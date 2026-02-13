@@ -1,0 +1,112 @@
+services:
+  # MQTT Broker (Mosquitto)
+  mosquitto:
+    build:
+      context: ./mosquitto
+      dockerfile: Dockerfile
+    container_name: cardiosense-mosquitto
+    ports:
+      - "1883:1883"      # MQTT
+      - "9001:9001"      # MQTT over WebSocket
+    volumes:
+      - mosquitto_data:/mosquitto/data
+      - mosquitto_logs:/mosquitto/log
+      - ./mosquitto/config:/mosquitto/config:ro
+    networks:
+      - cardiosense-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "mosquitto_sub", "-t", "$$SYS/#", "-C", "1", "-i", "healthcheck", "-W", "3"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Inference/Ingress Service (Python FastAPI)
+  inference:
+    build:
+      context: ./inference
+      dockerfile: Dockerfile
+    container_name: cardiosense-inference
+    ports:
+      - "8000:8000"
+    environment:
+      # Supabase
+      - SUPABASE_URL=${SUPABASE_URL}
+      - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}
+      
+      # MQTT
+      - MQTT_BROKER=mosquitto
+      - MQTT_PORT=1883
+      - MQTT_USERNAME=${MQTT_USERNAME:-cardiosense}
+      - MQTT_PASSWORD=${MQTT_PASSWORD:-cardiosense123}
+      - MQTT_KEEPALIVE=60
+      
+      # ML Settings
+      - PCG_SAMPLE_RATE=22050
+      - PCG_TARGET_DURATION=10
+      - PCG_MAX_DURATION=15
+      - ECG_SAMPLE_RATE=500
+      - ECG_WINDOW_SIZE=500
+      - ECG_MAX_DURATION=60
+      
+      # Processing
+      - STREAM_TIMEOUT_SEC=10
+      - METRICS_UPDATE_HZ=2
+      - PREPROCESSING_VERSION=v1.0.0
+      
+      # Demo Mode
+      - ENABLE_DEMO_MODE=true
+      
+      # Logging
+      - LOG_LEVEL=INFO
+    volumes:
+      - ./inference/models:/app/models:ro
+      - inference_cache:/app/cache
+    networks:
+      - cardiosense-network
+    depends_on:
+      mosquitto:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Frontend (Next.js)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        - NEXT_PUBLIC_SUPABASE_URL=${SUPABASE_URL}
+        - NEXT_PUBLIC_SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
+        - NEXT_PUBLIC_MQTT_WS_URL=ws://localhost:9001
+    container_name: cardiosense-frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_SUPABASE_URL=${SUPABASE_URL}
+      - NEXT_PUBLIC_SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
+      - NEXT_PUBLIC_MQTT_WS_URL=ws://localhost:9001
+      - NODE_ENV=production
+    networks:
+      - cardiosense-network
+    depends_on:
+      - inference
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+networks:
+  cardiosense-network:
+    driver: bridge
+
+volumes:
+  mosquitto_data:
+  mosquitto_logs:
+  inference_cache:

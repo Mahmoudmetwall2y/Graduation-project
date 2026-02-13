@@ -1,0 +1,69 @@
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Dependencies
+node_modules/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+*.pid
+*.seed
+*.pid.lock
+
+# Build outputs
+dist/
+build/
+.next/
+out/
+*.egg-info/
+
+# Models (large files)
+inference/models/*.pkl
+inference/models/*.h5
+inference/models/*.pt
+inference/models/*.pth
+!inference/models/.gitkeep
+
+# Data
+*.wav
+*.bin
+*.csv
+data/
+recordings/
+
+# Docker
+docker-compose.override.yml
+
+# Testing
+.coverage
+htmlcov/
+.pytest_cache/
+coverage/
+
+# Temporary
+tmp/
+temp/
+cache/
+.cache/
