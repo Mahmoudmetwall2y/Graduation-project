@@ -8,6 +8,9 @@ services:
     ports:
       - "1883:1883"      # MQTT
       - "9001:9001"      # MQTT over WebSocket
+    environment:
+      - MQTT_USERNAME=${MQTT_USERNAME}
+      - MQTT_PASSWORD=${MQTT_PASSWORD}
     volumes:
       - mosquitto_data:/mosquitto/data
       - mosquitto_logs:/mosquitto/log
