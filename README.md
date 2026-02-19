@@ -105,6 +105,17 @@ This starts:
 - **Inference API** → [http://localhost:8000](http://localhost:8000)
 - **Mosquitto MQTT** → `mqtt://localhost:1883`
 
+### 3.5 Process queued reports (async LLM worker trigger)
+
+LLM report requests are queued first. To process pending reports, call:
+
+```bash
+curl -X POST "http://localhost:3000/api/llm?action=process-pending" \
+  -H "x-internal-token: $INTERNAL_API_TOKEN"
+```
+
+Run this periodically (e.g., cron/GitHub Action/worker scheduler) in production.
+
 ### 4. Login
 
 Default credentials (from seed data):
