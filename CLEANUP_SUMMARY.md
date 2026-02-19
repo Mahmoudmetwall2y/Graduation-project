@@ -68,7 +68,7 @@ nul
 
 ### Project Structure (Clean)
 ```
-cardiosense/
+asculticor/
 ├── docs/                      # Documentation (now with index)
 │   ├── README.md             # NEW: Documentation index
 │   ├── AWS_MIGRATION.md
