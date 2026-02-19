@@ -270,6 +270,28 @@ If serving EU users:
 
 ---
 
+## Implementation History
+
+### February 2024 - Security Hardening
+
+#### Critical Issues Fixed
+- ✅ Removed hardcoded MQTT password from firmware
+- ✅ Enhanced `.env.example` with security documentation
+- ✅ Verified `.env` files properly excluded from git
+
+#### Implemented Protections
+- ✅ Rate limiting (60 req/min general, 5 req/min auth)
+- ✅ Security headers middleware (CSP, HSTS, X-Frame-Options)
+- ✅ CORS hardening with restricted methods
+- ✅ Input validation framework
+- ✅ Trusted host validation
+
+#### Dependencies Added
+- Testing: Jest, React Testing Library
+- LLM Integration: OpenAI SDK, Google Gemini SDK
+
+---
+
 **Last Updated**: 2024-02-17  
 **Version**: 1.0.0  
 **Maintainer**: AscultiCor Security Team

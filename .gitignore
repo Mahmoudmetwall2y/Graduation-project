@@ -67,3 +67,18 @@ tmp/
 temp/
 cache/
 .cache/
+
+# Build artifacts
+frontend/.next/
+frontend/out/
+frontend/dist/
+
+# Large binary files
+*.pdf
+*.zip
+*.tar.gz
+minikube-*
+
+# System files
+nul
+
