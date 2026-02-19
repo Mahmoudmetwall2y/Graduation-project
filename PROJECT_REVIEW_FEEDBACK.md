@@ -17,8 +17,8 @@
 - Add CI check enforcing deterministic install (`npm ci`) and lint/tests.
 
 ### 2) Credentials and onboarding documentation are inconsistent
-- README says default login is `admin@cardiosense.local / admin123`.
-- Supabase docs mention `admin@cardiosense.local / cardiosense123`.
+- README says default login is `admin@asculticor.local / admin123`.
+- Supabase docs mention `admin@asculticor.local / asculticor123`.
 - `supabase/seed.sql` comments show a different real email and password (`mahmoudmetwall2y@gmail.com / professional123`).
 
 **Risk**
@@ -30,7 +30,7 @@
 - Put all example credentials only in `.env.example` and docs as clearly marked non-production placeholders.
 
 ### 3) Insecure defaults are embedded in compose/dev docs
-- Docker Compose and code use fallback MQTT password `cardiosense123` and enable demo mode by default.
+- Docker Compose and code use fallback MQTT password `asculticor123` and enable demo mode by default.
 - This is okay for local development but dangerous if reused in shared/staging environments.
 
 **Suggestion**
@@ -39,7 +39,7 @@
 - Add an explicit `docker-compose.override.yml` for local/demo values.
 
 ### 4) Branding and naming drift
-- Codebase uses both `AscultiCor`, `CardioSense`, and `SONOCARDIA AI` labels.
+- Codebase uses both `AscultiCor`, `AscultiCor`, and `SONOCARDIA AI` labels.
 - This can confuse users and reduce trust.
 
 **Suggestion**
@@ -74,4 +74,4 @@
 - `npm test -- --runInBand` (failed: `jest` missing before install)
 - `npm ci` (failed: lockfile mismatch)
 - `python -m compileall inference/app` (passed)
-- `rg -n "TODO|FIXME|HACK|XXX|cardiosense123|admin123|ENABLE_DEMO_MODE|demo mode" ...`
+- `rg -n "TODO|FIXME|HACK|XXX|asculticor123|admin123|ENABLE_DEMO_MODE|demo mode" ...`

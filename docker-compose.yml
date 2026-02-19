@@ -4,7 +4,7 @@ services:
     build:
       context: ./mosquitto
       dockerfile: Dockerfile
-    container_name: cardiosense-mosquitto
+    container_name: asculticor-mosquitto
     ports:
       - "1883:1883"      # MQTT
       - "9001:9001"      # MQTT over WebSocket
@@ -12,10 +12,10 @@ services:
       - mosquitto_data:/mosquitto/data
       - mosquitto_logs:/mosquitto/log
     networks:
-      - cardiosense-network
+      - asculticor-network
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "mosquitto_sub", "-t", "$$SYS/#", "-C", "1", "-i", "healthcheck", "-W", "3", "-u", "cardiosense", "-P", "cardiosense123"]
+      test: ["CMD", "mosquitto_sub", "-t", "$$SYS/#", "-C", "1", "-i", "healthcheck", "-W", "3", "-u", "asculticor", "-P", "asculticor123"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -26,7 +26,7 @@ services:
     build:
       context: ./inference
       dockerfile: Dockerfile
-    container_name: cardiosense-inference
+    container_name: asculticor-inference
     ports:
       - "8000:8000"
     environment:
@@ -63,7 +63,7 @@ services:
       - ./inference/models:/app/models:ro
       - inference_cache:/app/cache
     networks:
-      - cardiosense-network
+      - asculticor-network
     depends_on:
       mosquitto:
         condition: service_healthy
@@ -83,7 +83,7 @@ services:
         - NEXT_PUBLIC_SUPABASE_URL=${SUPABASE_URL}
         - NEXT_PUBLIC_SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
         - NEXT_PUBLIC_MQTT_WS_URL=ws://localhost:9001
-    container_name: cardiosense-frontend
+    container_name: asculticor-frontend
     ports:
       - "3000:3000"
     environment:
@@ -92,7 +92,7 @@ services:
       - NEXT_PUBLIC_MQTT_WS_URL=ws://localhost:9001
       - NODE_ENV=production
     networks:
-      - cardiosense-network
+      - asculticor-network
     depends_on:
       - inference
     restart: unless-stopped
@@ -103,7 +103,7 @@ services:
       retries: 3
 
 networks:
-  cardiosense-network:
+  asculticor-network:
     driver: bridge
 
 volumes:

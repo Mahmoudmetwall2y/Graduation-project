@@ -5,7 +5,7 @@ COPY config/mosquitto.conf /mosquitto/config/mosquitto.conf
 
 # Generate password file with default credentials
 # In production, mount an external password file instead
-RUN mosquitto_passwd -b -c /mosquitto/config/passwd cardiosense cardiosense123 && \
+RUN mosquitto_passwd -b -c /mosquitto/config/passwd asculticor asculticor123 && \
     chmod 0700 /mosquitto/config/passwd && \
     chown mosquitto:mosquitto /mosquitto/config/passwd
 

@@ -18,8 +18,8 @@ VALUES (
 
 -- User created in Supabase Auth:
 -- ID: 4d4187e3-c290-4ea0-9edd-87f1a0d901fa
--- Email: admin@cardiosense.local
--- Password: cardiosense123
+-- Email: admin@asculticor.local
+-- Password: asculticor123
 -- NOTE: Replace with your own dashboard-created user before running in shared environments
 
 INSERT INTO profiles (id, org_id, full_name, role, created_at)

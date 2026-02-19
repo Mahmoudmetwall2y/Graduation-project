@@ -40,8 +40,8 @@ This directory contains all Supabase-related configuration for AscultiCor.
 
 4. **Create users** (via Dashboard):
    - Go to Authentication > Users > Add User
-   - Admin: `admin@cardiosense.local` / `cardiosense123`
-   - Operator: `operator@cardiosense.local` / `cardiosense123`
+   - Admin: `admin@asculticor.local` / `asculticor123`
+   - Operator: `operator@asculticor.local` / `asculticor123`
    - Note their UUIDs
 
 5. **Update and run seed script**:
