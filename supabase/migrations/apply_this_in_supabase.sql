@@ -198,17 +198,20 @@ ALTER TABLE device_alerts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE device_api_keys ENABLE ROW LEVEL SECURITY;
 
 -- Device Groups policies
+DROP POLICY IF EXISTS "Users can view device groups in their org" ON device_groups;
 CREATE POLICY "Users can view device groups in their org"
     ON device_groups FOR SELECT
     TO authenticated
     USING (org_id = public.user_org_id());
 
+DROP POLICY IF EXISTS "Admins can manage device groups" ON device_groups;
 CREATE POLICY "Admins can manage device groups"
     ON device_groups FOR ALL
     TO authenticated
     USING (org_id = public.user_org_id() AND public.is_admin());
 
 -- Device Settings policies
+DROP POLICY IF EXISTS "Users can view device settings in their org" ON device_settings;
 CREATE POLICY "Users can view device settings in their org"
     ON device_settings FOR SELECT
     TO authenticated
@@ -218,66 +221,78 @@ CREATE POLICY "Users can view device settings in their org"
         AND d.org_id = public.user_org_id()
     ));
 
+DROP POLICY IF EXISTS "Service role can manage device settings" ON device_settings;
 CREATE POLICY "Service role can manage device settings"
     ON device_settings FOR ALL
     TO service_role
     USING (true);
 
 -- Device Telemetry policies
+DROP POLICY IF EXISTS "Users can view telemetry in their org" ON device_telemetry;
 CREATE POLICY "Users can view telemetry in their org"
     ON device_telemetry FOR SELECT
     TO authenticated
     USING (org_id = public.user_org_id());
 
+DROP POLICY IF EXISTS "Service role can insert telemetry" ON device_telemetry;
 CREATE POLICY "Service role can insert telemetry"
     ON device_telemetry FOR INSERT
     TO service_role
     WITH CHECK (true);
 
 -- LLM Reports policies
+DROP POLICY IF EXISTS "Users can view LLM reports in their org" ON llm_reports;
 CREATE POLICY "Users can view LLM reports in their org"
     ON llm_reports FOR SELECT
     TO authenticated
     USING (org_id = public.user_org_id());
 
+DROP POLICY IF EXISTS "Service role can insert LLM reports" ON llm_reports;
 CREATE POLICY "Service role can insert LLM reports"
     ON llm_reports FOR INSERT
     TO service_role
     WITH CHECK (true);
 
 -- Device Recording Summaries policies
+DROP POLICY IF EXISTS "Users can view summaries in their org" ON device_recording_summaries;
 CREATE POLICY "Users can view summaries in their org"
     ON device_recording_summaries FOR SELECT
     TO authenticated
     USING (org_id = public.user_org_id());
 
+DROP POLICY IF EXISTS "Service role can manage summaries" ON device_recording_summaries;
 CREATE POLICY "Service role can manage summaries"
     ON device_recording_summaries FOR ALL
     TO service_role
     USING (true);
 
 -- Device Alerts policies
+DROP POLICY IF EXISTS "Users can view alerts in their org" ON device_alerts;
 CREATE POLICY "Users can view alerts in their org"
     ON device_alerts FOR SELECT
     TO authenticated
     USING (org_id = public.user_org_id());
 
+DROP POLICY IF EXISTS "Users can resolve alerts in their org" ON device_alerts;
 CREATE POLICY "Users can resolve alerts in their org"
     ON device_alerts FOR UPDATE
     TO authenticated
     USING (org_id = public.user_org_id());
 
+DROP POLICY IF EXISTS "Service role can create alerts" ON device_alerts;
 CREATE POLICY "Service role can create alerts"
     ON device_alerts FOR INSERT
     TO service_role
     WITH CHECK (true);
 
 -- Device API Keys policies
+DROP POLICY IF EXISTS "Admins can view API keys in their org" ON device_api_keys;
 CREATE POLICY "Admins can view API keys in their org"
     ON device_api_keys FOR SELECT
     TO authenticated
     USING (org_id = public.user_org_id() AND public.is_admin());
 
+DROP POLICY IF EXISTS "Admins can manage API keys" ON device_api_keys;
 CREATE POLICY "Admins can manage API keys"
     ON device_api_keys FOR ALL
     TO authenticated
