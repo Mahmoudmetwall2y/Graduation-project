@@ -105,6 +105,17 @@ This starts:
 - **Inference API** → [http://localhost:8000](http://localhost:8000)
 - **Mosquitto MQTT** → `mqtt://localhost:1883`
 
+
+
+> **If Mosquitto fails with** `entrypoint.sh: no such file or directory`
+>
+> Rebuild the broker image without cache to ensure the latest entrypoint is embedded:
+>
+> ```bash
+> docker-compose build --no-cache mosquitto
+> docker-compose up -d
+> ```
+
 ### 3.5 Process queued reports (async LLM worker trigger)
 
 LLM report requests are queued first. To process pending reports, call:
