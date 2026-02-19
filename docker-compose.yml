@@ -37,8 +37,8 @@ services:
       # MQTT
       - MQTT_BROKER=mosquitto
       - MQTT_PORT=1883
-      - MQTT_USERNAME=${MQTT_USERNAME:-cardiosense}
-      - MQTT_PASSWORD=${MQTT_PASSWORD:-cardiosense123}
+      - MQTT_USERNAME=${MQTT_USERNAME}
+      - MQTT_PASSWORD=${MQTT_PASSWORD}
       - MQTT_KEEPALIVE=60
       
       # ML Settings
@@ -55,7 +55,7 @@ services:
       - PREPROCESSING_VERSION=v1.0.0
       
       # Demo Mode
-      - ENABLE_DEMO_MODE=true
+      - ENABLE_DEMO_MODE=${ENABLE_DEMO_MODE:-false}
       
       # Logging
       - LOG_LEVEL=INFO
