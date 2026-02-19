@@ -159,6 +159,22 @@ The UI uses a **medical-grade design system** built with CSS custom properties:
 
 ---
 
+
+
+## ✅ Recommended quality checks
+
+Before merging production changes, run:
+
+```bash
+# Frontend
+cd frontend && npm ci && npm run lint && npm run typecheck && npm run build
+
+# Inference
+cd ../inference && python -m pip install -r requirements.txt && python -m compileall app
+```
+
+A GitHub Actions CI workflow is included to run equivalent checks on pushes and pull requests.
+
 ## 🔧 Development
 
 ### Frontend (Local)

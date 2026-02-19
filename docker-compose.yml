@@ -8,6 +8,9 @@ services:
     ports:
       - "1883:1883"      # MQTT
       - "9001:9001"      # MQTT over WebSocket
+    environment:
+      - MQTT_USERNAME=${MQTT_USERNAME}
+      - MQTT_PASSWORD=${MQTT_PASSWORD}
     volumes:
       - mosquitto_data:/mosquitto/data
       - mosquitto_logs:/mosquitto/log
@@ -15,7 +18,7 @@ services:
       - asculticor-network
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "mosquitto_sub", "-t", "$$SYS/#", "-C", "1", "-i", "healthcheck", "-W", "3", "-u", "asculticor", "-P", "asculticor123"]
+      test: ["CMD", "mosquitto_sub", "-t", "$$SYS/#", "-C", "1", "-i", "healthcheck", "-W", "3", "-u", "${MQTT_USERNAME}", "-P", "${MQTT_PASSWORD}"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -59,6 +62,9 @@ services:
       
       # Logging
       - LOG_LEVEL=INFO
+    environment:
+      - MQTT_USERNAME=${MQTT_USERNAME}
+      - MQTT_PASSWORD=${MQTT_PASSWORD}
     volumes:
       - ./inference/models:/app/models:ro
       - inference_cache:/app/cache
