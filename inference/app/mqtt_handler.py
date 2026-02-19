@@ -164,7 +164,9 @@ class MQTTHandler:
         self.broker = os.getenv("MQTT_BROKER", "mosquitto")
         self.port = int(os.getenv("MQTT_PORT", 1883))
         self.username = os.getenv("MQTT_USERNAME", "cardiosense")
-        self.password = os.getenv("MQTT_PASSWORD", "cardiosense123")
+        self.password = os.getenv("MQTT_PASSWORD")
+        if not self.password:
+            raise ValueError("MQTT_PASSWORD is required. Set it in your environment before starting inference service.")
         self.keepalive = int(os.getenv("MQTT_KEEPALIVE", 60))
         
         # Limits

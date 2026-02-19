@@ -109,7 +109,7 @@ This starts:
 
 Default credentials (from seed data):
 - **Email:** `admin@cardiosense.local`
-- **Password:** `admin123`
+- **Password:** `cardiosense123`
 
 ---
 
