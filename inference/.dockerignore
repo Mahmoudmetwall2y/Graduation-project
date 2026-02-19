@@ -1,0 +1,14 @@
+__pycache__
+*.pyc
+*.pyo
+.git
+.env
+.env.*
+models/*.pkl
+models/*.h5
+models/*.pt
+models/*.pth
+tests/
+.pytest_cache/
+.coverage
+*.md

@@ -1,24 +1,37 @@
 """
 MQTT Handler for real-time signal ingestion.
 Manages buffering, reconstruction, and inference triggering.
+
+Threading model:
+- paho-mqtt runs its own network thread (via loop_start())
+- Callbacks (_on_message, _on_connect, etc.) run in the mqtt thread
+- Supabase client is synchronous — calls are dispatched to a thread pool
+  via loop.run_in_executor() to avoid blocking the asyncio event loop
+- Background monitoring tasks (_monitor_timeouts, _publish_live_metrics)
+  run as asyncio tasks on the main event loop
 """
 
 import os
 import json
-import struct
 import asyncio
+import concurrent.futures
 from typing import Dict, Any, Optional
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import logging
+import io
 import numpy as np
 import paho.mqtt.client as mqtt
 from collections import defaultdict
 import base64
+import soundfile as sf
 
 from .supabase_client import SupabaseClient
 from .inference import InferenceEngine
 
 logger = logging.getLogger(__name__)
+
+# Thread pool for running sync Supabase calls without blocking the event loop
+_executor = concurrent.futures.ThreadPoolExecutor(max_workers=4)
 
 
 class SessionBuffer:
@@ -44,8 +57,8 @@ class SessionBuffer:
         self.total_samples = 0
         
         # Timing
-        self.started_at = datetime.utcnow()
-        self.last_chunk_at = datetime.utcnow()
+        self.started_at = datetime.now(timezone.utc)
+        self.last_chunk_at = datetime.now(timezone.utc)
         self.ended = False
         
         # Metadata
@@ -53,17 +66,28 @@ class SessionBuffer:
         self.sample_rate = config.get('sample_rate_hz', 22050 if modality == 'pcg' else 500)
         self.format = config.get('format', 'pcm_s16le')
         
+        # Cached quality metrics (updated incrementally)
+        self._cached_snr: Optional[float] = None
+        self._cached_clipping_pct: Optional[float] = None
+        self._last_metrics_samples: int = 0
+        
         logger.info(f"Created buffer for {modality} session {session_id}")
     
     def add_chunk(self, data: bytes):
         """Add binary chunk to buffer."""
         self.chunks.append(data)
         self.total_bytes += len(data)
-        self.last_chunk_at = datetime.utcnow()
+        self.last_chunk_at = datetime.now(timezone.utc)
         
         # Estimate samples (assuming int16 = 2 bytes per sample)
         bytes_per_sample = 2 if 'int16' in self.format or 's16' in self.format else 1
-        self.total_samples += len(data) // bytes_per_sample
+        new_samples = len(data) // bytes_per_sample
+        self.total_samples += new_samples
+        
+        # Invalidate cached metrics when significant new data arrives
+        if self.total_samples - self._last_metrics_samples > self.sample_rate:
+            self._cached_snr = None
+            self._cached_clipping_pct = None
     
     def get_duration(self) -> float:
         """Get duration in seconds."""
@@ -90,18 +114,23 @@ class SessionBuffer:
         return signal
     
     def get_quality_metrics(self) -> Dict[str, Any]:
-        """Compute simple quality metrics."""
+        """Compute quality metrics with caching to avoid O(n²) reconstruction."""
         if not self.chunks:
             return {}
         
-        signal = self.reconstruct_signal()
+        # Only recompute if cache is stale
+        if self._cached_snr is None or self._cached_clipping_pct is None:
+            signal = self.reconstruct_signal()
+            self._cached_snr = float(self._estimate_snr(signal))
+            self._cached_clipping_pct = float(self._detect_clipping(signal))
+            self._last_metrics_samples = self.total_samples
         
         return {
             'total_samples': int(self.total_samples),
             'duration_sec': float(self.get_duration()),
             'sample_rate': int(self.sample_rate),
-            'snr_estimate': float(self._estimate_snr(signal)),
-            'clipping_pct': float(self._detect_clipping(signal)),
+            'snr_estimate': self._cached_snr,
+            'clipping_pct': self._cached_clipping_pct,
             'missing_pct': 0.0,  # Simplified
             'buffer_health': 'good'
         }
@@ -147,6 +176,7 @@ class MQTTHandler:
         # State
         self.buffers: Dict[str, SessionBuffer] = {}
         self.running = False
+        self.loop: Optional[asyncio.AbstractEventLoop] = None
         
         # Clients
         self.supabase = SupabaseClient()
@@ -163,18 +193,36 @@ class MQTTHandler:
         
         logger.info(f"MQTTHandler initialized: {self.broker}:{self.port}")
     
+    def _run_sync_in_executor(self, func, *args):
+        """Schedule a synchronous function to run in the thread pool.
+        
+        This is used to call synchronous Supabase methods without 
+        blocking the asyncio event loop or the MQTT callback thread.
+        """
+        if self.loop and self.loop.is_running():
+            return asyncio.run_coroutine_threadsafe(
+                self.loop.run_in_executor(_executor, func, *args),
+                self.loop
+            )
+        else:
+            logger.warning("Event loop not available, running synchronously")
+            return func(*args)
+    
     def start(self):
         """Start MQTT connection and monitoring."""
         self.running = True
         
         try:
+            # Capture the running event loop for cross-thread scheduling
+            self.loop = asyncio.get_running_loop()
+            
             logger.info(f"Connecting to MQTT broker: {self.broker}:{self.port}")
             self.client.connect(self.broker, self.port, self.keepalive)
             self.client.loop_start()
             
-            # Start timeout monitor
-            asyncio.create_task(self._monitor_timeouts())
-            asyncio.create_task(self._publish_live_metrics())
+            # Start background monitoring tasks on the event loop
+            asyncio.ensure_future(self._monitor_timeouts())
+            asyncio.ensure_future(self._publish_live_metrics())
             
         except Exception as e:
             logger.error(f"Failed to start MQTT handler: {e}")
@@ -209,7 +257,7 @@ class MQTTHandler:
             logger.warning(f"Unexpected MQTT disconnection (code {rc})")
     
     def _on_message(self, client, userdata, msg):
-        """Callback for MQTT message."""
+        """Callback for MQTT message — runs in the paho-mqtt thread."""
         try:
             topic_parts = msg.topic.split('/')
             
@@ -231,7 +279,9 @@ class MQTTHandler:
             elif msg_type == 'ecg':
                 self._handle_data_chunk(org_id, device_id, session_id, 'ecg', msg.payload)
             elif msg_type == 'heartbeat':
-                asyncio.create_task(self._handle_heartbeat(device_id))
+                self._run_sync_in_executor(
+                    self.supabase.update_device_last_seen, device_id
+                )
             
         except Exception as e:
             logger.error(f"Error handling message: {e}")
@@ -251,14 +301,21 @@ class MQTTHandler:
             if msg_type == 'start_pcg':
                 self._handle_start_pcg(org_id, device_id, session_id, meta)
             elif msg_type == 'end_pcg':
-                asyncio.create_task(self._handle_end_pcg(session_id))
+                self._schedule_async(self._handle_end_pcg(session_id))
             elif msg_type == 'start_ecg':
                 self._handle_start_ecg(org_id, device_id, session_id, meta)
             elif msg_type == 'end_ecg':
-                asyncio.create_task(self._handle_end_ecg(session_id))
+                self._schedule_async(self._handle_end_ecg(session_id))
             
         except Exception as e:
             logger.error(f"Error handling meta message: {e}")
+    
+    def _schedule_async(self, coro):
+        """Schedule an async coroutine from the MQTT thread onto the event loop."""
+        if self.loop and self.loop.is_running():
+            asyncio.run_coroutine_threadsafe(coro, self.loop)
+        else:
+            logger.error("Cannot schedule async task: event loop not available")
     
     def _handle_start_pcg(
         self, 
@@ -282,8 +339,10 @@ class MQTTHandler:
             config=config
         )
         
-        # Update session status
-        asyncio.create_task(self.supabase.update_session_status(session_id, 'streaming'))
+        # Update session status (sync call dispatched to thread pool)
+        self._run_sync_in_executor(
+            self.supabase.update_session_status, session_id, 'streaming'
+        )
         
         logger.info(f"Started PCG streaming for session {session_id}")
     
@@ -309,7 +368,9 @@ class MQTTHandler:
             config=config
         )
         
-        asyncio.create_task(self.supabase.update_session_status(session_id, 'streaming'))
+        self._run_sync_in_executor(
+            self.supabase.update_session_status, session_id, 'streaming'
+        )
         
         logger.info(f"Started ECG streaming for session {session_id}")
     
@@ -348,14 +409,10 @@ class MQTTHandler:
             
             if duration >= max_duration:
                 logger.warning(f"{modality.upper()} buffer exceeded max duration, ending session")
-                asyncio.create_task(self._force_end_session(session_id, modality))
+                self._schedule_async(self._force_end_session(session_id, modality))
             
         except Exception as e:
             logger.error(f"Error handling {modality} chunk: {e}")
-    
-    async def _handle_heartbeat(self, device_id: str):
-        """Update device last_seen timestamp."""
-        await self.supabase.update_device_last_seen(device_id)
     
     async def _handle_end_pcg(self, session_id: str):
         """Handle end_pcg message - finalize and run inference."""
@@ -368,51 +425,43 @@ class MQTTHandler:
         buffer = self.buffers[buffer_key]
         buffer.ended = True
         
+        loop = asyncio.get_running_loop()
+        
         try:
             # Update status
-            await self.supabase.update_session_status(session_id, 'processing')
+            await loop.run_in_executor(_executor, 
+                self.supabase.update_session_status, session_id, 'processing')
             
             # Reconstruct signal
             audio = buffer.reconstruct_signal()
             
-            # Upload to storage
-            storage_path = f"{buffer.org_id}/{session_id}/pcg/recording.wav"
-            audio_bytes = (audio * 32768).astype(np.int16).tobytes()
-            checksum = SupabaseClient.compute_checksum(audio_bytes)
+            # Create proper WAV bytes using soundfile
+            wav_buffer = io.BytesIO()
+            audio_int16 = (audio * 32767).astype(np.int16)
+            sf.write(wav_buffer, audio_int16, buffer.sample_rate, format='WAV', subtype='PCM_16')
+            wav_bytes = wav_buffer.getvalue()
+            checksum = SupabaseClient.compute_checksum(wav_bytes)
             
-            await self.supabase.upload_file(
-                bucket='recordings',
-                path=storage_path,
-                data=audio_bytes,
-                content_type='audio/wav'
-            )
+            storage_path = f"{buffer.org_id}/{session_id}/pcg/recording.wav"
+            
+            await loop.run_in_executor(_executor,
+                self.supabase.upload_file, 'recordings', storage_path, wav_bytes, 'audio/wav')
             
             # Create recording entry
-            await self.supabase.create_recording(
-                org_id=buffer.org_id,
-                session_id=session_id,
-                modality='pcg',
-                valve_position=buffer.valve_position,
-                sample_rate=buffer.sample_rate,
-                duration=buffer.get_duration(),
-                storage_path=storage_path,
-                checksum=checksum
-            )
+            await loop.run_in_executor(_executor,
+                self.supabase.create_recording,
+                buffer.org_id, session_id, 'pcg', buffer.valve_position,
+                buffer.sample_rate, buffer.get_duration(), storage_path, checksum)
             
             # Run PCG inference
             pcg_result = self.inference_engine.predict_pcg(audio, buffer.sample_rate)
             
             # Store PCG prediction
-            await self.supabase.create_prediction(
-                org_id=buffer.org_id,
-                session_id=session_id,
-                modality='pcg',
-                model_name=pcg_result['model_name'],
-                model_version=pcg_result['model_version'],
-                preprocessing_version=pcg_result['preprocessing_version'],
-                output_json=pcg_result,
-                latency_ms=pcg_result['latency_ms']
-            )
+            await loop.run_in_executor(_executor,
+                self.supabase.create_prediction,
+                buffer.org_id, session_id, 'pcg',
+                pcg_result['model_name'], pcg_result['model_version'],
+                pcg_result['preprocessing_version'], pcg_result, pcg_result['latency_ms'])
             
             # If Murmur detected, run severity analysis
             if pcg_result['label'] == 'Murmur':
@@ -423,43 +472,32 @@ class MQTTHandler:
                 )
                 
                 if severity_result:
-                    await self.supabase.create_murmur_severity(
-                        org_id=buffer.org_id,
-                        session_id=session_id,
-                        model_version=severity_result['model_version'],
-                        preprocessing_version=severity_result['preprocessing_version'],
-                        severity_data=severity_result
-                    )
+                    await loop.run_in_executor(_executor,
+                        self.supabase.create_murmur_severity,
+                        buffer.org_id, session_id,
+                        severity_result['model_version'],
+                        severity_result['preprocessing_version'],
+                        severity_result)
             
             # Audit log
-            await self.supabase.create_audit_log(
-                org_id=buffer.org_id,
-                user_id=None,
-                action='pcg_inference_completed',
-                entity_type='session',
-                entity_id=session_id,
-                metadata={
-                    'result': pcg_result['label'],
-                    'demo_mode': pcg_result['demo_mode']
-                }
-            )
+            await loop.run_in_executor(_executor,
+                self.supabase.create_audit_log,
+                buffer.org_id, None, 'pcg_inference_completed', 'session', session_id,
+                {'result': pcg_result['label'], 'demo_mode': pcg_result['demo_mode']})
             
             logger.info(f"PCG inference completed for session {session_id}")
             
         except Exception as e:
             logger.error(f"Error processing PCG: {e}")
-            await self.supabase.update_session_status(session_id, 'error')
-            await self.supabase.create_audit_log(
-                org_id=buffer.org_id,
-                user_id=None,
-                action='pcg_inference_failed',
-                entity_type='session',
-                entity_id=session_id,
-                metadata={'error': str(e)}
-            )
+            await loop.run_in_executor(_executor,
+                self.supabase.update_session_status, session_id, 'error')
+            await loop.run_in_executor(_executor,
+                self.supabase.create_audit_log,
+                buffer.org_id, None, 'pcg_inference_failed', 'session', session_id,
+                {'error': str(e)})
         finally:
             # Clean up buffer
-            del self.buffers[buffer_key]
+            self.buffers.pop(buffer_key, None)
     
     async def _handle_end_ecg(self, session_id: str):
         """Handle end_ecg message - finalize and run inference."""
@@ -472,9 +510,12 @@ class MQTTHandler:
         buffer = self.buffers[buffer_key]
         buffer.ended = True
         
+        loop = asyncio.get_running_loop()
+        
         try:
             # Update status
-            await self.supabase.update_session_status(session_id, 'processing')
+            await loop.run_in_executor(_executor,
+                self.supabase.update_session_status, session_id, 'processing')
             
             # Reconstruct signal
             ecg = buffer.reconstruct_signal()
@@ -484,52 +525,31 @@ class MQTTHandler:
             ecg_bytes = (ecg * 32768).astype(np.int16).tobytes()
             checksum = SupabaseClient.compute_checksum(ecg_bytes)
             
-            await self.supabase.upload_file(
-                bucket='recordings',
-                path=storage_path,
-                data=ecg_bytes,
-                content_type='application/octet-stream'
-            )
+            await loop.run_in_executor(_executor,
+                self.supabase.upload_file, 'recordings', storage_path, ecg_bytes,
+                'application/octet-stream')
             
             # Create recording entry
-            await self.supabase.create_recording(
-                org_id=buffer.org_id,
-                session_id=session_id,
-                modality='ecg',
-                valve_position=None,
-                sample_rate=buffer.sample_rate,
-                duration=buffer.get_duration(),
-                storage_path=storage_path,
-                checksum=checksum
-            )
+            await loop.run_in_executor(_executor,
+                self.supabase.create_recording,
+                buffer.org_id, session_id, 'ecg', None,
+                buffer.sample_rate, buffer.get_duration(), storage_path, checksum)
             
             # Run ECG inference
             ecg_result = self.inference_engine.predict_ecg(ecg, buffer.sample_rate)
             
             # Store ECG prediction
-            await self.supabase.create_prediction(
-                org_id=buffer.org_id,
-                session_id=session_id,
-                modality='ecg',
-                model_name=ecg_result['model_name'],
-                model_version=ecg_result['model_version'],
-                preprocessing_version=ecg_result['preprocessing_version'],
-                output_json=ecg_result,
-                latency_ms=ecg_result['latency_ms']
-            )
+            await loop.run_in_executor(_executor,
+                self.supabase.create_prediction,
+                buffer.org_id, session_id, 'ecg',
+                ecg_result['model_name'], ecg_result['model_version'],
+                ecg_result['preprocessing_version'], ecg_result, ecg_result['latency_ms'])
             
             # Audit log
-            await self.supabase.create_audit_log(
-                org_id=buffer.org_id,
-                user_id=None,
-                action='ecg_inference_completed',
-                entity_type='session',
-                entity_id=session_id,
-                metadata={
-                    'result': ecg_result['prediction'],
-                    'demo_mode': ecg_result['demo_mode']
-                }
-            )
+            await loop.run_in_executor(_executor,
+                self.supabase.create_audit_log,
+                buffer.org_id, None, 'ecg_inference_completed', 'session', session_id,
+                {'result': ecg_result['prediction'], 'demo_mode': ecg_result['demo_mode']})
             
             logger.info(f"ECG inference completed for session {session_id}")
             
@@ -537,26 +557,22 @@ class MQTTHandler:
             pcg_buffer_key = f"{session_id}_pcg"
             if pcg_buffer_key not in self.buffers:
                 # PCG already done or not in session
-                await self.supabase.update_session_status(
-                    session_id, 
-                    'done',
-                    ended_at=datetime.utcnow().isoformat()
-                )
+                await loop.run_in_executor(_executor,
+                    self.supabase.update_session_status,
+                    session_id, 'done',
+                    datetime.now(timezone.utc).isoformat())
             
         except Exception as e:
             logger.error(f"Error processing ECG: {e}")
-            await self.supabase.update_session_status(session_id, 'error')
-            await self.supabase.create_audit_log(
-                org_id=buffer.org_id,
-                user_id=None,
-                action='ecg_inference_failed',
-                entity_type='session',
-                entity_id=session_id,
-                metadata={'error': str(e)}
-            )
+            await loop.run_in_executor(_executor,
+                self.supabase.update_session_status, session_id, 'error')
+            await loop.run_in_executor(_executor,
+                self.supabase.create_audit_log,
+                buffer.org_id, None, 'ecg_inference_failed', 'session', session_id,
+                {'error': str(e)})
         finally:
             # Clean up buffer
-            del self.buffers[buffer_key]
+            self.buffers.pop(buffer_key, None)
     
     async def _force_end_session(self, session_id: str, modality: str):
         """Force end session when max duration exceeded."""
@@ -571,8 +587,9 @@ class MQTTHandler:
             try:
                 await asyncio.sleep(5)  # Check every 5 seconds
                 
-                now = datetime.utcnow()
+                now = datetime.now(timezone.utc)
                 timeout_delta = timedelta(seconds=self.timeout_sec)
+                loop = asyncio.get_running_loop()
                 
                 for buffer_key, buffer in list(self.buffers.items()):
                     if buffer.ended:
@@ -588,26 +605,22 @@ class MQTTHandler:
                         )
                         
                         # Mark as error
-                        await self.supabase.update_session_status(
-                            buffer.session_id, 
-                            'error'
-                        )
+                        await loop.run_in_executor(_executor,
+                            self.supabase.update_session_status,
+                            buffer.session_id, 'error')
                         
-                        await self.supabase.create_audit_log(
-                            org_id=buffer.org_id,
-                            user_id=None,
-                            action='session_timeout',
-                            entity_type='session',
-                            entity_id=buffer.session_id,
-                            metadata={
+                        await loop.run_in_executor(_executor,
+                            self.supabase.create_audit_log,
+                            buffer.org_id, None, 'session_timeout', 'session',
+                            buffer.session_id,
+                            {
                                 'modality': buffer.modality,
                                 'timeout_sec': self.timeout_sec,
                                 'last_chunk_sec_ago': time_since_last.total_seconds()
-                            }
-                        )
+                            })
                         
                         # Clean up
-                        del self.buffers[buffer_key]
+                        self.buffers.pop(buffer_key, None)
                         
             except Exception as e:
                 logger.error(f"Error in timeout monitor: {e}")
@@ -619,26 +632,26 @@ class MQTTHandler:
                 interval = 1.0 / self.metrics_update_hz
                 await asyncio.sleep(interval)
                 
+                loop = asyncio.get_running_loop()
+                
                 for buffer_key, buffer in self.buffers.items():
                     if buffer.ended:
                         continue
                     
-                    # Compute metrics
+                    # Compute metrics (uses cache to avoid O(n²) reconstruction)
                     metrics = {
                         'buffer_fill': {
                             f'{buffer.modality}_seconds': buffer.get_duration(),
                             f'{buffer.modality}_samples': buffer.total_samples
                         },
                         'quality': buffer.get_quality_metrics(),
-                        'timestamp': datetime.utcnow().isoformat()
+                        'timestamp': datetime.now(timezone.utc).isoformat()
                     }
                     
-                    # Publish to DB (or broadcast via Realtime)
-                    await self.supabase.create_live_metrics(
-                        org_id=buffer.org_id,
-                        session_id=buffer.session_id,
-                        metrics=metrics
-                    )
+                    # Publish to DB via thread pool
+                    await loop.run_in_executor(_executor,
+                        self.supabase.create_live_metrics,
+                        buffer.org_id, buffer.session_id, metrics)
                     
             except Exception as e:
                 logger.error(f"Error publishing live metrics: {e}")

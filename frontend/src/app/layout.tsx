@@ -1,12 +1,12 @@
-import type { Metadata } from 'next'
-import { Inter } from 'next/font/google'
 import './globals.css'
-
-const inter = Inter({ subsets: ['latin'] })
+import type { Metadata } from 'next'
+import Navbar from './components/Navbar'
+import { ThemeProvider } from './components/ThemeProvider'
+import { ToastProvider } from './components/Toast'
 
 export const metadata: Metadata = {
-  title: 'AscultiCor - Real-Time Patient Monitoring',
-  description: 'Real-time PCG and ECG signal monitoring system with ML inference',
+  title: 'SONOCARDIA — AI-Powered Heart Disease Detection',
+  description: 'AI-powered cardiac auscultation and monitoring platform for real-time PCG and ECG analysis using heart sounds.',
 }
 
 export default function RootLayout({
@@ -15,8 +15,15 @@ export default function RootLayout({
   children: React.ReactNode
 }) {
   return (
-    <html lang="en">
-      <body className={inter.className}>{children}</body>
+    <html lang="en" suppressHydrationWarning>
+      <body>
+        <ThemeProvider>
+          <ToastProvider>
+            <Navbar />
+            {children}
+          </ToastProvider>
+        </ThemeProvider>
+      </body>
     </html>
   )
 }

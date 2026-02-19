@@ -176,13 +176,27 @@ class InferenceEngine:
                 # Model outputs 6 heads
                 predictions = self.severity_model.predict(spectrogram)
                 
-                # Parse outputs (assuming multi-head model)
-                location_labels = ['AV', 'MV', 'PV', 'TV']
-                timing_labels = ['systolic', 'diastolic', 'continuous']
-                shape_labels = ['crescendo', 'decrescendo', 'plateau', 'crescendo-decrescendo']
-                grading_labels = ['I/VI', 'II/VI', 'III/VI', 'IV/VI', 'V/VI', 'VI/VI']
-                pitch_labels = ['low', 'medium', 'high']
-                quality_labels = ['blowing', 'harsh', 'rumbling', 'musical']
+                # Parse outputs — labels match SONOCARDIA paper exactly
+                location_labels = [
+                    'AV', 'MV', 'PV', 'TV',
+                    'Left heart', 'Right heart',
+                    'AV+Right', 'MV+Right',
+                    'Multiple (3+)', 'Other'
+                ]
+                timing_labels = [
+                    'Early-systolic', 'Mid-systolic', 'Late-systolic',
+                    'Holosystolic', 'Unknown'
+                ]
+                shape_labels = [
+                    'Crescendo', 'Decrescendo',
+                    'Crescendo-decrescendo', 'Plateau', 'Unknown'
+                ]
+                grading_labels = [
+                    'I/VI', 'II/VI', 'III/VI',
+                    'IV/VI', 'V/VI', 'VI/VI', 'Unknown'
+                ]
+                pitch_labels = ['Low', 'Medium', 'High', 'Unknown']
+                quality_labels = ['Blowing', 'Harsh', 'Musical', 'Unknown']
                 
                 result = {
                     'location': self._parse_head(predictions[0][0], location_labels),
@@ -239,8 +253,10 @@ class InferenceEngine:
             else:
                 prediction = self.ecg_model.predict(processed)
                 
-                # Parse output (assuming binary or multi-class)
-                labels = ['Normal', 'Abnormal']  # Simplified
+                # Parse output — 5-class beat classification per paper
+                # N=Normal, SVEB=Supraventricular, VEB=Ventricular,
+                # F=Fusion, Q=Unknown
+                labels = ['Normal', 'SVEB', 'VEB', 'Fusion', 'Unknown']
                 pred_class = np.argmax(prediction[0])
                 confidence = float(np.max(prediction[0]))
                 
@@ -249,7 +265,7 @@ class InferenceEngine:
                     'confidence': confidence,
                     'probabilities': {
                         labels[i]: float(prediction[0][i])
-                        for i in range(len(labels))
+                        for i in range(min(len(labels), len(prediction[0])))
                     }
                 }
             
@@ -320,57 +336,82 @@ class InferenceEngine:
             }
     
     def _demo_severity_prediction(self) -> Dict[str, Any]:
-        """Deterministic demo severity prediction."""
+        """Deterministic demo severity prediction (labels match SONOCARDIA paper)."""
         return {
             'location': {
                 'predicted': 'MV',
-                'probabilities': {'AV': 0.15, 'MV': 0.55, 'PV': 0.20, 'TV': 0.10}
+                'probabilities': {
+                    'AV': 0.10, 'MV': 0.45, 'PV': 0.12, 'TV': 0.08,
+                    'Left heart': 0.08, 'Right heart': 0.05,
+                    'AV+Right': 0.04, 'MV+Right': 0.03,
+                    'Multiple (3+)': 0.03, 'Other': 0.02
+                }
             },
             'timing': {
-                'predicted': 'systolic',
-                'probabilities': {'systolic': 0.65, 'diastolic': 0.25, 'continuous': 0.10}
+                'predicted': 'Mid-systolic',
+                'probabilities': {
+                    'Early-systolic': 0.10, 'Mid-systolic': 0.50,
+                    'Late-systolic': 0.15, 'Holosystolic': 0.20,
+                    'Unknown': 0.05
+                }
             },
             'shape': {
-                'predicted': 'crescendo-decrescendo',
+                'predicted': 'Crescendo-decrescendo',
                 'probabilities': {
-                    'crescendo': 0.15,
-                    'decrescendo': 0.20,
-                    'plateau': 0.10,
-                    'crescendo-decrescendo': 0.55
+                    'Crescendo': 0.15, 'Decrescendo': 0.18,
+                    'Crescendo-decrescendo': 0.50, 'Plateau': 0.12,
+                    'Unknown': 0.05
                 }
             },
             'grading': {
                 'predicted': 'III/VI',
                 'probabilities': {
-                    'I/VI': 0.05, 'II/VI': 0.15, 'III/VI': 0.40,
-                    'IV/VI': 0.25, 'V/VI': 0.10, 'VI/VI': 0.05
+                    'I/VI': 0.05, 'II/VI': 0.12, 'III/VI': 0.38,
+                    'IV/VI': 0.22, 'V/VI': 0.10, 'VI/VI': 0.05,
+                    'Unknown': 0.08
                 }
             },
             'pitch': {
-                'predicted': 'medium',
-                'probabilities': {'low': 0.20, 'medium': 0.55, 'high': 0.25}
+                'predicted': 'Medium',
+                'probabilities': {
+                    'Low': 0.18, 'Medium': 0.50, 'High': 0.25,
+                    'Unknown': 0.07
+                }
             },
             'quality': {
-                'predicted': 'blowing',
+                'predicted': 'Blowing',
                 'probabilities': {
-                    'blowing': 0.50, 'harsh': 0.25, 'rumbling': 0.15, 'musical': 0.10
+                    'Blowing': 0.48, 'Harsh': 0.28,
+                    'Musical': 0.15, 'Unknown': 0.09
                 }
             }
         }
     
     def _demo_ecg_prediction(self, ecg: np.ndarray) -> Dict[str, Any]:
-        """Deterministic demo ECG prediction based on signal characteristics."""
+        """Deterministic demo ECG prediction (5-class per SONOCARDIA paper)."""
         # Simple heuristic: use variance
         variance = np.var(ecg)
         
-        if variance > 1.5:
-            # High variance -> Abnormal
+        if variance > 2.0:
+            # Very high variance -> Ventricular ectopic
             return {
-                'prediction': 'Abnormal',
-                'confidence': 0.72,
+                'prediction': 'VEB',
+                'confidence': 0.68,
                 'probabilities': {
-                    'Normal': 0.28,
-                    'Abnormal': 0.72
+                    'Normal': 0.12, 'SVEB': 0.10,
+                    'VEB': 0.68, 'Fusion': 0.06,
+                    'Unknown': 0.04
+                }
+            }
+        elif variance > 1.0:
+            # Medium-high variance -> Supraventricular ectopic
+            return {
+                'prediction': 'SVEB',
+                'confidence': 0.62,
+                'probabilities': {
+                    'Normal': 0.20, 'SVEB': 0.62,
+                    'VEB': 0.08, 'Fusion': 0.05,
+                    'Unknown': 0.05
                 }
             }
         else:
@@ -379,7 +420,8 @@ class InferenceEngine:
                 'prediction': 'Normal',
                 'confidence': 0.81,
                 'probabilities': {
-                    'Normal': 0.81,
-                    'Abnormal': 0.19
+                    'Normal': 0.81, 'SVEB': 0.08,
+                    'VEB': 0.05, 'Fusion': 0.03,
+                    'Unknown': 0.03
                 }
             }

@@ -78,7 +78,7 @@ export async function GET(
     const stats = {
       totalSessions: device.sessions?.length || 0,
       completedSessions: device.sessions?.filter((s: any) => s.status === 'done').length || 0,
-      totalRecordings: device.sessions?.reduce((acc: number, s: any) => 
+      totalRecordings: device.sessions?.reduce((acc: number, s: any) =>
         acc + (s.predictions?.length || 0), 0
       ) || 0,
       lastSession: device.sessions?.[0]?.created_at || null,
@@ -148,13 +148,13 @@ export async function PATCH(
     // Update allowed fields
     const allowedUpdates = ['device_name', 'device_group_id', 'notes', 'sensor_config', 'status']
     const updates: any = {}
-    
+
     allowedUpdates.forEach(field => {
       if (body[field] !== undefined) {
         updates[field] = body[field]
       }
     })
-    
+
     updates.updated_at = new Date().toISOString()
 
     const { data: device, error } = await supabase
@@ -214,19 +214,40 @@ export async function DELETE(
       return NextResponse.json({ error: 'Profile not found' }, { status: 404 })
     }
 
-    // Only admins can delete devices
-    if (profile.role !== 'admin') {
-      return NextResponse.json({ error: 'Forbidden - Admin only' }, { status: 403 })
+    // Verify device exists and get owner info
+    const { data: device } = await supabase
+      .from('devices')
+      .select('id, owner_user_id')
+      .eq('id', deviceId)
+      .eq('org_id', profile.org_id)
+      .single()
+
+    if (!device) {
+      return NextResponse.json({ error: 'Device not found' }, { status: 404 })
+    }
+
+    // Allow deletion by admin or device owner
+    if (profile.role !== 'admin' && device.owner_user_id !== user.id) {
+      return NextResponse.json({ error: 'Forbidden — you can only delete your own devices' }, { status: 403 })
     }
 
     // Delete device (cascade will handle related records)
-    const { error } = await supabase
+    const { data: deleted, error, count } = await supabase
       .from('devices')
       .delete()
       .eq('id', deviceId)
       .eq('org_id', profile.org_id)
+      .select('id')
 
     if (error) throw error
+
+    // Supabase RLS silently blocks deletes — check if anything was actually removed
+    if (!deleted || deleted.length === 0) {
+      return NextResponse.json(
+        { error: 'Delete blocked by database policy. Please run migration 003_fix_device_delete_policy.sql in Supabase SQL Editor.' },
+        { status: 403 }
+      )
+    }
 
     // Create audit log
     await supabase

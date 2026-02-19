@@ -1,137 +1,497 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
+import {
+  Activity,
+  Cpu,
+  AlertTriangle,
+  Clock,
+  ChevronRight,
+  TrendingUp,
+  Heart,
+  Zap,
+  Plus,
+  Wifi,
+  WifiOff,
+  ArrowUpRight,
+  BarChart3,
+  Stethoscope
+} from 'lucide-react'
+import {
+  AreaChart,
+  Area,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+  BarChart,
+  Bar,
+} from 'recharts'
+import { PageSkeleton } from './components/Skeleton'
 
 interface Session {
   id: string
   status: string
   created_at: string
   device_id: string
+  ended_at: string | null
+}
+
+interface DailyActivity {
+  day: string
+  sessions: number
+  predictions: number
 }
 
 export default function Dashboard() {
   const [sessions, setSessions] = useState<Session[]>([])
   const [loading, setLoading] = useState(true)
+  const [deviceCount, setDeviceCount] = useState(0)
+  const [onlineDevices, setOnlineDevices] = useState(0)
+  const [weeklyData, setWeeklyData] = useState<DailyActivity[]>([])
+  const [predictionCount, setPredictionCount] = useState(0)
+  const [todaySessionCount, setTodaySessionCount] = useState(0)
+
+  const [error, setError] = useState<string | null>(null)
   const router = useRouter()
   const supabase = createClientComponentClient()
 
-  useEffect(() => {
-    fetchSessions()
-  }, [])
-
-  const fetchSessions = async () => {
+  const fetchDashboardData = useCallback(async () => {
     try {
-      const { data, error } = await supabase
+      // Fetch recent sessions
+      const { data: sessionsData, error: sessionsError } = await supabase
         .from('sessions')
         .select('*')
         .order('created_at', { ascending: false })
-        .limit(10)
+        .limit(20)
 
-      if (error) throw error
-      setSessions(data || [])
+      if (sessionsError) throw sessionsError
+      setSessions(sessionsData || [])
+
+      // Count today's sessions
+      const today = new Date()
+      today.setHours(0, 0, 0, 0)
+      const todayCount = (sessionsData || []).filter(
+        s => new Date(s.created_at) >= today
+      ).length
+      setTodaySessionCount(todayCount)
+
+      // Fetch prediction count
+      const { count: predCount } = await supabase
+        .from('predictions')
+        .select('*', { count: 'exact', head: true })
+
+      setPredictionCount(predCount || 0)
+
+      // Fetch devices
+      const response = await fetch('/api/devices')
+      if (response.ok) {
+        const data = await response.json()
+        const devices = data.devices || []
+        setDeviceCount(devices.length)
+        setOnlineDevices(devices.filter((d: any) => d.status === 'online').length)
+      }
+
+      // Build real weekly activity from sessions
+      const weekAgo = new Date()
+      weekAgo.setDate(weekAgo.getDate() - 6)
+      weekAgo.setHours(0, 0, 0, 0)
+
+      const { data: weekSessions } = await supabase
+        .from('sessions')
+        .select('created_at')
+        .gte('created_at', weekAgo.toISOString())
+        .order('created_at', { ascending: true })
+
+      const { data: weekPredictions } = await supabase
+        .from('predictions')
+        .select('created_at')
+        .gte('created_at', weekAgo.toISOString())
+
+      // Group by day
+      const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+      const dailyMap: Record<string, { sessions: number; predictions: number }> = {}
+
+      for (let i = 0; i < 7; i++) {
+        const d = new Date()
+        d.setDate(d.getDate() - (6 - i))
+        const key = d.toISOString().split('T')[0]
+        const dayName = dayNames[d.getDay()]
+        dailyMap[key] = { sessions: 0, predictions: 0 }
+      }
+
+      ; (weekSessions || []).forEach(s => {
+        const key = new Date(s.created_at).toISOString().split('T')[0]
+        if (dailyMap[key]) dailyMap[key].sessions++
+      })
+
+        ; (weekPredictions || []).forEach(p => {
+          const key = new Date(p.created_at).toISOString().split('T')[0]
+          if (dailyMap[key]) dailyMap[key].predictions++
+        })
+
+      const weekly = Object.entries(dailyMap).map(([dateStr, counts]) => {
+        const d = new Date(dateStr + 'T12:00:00')
+        return {
+          day: dayNames[d.getDay()],
+          sessions: counts.sessions,
+          predictions: counts.predictions,
+        }
+      })
+
+      setWeeklyData(weekly)
+
     } catch (error) {
-      console.error('Error fetching sessions:', error)
+      console.error('Error fetching dashboard data:', error)
+      setError('Failed to load dashboard data. Please check your connection.')
     } finally {
       setLoading(false)
     }
+  }, [supabase])
+
+  useEffect(() => {
+    fetchDashboardData()
+  }, [fetchDashboardData])
+
+  const activeSessions = sessions.filter(s => s.status === 'streaming' || s.status === 'processing').length
+  const completedSessions = sessions.filter(s => s.status === 'done').length
+  const alertCount = sessions.filter(s => s.status === 'error').length
+
+  const getStatusBadge = (status: string) => {
+    const map: Record<string, string> = {
+      created: 'badge-neutral',
+      streaming: 'badge-info',
+      processing: 'badge-warning',
+      done: 'badge-success',
+      error: 'badge-danger',
+    }
+    return map[status] || 'badge-neutral'
   }
 
-  const getStatusColor = (status: string) => {
-    const colors: Record<string, string> = {
-      created: 'bg-gray-100 text-gray-800',
-      streaming: 'bg-blue-100 text-blue-800',
-      processing: 'bg-yellow-100 text-yellow-800',
-      done: 'bg-green-100 text-green-800',
-      error: 'bg-red-100 text-red-800',
-    }
-    return colors[status] || 'bg-gray-100 text-gray-800'
+  if (loading) {
+    return (
+      <div className="page-wrapper">
+        <div className="page-content">
+          <PageSkeleton />
+        </div>
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="page-wrapper">
+        <div className="page-content flex flex-col items-center justify-center min-h-[60vh] space-y-4">
+          <div className="p-4 rounded-full bg-red-50 dark:bg-red-950/30">
+            <AlertTriangle className="w-8 h-8 text-red-600 dark:text-red-400" />
+          </div>
+          <h2 className="text-xl font-bold text-foreground">Something went wrong</h2>
+          <p className="text-muted-foreground">{error}</p>
+          <button
+            onClick={() => {
+              setLoading(true)
+              setError(null)
+              fetchDashboardData()
+            }}
+            className="btn-primary"
+          >
+            Try Again
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+
+  // Onboarding empty state when user has no devices or sessions
+  const isNewUser = deviceCount === 0 && sessions.length === 0
+
+  if (isNewUser) {
+    return (
+      <div className="page-wrapper">
+        <div className="page-content">
+          <div className="max-w-2xl mx-auto text-center py-16 fade-in">
+            <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-teal-500 to-teal-700 flex items-center justify-center mx-auto mb-6 shadow-xl">
+              <Stethoscope className="w-10 h-10 text-white" />
+            </div>
+            <h1 className="text-3xl font-bold text-foreground tracking-tight mb-3">
+              Welcome to SONOCARDIA
+            </h1>
+            <p className="text-lg text-muted-foreground mb-10 leading-relaxed">
+              AI-Powered Heart Disease Detection & Prediction using heart sounds.
+              <br />Get started by following the steps below.
+            </p>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-left">
+              {/* Step 1 */}
+              <div className="bg-card border border-border rounded-xl p-6 relative overflow-hidden group hover:border-primary/30 transition-colors">
+                <div className="absolute top-3 right-3 text-5xl font-black text-muted-foreground/10">1</div>
+                <div className="p-2.5 rounded-xl bg-teal-50 dark:bg-teal-950/30 w-fit mb-3">
+                  <Cpu className="w-5 h-5 text-teal-600 dark:text-teal-400" />
+                </div>
+                <h3 className="font-semibold text-foreground mb-1">Register Device</h3>
+                <p className="text-sm text-muted-foreground mb-4">Add your ESP32 + SONOCARDIA Kit and get credentials</p>
+                <Link href="/devices" className="btn-primary text-sm gap-1 w-full justify-center">
+                  Add Device <ArrowUpRight className="w-3.5 h-3.5" />
+                </Link>
+              </div>
+
+              {/* Step 2 */}
+              <div className="bg-card border border-border rounded-xl p-6 relative overflow-hidden group hover:border-primary/30 transition-colors">
+                <div className="absolute top-3 right-3 text-5xl font-black text-muted-foreground/10">2</div>
+                <div className="p-2.5 rounded-xl bg-blue-50 dark:bg-blue-950/30 w-fit mb-3">
+                  <Wifi className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+                </div>
+                <h3 className="font-semibold text-foreground mb-1">Flash & Provision</h3>
+                <p className="text-sm text-muted-foreground mb-4">Flash firmware and send credentials via Serial Monitor</p>
+                <span className="inline-flex items-center text-sm text-muted-foreground">
+                  <Clock className="w-3.5 h-3.5 mr-1" /> After step 1
+                </span>
+              </div>
+
+              {/* Step 3 */}
+              <div className="bg-card border border-border rounded-xl p-6 relative overflow-hidden group hover:border-primary/30 transition-colors">
+                <div className="absolute top-3 right-3 text-5xl font-black text-muted-foreground/10">3</div>
+                <div className="p-2.5 rounded-xl bg-rose-50 dark:bg-rose-950/30 w-fit mb-3">
+                  <Heart className="w-5 h-5 text-rose-600 dark:text-rose-400" />
+                </div>
+                <h3 className="font-semibold text-foreground mb-1">Start Recording</h3>
+                <p className="text-sm text-muted-foreground mb-4">Create a session and record cardiac signals</p>
+                <span className="inline-flex items-center text-sm text-muted-foreground">
+                  <Clock className="w-3.5 h-3.5 mr-1" /> After step 2
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    )
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <nav className="bg-white shadow-sm">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between h-16">
-            <div className="flex items-center">
-              <h1 className="text-2xl font-bold text-gray-900">AscultiCor</h1>
+    <div className="page-wrapper">
+      <div className="page-content space-y-6">
+
+        {/* Header */}
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 fade-in">
+          <div>
+            <h1 className="text-2xl font-bold text-foreground tracking-tight">Dashboard</h1>
+            <p className="text-sm text-muted-foreground mt-1">Monitor your cardiac analysis sessions in real-time</p>
+          </div>
+          <button
+            onClick={() => router.push('/session/new')}
+            className="btn-primary gap-2"
+          >
+            <Plus className="w-4 h-4" />
+            New Session
+          </button>
+        </div>
+
+        {/* Stat Cards */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          {[
+            {
+              label: 'Active Sessions',
+              value: activeSessions,
+              icon: Activity,
+              bgLight: 'bg-teal-50 dark:bg-teal-950/30',
+              textColor: 'text-teal-700 dark:text-teal-400',
+              change: todaySessionCount > 0 ? `+${todaySessionCount} today` : 'No sessions today',
+            },
+            {
+              label: 'Devices',
+              value: `${onlineDevices}/${deviceCount}`,
+              icon: Cpu,
+              bgLight: 'bg-blue-50 dark:bg-blue-950/30',
+              textColor: 'text-blue-700 dark:text-blue-400',
+              change: onlineDevices > 0 ? `${onlineDevices} online` : 'All offline',
+            },
+            {
+              label: 'Predictions',
+              value: predictionCount,
+              icon: BarChart3,
+              bgLight: 'bg-purple-50 dark:bg-purple-950/30',
+              textColor: 'text-purple-700 dark:text-purple-400',
+              change: `${completedSessions} sessions completed`,
+            },
+            {
+              label: 'Alerts',
+              value: alertCount,
+              icon: AlertTriangle,
+              bgLight: alertCount > 0 ? 'bg-amber-50 dark:bg-amber-950/30' : 'bg-emerald-50 dark:bg-emerald-950/30',
+              textColor: alertCount > 0 ? 'text-amber-700 dark:text-amber-400' : 'text-emerald-700 dark:text-emerald-400',
+              change: alertCount > 0 ? 'Needs attention' : 'All clear ✓',
+            },
+          ].map((stat, i) => (
+            <div
+              key={stat.label}
+              className={`stat-card bg-card border border-border slide-up stagger-${i + 1}`}
+              style={{ animationFillMode: 'backwards' }}
+            >
+              <div className="flex items-start justify-between">
+                <div>
+                  <p className="text-sm font-medium text-muted-foreground">{stat.label}</p>
+                  <p className="text-3xl font-bold text-foreground mt-1">{stat.value}</p>
+                  <p className={`text-xs font-medium mt-2 ${stat.textColor}`}>{stat.change}</p>
+                </div>
+                <div className={`p-2.5 rounded-xl ${stat.bgLight}`}>
+                  <stat.icon className={`w-5 h-5 ${stat.textColor}`} />
+                </div>
+              </div>
             </div>
-            <div className="flex items-center space-x-4">
-              <Link
-                href="/devices"
-                className="text-gray-600 hover:text-gray-900"
-              >
-                Devices
-              </Link>
-              <Link
-                href="/admin"
-                className="text-gray-600 hover:text-gray-900"
-              >
-                Admin
-              </Link>
+          ))}
+        </div>
+
+        {/* Charts Row */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* Session Summary */}
+          <div className="bg-card border border-border rounded-xl p-6 slide-up" style={{ animationFillMode: 'backwards', animationDelay: '0.2s' }}>
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2">
+                <Heart className="w-5 h-5 text-teal-600 dark:text-teal-400" />
+                <h3 className="font-semibold text-foreground">Session Overview</h3>
+              </div>
+              <span className="text-xs text-muted-foreground">{sessions.length} total</span>
             </div>
+            {/* Session status breakdown */}
+            <div className="grid grid-cols-2 gap-3 mb-4">
+              {[
+                { label: 'Completed', count: completedSessions, color: 'text-emerald-600 dark:text-emerald-400', bg: 'bg-emerald-50 dark:bg-emerald-950/30' },
+                { label: 'Active', count: activeSessions, color: 'text-blue-600 dark:text-blue-400', bg: 'bg-blue-50 dark:bg-blue-950/30' },
+                { label: 'Created', count: sessions.filter(s => s.status === 'created').length, color: 'text-gray-600 dark:text-gray-400', bg: 'bg-gray-50 dark:bg-gray-950/30' },
+                { label: 'Errors', count: alertCount, color: 'text-red-600 dark:text-red-400', bg: 'bg-red-50 dark:bg-red-950/30' },
+              ].map(item => (
+                <div key={item.label} className={`rounded-lg p-3 ${item.bg}`}>
+                  <p className={`text-2xl font-bold ${item.color}`}>{item.count}</p>
+                  <p className="text-xs text-muted-foreground">{item.label}</p>
+                </div>
+              ))}
+            </div>
+
+            {/* Device status */}
+            <div className="flex items-center gap-4 pt-3 border-t border-border">
+              <div className="flex items-center gap-2">
+                <div className={`w-2 h-2 rounded-full ${onlineDevices > 0 ? 'bg-emerald-500 animate-pulse' : 'bg-gray-400'}`} />
+                <span className="text-sm text-muted-foreground">{onlineDevices} device{onlineDevices !== 1 ? 's' : ''} online</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <WifiOff className="w-3.5 h-3.5 text-muted-foreground" />
+                <span className="text-sm text-muted-foreground">{deviceCount - onlineDevices} offline</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Weekly Activity */}
+          <div className="bg-card border border-border rounded-xl p-6 slide-up" style={{ animationFillMode: 'backwards', animationDelay: '0.25s' }}>
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2">
+                <TrendingUp className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+                <h3 className="font-semibold text-foreground">Weekly Activity</h3>
+              </div>
+              <span className="text-xs text-muted-foreground">Last 7 days</span>
+            </div>
+            {weeklyData.every(d => d.sessions === 0 && d.predictions === 0) ? (
+              <div className="flex flex-col items-center justify-center h-[200px] text-center">
+                <BarChart3 className="w-10 h-10 text-muted-foreground/20 mb-3" />
+                <p className="text-sm text-muted-foreground">No activity this week</p>
+                <p className="text-xs text-muted-foreground/60 mt-1">Start a session to see data here</p>
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height={200}>
+                <BarChart data={weeklyData} barCategoryGap="25%">
+                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
+                  <XAxis
+                    dataKey="day"
+                    tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }}
+                    tickLine={false}
+                    axisLine={{ stroke: 'hsl(var(--border))' }}
+                  />
+                  <YAxis
+                    tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }}
+                    tickLine={false}
+                    axisLine={false}
+                    allowDecimals={false}
+                  />
+                  <Tooltip
+                    contentStyle={{
+                      backgroundColor: 'hsl(var(--card))',
+                      border: '1px solid hsl(var(--border))',
+                      borderRadius: '8px',
+                      fontSize: '12px',
+                      color: 'hsl(var(--foreground))',
+                    }}
+                  />
+                  <Bar dataKey="sessions" fill="hsl(172, 66%, 35%)" radius={[6, 6, 0, 0]} name="Sessions" />
+                  <Bar dataKey="predictions" fill="hsl(213, 94%, 48%)" radius={[6, 6, 0, 0]} name="Predictions" />
+                </BarChart>
+              </ResponsiveContainer>
+            )}
           </div>
         </div>
-      </nav>
 
-      <main className="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
-        <div className="px-4 py-6 sm:px-0">
-          <div className="flex justify-between items-center mb-6">
-            <h2 className="text-2xl font-bold text-gray-900">Recent Sessions</h2>
-            <button
-              onClick={() => router.push('/session/new')}
-              className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
-            >
-              New Session
-            </button>
+        {/* Recent Sessions */}
+        <div className="bg-card border border-border rounded-xl slide-up" style={{ animationFillMode: 'backwards', animationDelay: '0.3s' }}>
+          <div className="flex items-center justify-between p-6 pb-0">
+            <div className="flex items-center gap-2">
+              <Clock className="w-5 h-5 text-muted-foreground" />
+              <h3 className="font-semibold text-foreground">Recent Sessions</h3>
+            </div>
+            <Link href="/session/new" className="text-sm font-medium text-primary hover:text-primary/80 transition-colors">
+              View all →
+            </Link>
           </div>
 
-          {loading ? (
-            <div className="text-center py-8">Loading...</div>
-          ) : sessions.length === 0 ? (
-            <div className="text-center py-8 text-gray-500">
-              No sessions found. Create a new session to get started.
+          {sessions.length === 0 ? (
+            <div className="p-12 text-center">
+              <Activity className="w-12 h-12 text-muted-foreground/30 mx-auto mb-4" />
+              <h3 className="text-lg font-medium text-foreground mb-1">No sessions yet</h3>
+              <p className="text-sm text-muted-foreground mb-4">
+                Create your first session to start monitoring
+              </p>
+              <button onClick={() => router.push('/session/new')} className="btn-primary gap-2">
+                <Plus className="w-4 h-4" />
+                Start First Session
+              </button>
             </div>
           ) : (
-            <div className="bg-white shadow overflow-hidden sm:rounded-md">
-              <ul className="divide-y divide-gray-200">
-                {sessions.map((session) => (
-                  <li key={session.id}>
-                    <Link
-                      href={`/session/${session.id}`}
-                      className="block hover:bg-gray-50"
-                    >
-                      <div className="px-4 py-4 sm:px-6">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center">
-                            <p className="text-sm font-medium text-blue-600 truncate">
-                              Session {session.id.slice(0, 8)}
-                            </p>
-                            <span
-                              className={`ml-2 px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${getStatusColor(
-                                session.status
-                              )}`}
-                            >
-                              {session.status}
-                            </span>
-                          </div>
-                          <div className="ml-2 flex-shrink-0 flex">
-                            <p className="text-sm text-gray-500">
-                              {new Date(session.created_at).toLocaleString()}
-                            </p>
-                          </div>
-                        </div>
-                      </div>
-                    </Link>
-                  </li>
-                ))}
-              </ul>
+            <div className="divide-y divide-border">
+              {sessions.slice(0, 8).map((session) => (
+                <Link
+                  key={session.id}
+                  href={`/session/${session.id}`}
+                  className="flex items-center justify-between px-6 py-4 hover:bg-accent/50 transition-colors group"
+                >
+                  <div className="flex items-center gap-4">
+                    <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
+                      <Heart className="w-5 h-5 text-primary" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-foreground">
+                        Session {session.id.slice(0, 8)}
+                      </p>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        {new Date(session.created_at).toLocaleString()}
+                        {session.ended_at && ` • Duration: ${Math.round((new Date(session.ended_at).getTime() - new Date(session.created_at).getTime()) / 1000)}s`}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className={`badge ${getStatusBadge(session.status)}`}>
+                      {session.status}
+                    </span>
+                    <ChevronRight className="w-4 h-4 text-muted-foreground group-hover:text-foreground transition-colors" />
+                  </div>
+                </Link>
+              ))}
             </div>
           )}
         </div>
-      </main>
+
+      </div>
     </div>
   )
 }

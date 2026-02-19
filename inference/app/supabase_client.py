@@ -1,11 +1,12 @@
 """
 Supabase client wrapper for database operations and storage.
+All methods are synchronous since the supabase-py client is synchronous.
 """
 
 import os
 from typing import Dict, Any, Optional, List
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from supabase import create_client, Client
 import hashlib
 import json
@@ -29,7 +30,7 @@ class SupabaseClient:
     
     # ========== SESSION OPERATIONS ==========
     
-    async def get_session(self, session_id: str) -> Optional[Dict[str, Any]]:
+    def get_session(self, session_id: str) -> Optional[Dict[str, Any]]:
         """Get session by ID."""
         try:
             response = self.client.table("sessions").select("*").eq("id", session_id).single().execute()
@@ -38,7 +39,7 @@ class SupabaseClient:
             logger.error(f"Error getting session {session_id}: {e}")
             return None
     
-    async def update_session_status(
+    def update_session_status(
         self, 
         session_id: str, 
         status: str,
@@ -59,11 +60,11 @@ class SupabaseClient:
     
     # ========== DEVICE OPERATIONS ==========
     
-    async def update_device_last_seen(self, device_id: str) -> bool:
+    def update_device_last_seen(self, device_id: str) -> bool:
         """Update device last_seen_at timestamp."""
         try:
             self.client.table("devices").update({
-                "last_seen_at": datetime.utcnow().isoformat()
+                "last_seen_at": datetime.now(timezone.utc).isoformat()
             }).eq("id", device_id).execute()
             return True
         except Exception as e:
@@ -72,7 +73,7 @@ class SupabaseClient:
     
     # ========== RECORDING OPERATIONS ==========
     
-    async def create_recording(
+    def create_recording(
         self,
         org_id: str,
         session_id: str,
@@ -105,7 +106,7 @@ class SupabaseClient:
     
     # ========== PREDICTION OPERATIONS ==========
     
-    async def create_prediction(
+    def create_prediction(
         self,
         org_id: str,
         session_id: str,
@@ -136,7 +137,7 @@ class SupabaseClient:
             logger.error(f"Error creating prediction: {e}")
             return None
     
-    async def create_murmur_severity(
+    def create_murmur_severity(
         self,
         org_id: str,
         session_id: str,
@@ -168,7 +169,7 @@ class SupabaseClient:
     
     # ========== LIVE METRICS OPERATIONS ==========
     
-    async def create_live_metrics(
+    def create_live_metrics(
         self,
         org_id: str,
         session_id: str,
@@ -188,7 +189,7 @@ class SupabaseClient:
     
     # ========== STORAGE OPERATIONS ==========
     
-    async def upload_file(
+    def upload_file(
         self,
         bucket: str,
         path: str,
@@ -210,7 +211,7 @@ class SupabaseClient:
     
     # ========== AUDIT LOG OPERATIONS ==========
     
-    async def create_audit_log(
+    def create_audit_log(
         self,
         org_id: str,
         user_id: Optional[str],

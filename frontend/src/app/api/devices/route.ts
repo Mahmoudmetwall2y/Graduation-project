@@ -1,13 +1,13 @@
 import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs'
 import { cookies } from 'next/headers'
 import { NextResponse } from 'next/server'
-import { randomUUID } from 'crypto'
+import { randomUUID, createHash } from 'crypto'
 
 // GET /api/devices - List all devices
 export async function GET(request: Request) {
   try {
     const supabase = createRouteHandlerClient({ cookies })
-    
+
     // Get current user
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) {
@@ -53,9 +53,9 @@ export async function POST(request: Request) {
   try {
     const supabase = createRouteHandlerClient({ cookies })
     const body = await request.json()
-    
+
     const { device_name, device_type = 'esp32', device_group_id, notes, sensor_config } = body
-    
+
     if (!device_name) {
       return NextResponse.json(
         { error: 'Device name is required' },
@@ -83,7 +83,8 @@ export async function POST(request: Request) {
     // Generate device credentials
     const deviceId = randomUUID()
     const deviceSecret = `asc_${randomUUID().replace(/-/g, '')}`
-    
+    const deviceSecretHash = createHash('sha256').update(deviceSecret).digest('hex')
+
     // Create device
     const { data: device, error: deviceError } = await supabase
       .from('devices')
@@ -94,7 +95,7 @@ export async function POST(request: Request) {
         device_name,
         device_type,
         device_group_id: device_group_id || null,
-        device_secret_hash: deviceSecret, // In production, hash this
+        device_secret_hash: deviceSecretHash,
         notes: notes || null,
         sensor_config: sensor_config || {},
         status: 'offline'

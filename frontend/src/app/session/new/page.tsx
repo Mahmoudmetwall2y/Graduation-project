@@ -1,23 +1,24 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
+import { Heart, Cpu, FileText, ArrowRight, ChevronLeft, Activity } from 'lucide-react'
 
 export default function NewSessionPage() {
   const [deviceId, setDeviceId] = useState('')
   const [devices, setDevices] = useState<any[]>([])
   const [notes, setNotes] = useState('')
   const [loading, setLoading] = useState(false)
+
   const [error, setError] = useState<string | null>(null)
+  const [fetchError, setFetchError] = useState<string | null>(null)
+  const [loadingDevices, setLoadingDevices] = useState(true)
   const router = useRouter()
   const supabase = createClientComponentClient()
 
-  useEffect(() => {
-    fetchDevices()
-  }, [])
-
-  const fetchDevices = async () => {
+  const fetchDevices = useCallback(async () => {
     try {
       const { data, error } = await supabase
         .from('devices')
@@ -29,10 +30,18 @@ export default function NewSessionPage() {
       if (data && data.length > 0) {
         setDeviceId(data[0].id)
       }
+      setFetchError(null)
     } catch (error) {
       console.error('Error fetching devices:', error)
+      setFetchError('Failed to load devices. Please check your connection.')
+    } finally {
+      setLoadingDevices(false)
     }
-  }
+  }, [supabase])
+
+  useEffect(() => {
+    fetchDevices()
+  }, [fetchDevices])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -41,12 +50,11 @@ export default function NewSessionPage() {
 
     try {
       const { data: { user } } = await supabase.auth.getUser()
-      
+
       if (!user) {
         throw new Error('Not authenticated')
       }
 
-      // Get user's org_id
       const { data: profile, error: profileError } = await supabase
         .from('profiles')
         .select('org_id')
@@ -55,7 +63,6 @@ export default function NewSessionPage() {
 
       if (profileError) throw profileError
 
-      // Create session
       const { data: session, error: sessionError } = await supabase
         .from('sessions')
         .insert({
@@ -69,8 +76,6 @@ export default function NewSessionPage() {
         .single()
 
       if (sessionError) throw sessionError
-
-      // Redirect to session detail
       router.push(`/session/${session.id}`)
     } catch (error: any) {
       setError(error.message)
@@ -80,91 +85,122 @@ export default function NewSessionPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <nav className="bg-white shadow-sm">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between h-16">
-            <div className="flex items-center">
-              <h1 className="text-2xl font-bold text-gray-900">AscultiCor</h1>
+    <div className="page-wrapper">
+      <div className="page-content">
+
+        <Link href="/" className="inline-flex items-center gap-1 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors mb-6">
+          <ChevronLeft className="w-4 h-4" />
+          Back to Dashboard
+        </Link>
+
+        <div className="max-w-lg mx-auto">
+          {/* Header */}
+          <div className="text-center mb-8 fade-in">
+            <div className="w-14 h-14 rounded-2xl bg-primary/10 flex items-center justify-center mx-auto mb-4">
+              <Heart className="w-7 h-7 text-primary" />
             </div>
+            <h1 className="text-2xl font-bold text-foreground tracking-tight">New Session</h1>
+            <p className="text-sm text-muted-foreground mt-1">Start a new cardiac monitoring session</p>
           </div>
-        </div>
-      </nav>
 
-      <main className="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
-        <div className="px-4 py-6 sm:px-0">
-          <div className="max-w-md mx-auto">
-            <h2 className="text-2xl font-bold text-gray-900 mb-6">Create New Session</h2>
+          {error && (
+            <div className="mb-6 rounded-lg bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900/50 p-4 fade-in">
+              <p className="text-sm text-red-700 dark:text-red-400">{error}</p>
+            </div>
+          )}
 
-            {error && (
-              <div className="mb-4 rounded-md bg-red-50 p-4">
-                <p className="text-sm text-red-800">{error}</p>
-              </div>
-            )}
-
-            <form onSubmit={handleSubmit} className="space-y-6 bg-white shadow rounded-lg p-6">
-              <div>
-                <label htmlFor="device" className="block text-sm font-medium text-gray-700">
-                  Device
-                </label>
-                <select
-                  id="device"
-                  value={deviceId}
-                  onChange={(e) => setDeviceId(e.target.value)}
-                  required
-                  className="mt-1 block w-full pl-3 pr-10 py-2 text-base border border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md"
-                >
-                  {devices.length === 0 ? (
-                    <option value="">No devices available</option>
-                  ) : (
-                    devices.map((device) => (
-                      <option key={device.id} value={device.id}>
-                        {device.device_name}
-                      </option>
-                    ))
-                  )}
-                </select>
-                {devices.length === 0 && (
-                  <p className="mt-2 text-sm text-red-600">
-                    Please register a device first.
-                  </p>
+          <form onSubmit={handleSubmit} className="bg-card border border-border rounded-xl p-6 space-y-5 slide-up">
+            <div>
+              <label htmlFor="device" className="block text-sm font-medium text-foreground mb-1.5">
+                <span className="flex items-center gap-1.5">
+                  <Cpu className="w-3.5 h-3.5 text-muted-foreground" />
+                  Select Device
+                </span>
+              </label>
+              <select
+                id="device"
+                value={deviceId}
+                onChange={(e) => setDeviceId(e.target.value)}
+                required
+                className="input-field"
+              >
+                {devices.length === 0 ? (
+                  <option value="">No devices available</option>
+                ) : (
+                  devices.map((device) => (
+                    <option key={device.id} value={device.id}>
+                      {device.device_name} ({device.device_type})
+                    </option>
+                  ))
                 )}
-              </div>
+              </select>
+              {loadingDevices ? (
+                <div className="text-center py-4 text-sm text-muted-foreground">
+                  <Activity className="w-4 h-4 animate-spin inline mr-2" />
+                  Loading devices...
+                </div>
+              ) : fetchError ? (
+                <div className="text-center py-2">
+                  <p className="text-sm text-destructive mb-2">{fetchError}</p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setLoadingDevices(true)
+                      fetchDevices()
+                    }}
+                    className="text-xs text-primary hover:underline"
+                  >
+                    Retry loading devices
+                  </button>
+                </div>
+              ) : devices.length === 0 ? (
+                <p className="mt-2 text-xs text-destructive flex items-center gap-1">
+                  <Cpu className="w-3 h-3" />
+                  Please <Link href="/devices" className="text-primary underline">register a device</Link> first.
+                </p>
+              ) : null}
+            </div>
 
-              <div>
-                <label htmlFor="notes" className="block text-sm font-medium text-gray-700">
-                  Notes (Optional)
-                </label>
-                <textarea
-                  id="notes"
-                  value={notes}
-                  onChange={(e) => setNotes(e.target.value)}
-                  rows={3}
-                  className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                  placeholder="Enter any notes about this session..."
-                />
-              </div>
+            <div>
+              <label htmlFor="notes" className="block text-sm font-medium text-foreground mb-1.5">
+                <span className="flex items-center gap-1.5">
+                  <FileText className="w-3.5 h-3.5 text-muted-foreground" />
+                  Notes <span className="text-muted-foreground font-normal">(Optional)</span>
+                </span>
+              </label>
+              <textarea
+                id="notes"
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                rows={3}
+                className="input-field resize-none"
+                placeholder="Patient info, auscultation point, etc..."
+              />
+            </div>
 
-              <div className="flex items-center justify-between">
-                <button
-                  type="button"
-                  onClick={() => router.push('/')}
-                  className="text-sm text-gray-600 hover:text-gray-900"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={loading || devices.length === 0}
-                  className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50"
-                >
-                  {loading ? 'Creating...' : 'Create Session'}
-                </button>
-              </div>
-            </form>
-          </div>
+            <div className="flex items-center justify-between pt-2">
+              <button
+                type="button"
+                onClick={() => router.push('/')}
+                className="btn-ghost"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={loading || devices.length === 0}
+                className="btn-primary gap-2"
+              >
+                {loading ? (
+                  <Activity className="w-4 h-4 animate-spin" />
+                ) : null}
+                {loading ? 'Creating...' : 'Start Session'}
+                {!loading && <ArrowRight className="w-4 h-4" />}
+              </button>
+            </div>
+          </form>
         </div>
-      </main>
+      </div>
     </div>
   )
 }

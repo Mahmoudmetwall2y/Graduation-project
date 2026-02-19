@@ -11,15 +11,15 @@ services:
     volumes:
       - mosquitto_data:/mosquitto/data
       - mosquitto_logs:/mosquitto/log
-      - ./mosquitto/config:/mosquitto/config:ro
     networks:
       - cardiosense-network
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "mosquitto_sub", "-t", "$$SYS/#", "-C", "1", "-i", "healthcheck", "-W", "3"]
+      test: ["CMD", "mosquitto_sub", "-t", "$$SYS/#", "-C", "1", "-i", "healthcheck", "-W", "3", "-u", "cardiosense", "-P", "cardiosense123"]
       interval: 30s
       timeout: 10s
       retries: 3
+      start_period: 10s
 
   # Inference/Ingress Service (Python FastAPI)
   inference:
