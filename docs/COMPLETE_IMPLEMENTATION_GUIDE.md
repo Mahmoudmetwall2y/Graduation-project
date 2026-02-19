@@ -750,8 +750,8 @@ SUPABASE_ANON_KEY=eyJhbG...
 SUPABASE_SERVICE_ROLE_KEY=eyJhbG...
 
 # MQTT Configuration
-MQTT_USERNAME=cardiosense
-MQTT_PASSWORD=cardiosense123
+MQTT_USERNAME=asculticor
+MQTT_PASSWORD=asculticor123
 
 # Enable real models (not demo)
 ENABLE_DEMO_MODE=false

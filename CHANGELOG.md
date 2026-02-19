@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
-- 🔒 **CRITICAL**: Removed hardcoded MQTT password from firmware (changed from `cardiosense123` to `CHANGE_ME_IN_PRODUCTION`)
+- 🔒 **CRITICAL**: Removed hardcoded MQTT password from firmware (changed from `asculticor123` to `CHANGE_ME_IN_PRODUCTION`)
 - 🔒 Added security warnings to firmware configuration section
 - 🔒 Implemented rate limiting on all API endpoints (60 req/min general, 5 req/min auth)
 - 🔒 Added security headers middleware (CSP, HSTS, X-Frame-Options, etc.)
