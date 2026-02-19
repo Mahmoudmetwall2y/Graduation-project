@@ -136,6 +136,20 @@ class ConfigResponse(BaseModel):
 # ENDPOINTS
 # ==========================================================================
 
+
+def require_internal_token(request: Request):
+    """Protect internal operational endpoints with a shared token."""
+    configured = os.getenv("INFERENCE_INTERNAL_TOKEN")
+    if not configured:
+        raise HTTPException(
+            status_code=500,
+            detail="INFERENCE_INTERNAL_TOKEN is not configured"
+        )
+
+    provided = request.headers.get("x-internal-token")
+    if provided != configured:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
 @app.get("/")
 async def root():
     """Root endpoint."""
@@ -179,6 +193,8 @@ async def get_config(request: Request):
     Returns preprocessing settings and limits.
     Rate limited: 60 requests per minute per IP.
     """
+    require_internal_token(request)
+
     global mqtt_handler
     
     if not mqtt_handler:
@@ -206,6 +222,8 @@ async def get_metrics(request: Request):
     Returns active sessions and buffer stats.
     Rate limited: 60 requests per minute per IP.
     """
+    require_internal_token(request)
+
     global mqtt_handler
     
     if not mqtt_handler:
