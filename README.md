@@ -116,6 +116,16 @@ This starts:
 > docker-compose up -d
 > ```
 
+> **If inference keeps restarting with** `SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must be set`
+>
+> Your `.env` is missing required Supabase variables. Recreate/check `.env` and restart:
+>
+> ```bash
+> cp .env.example .env  # if not created yet
+> # then set SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY, INTERNAL_API_TOKEN, INFERENCE_INTERNAL_TOKEN
+> docker-compose up --build -d
+> ```
+
 ### 3.5 Process queued reports (async LLM worker trigger)
 
 LLM report requests are queued first. To process pending reports, call:

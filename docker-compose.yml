@@ -18,7 +18,7 @@ services:
       - asculticor-network
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "mosquitto_sub", "-t", "$$SYS/#", "-C", "1", "-i", "healthcheck", "-W", "3", "-u", "${MQTT_USERNAME}", "-P", "${MQTT_PASSWORD}"]
+      test: ["CMD", "mosquitto_sub", "-t", "$$SYS/#", "-C", "1", "-i", "healthcheck", "-W", "3", "-u", "${MQTT_USERNAME:?MQTT_USERNAME is required}", "-P", "${MQTT_PASSWORD:?MQTT_PASSWORD is required}"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -34,14 +34,14 @@ services:
       - "8000:8000"
     environment:
       # Supabase
-      - SUPABASE_URL=${SUPABASE_URL}
-      - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}
+      - SUPABASE_URL=${SUPABASE_URL:?SUPABASE_URL is required}
+      - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY:?SUPABASE_SERVICE_ROLE_KEY is required}
       
       # MQTT
       - MQTT_BROKER=mosquitto
       - MQTT_PORT=1883
-      - MQTT_USERNAME=${MQTT_USERNAME}
-      - MQTT_PASSWORD=${MQTT_PASSWORD}
+      - MQTT_USERNAME=${MQTT_USERNAME:?MQTT_USERNAME is required}
+      - MQTT_PASSWORD=${MQTT_PASSWORD:?MQTT_PASSWORD is required}
       - MQTT_KEEPALIVE=60
       
       # ML Settings
@@ -62,7 +62,7 @@ services:
       
       # Logging
       - LOG_LEVEL=INFO
-      - INFERENCE_INTERNAL_TOKEN=${INFERENCE_INTERNAL_TOKEN}
+      - INFERENCE_INTERNAL_TOKEN=${INFERENCE_INTERNAL_TOKEN:?INFERENCE_INTERNAL_TOKEN is required}
     volumes:
       - ./inference/models:/app/models:ro
       - inference_cache:/app/cache
@@ -84,15 +84,15 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
       args:
-        - NEXT_PUBLIC_SUPABASE_URL=${SUPABASE_URL}
-        - NEXT_PUBLIC_SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
+        - NEXT_PUBLIC_SUPABASE_URL=${SUPABASE_URL:?SUPABASE_URL is required}
+        - NEXT_PUBLIC_SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY:?SUPABASE_ANON_KEY is required}
         - NEXT_PUBLIC_MQTT_WS_URL=ws://localhost:9001
     container_name: asculticor-frontend
     ports:
       - "3000:3000"
     environment:
-      - NEXT_PUBLIC_SUPABASE_URL=${SUPABASE_URL}
-      - NEXT_PUBLIC_SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
+      - NEXT_PUBLIC_SUPABASE_URL=${SUPABASE_URL:?SUPABASE_URL is required}
+      - NEXT_PUBLIC_SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY:?SUPABASE_ANON_KEY is required}
       - NEXT_PUBLIC_MQTT_WS_URL=ws://localhost:9001
       - NODE_ENV=production
     networks:
