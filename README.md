@@ -8,7 +8,7 @@
 
 # 🫀 AscultiCor — AI-Powered Cardiac Monitoring Platform
 
-**AscultiCor** (formerly CardioSense) is a full-stack, real-time cardiac auscultation and monitoring platform that combines IoT hardware (ESP32), MQTT messaging, AI/ML inference, and a modern web dashboard. It enables healthcare professionals to remotely monitor patients' heart sounds (PCG) and electrocardiograms (ECG) with AI-assisted classification.
+**AscultiCor** is a full-stack, real-time cardiac auscultation and monitoring platform that combines IoT hardware (ESP32), MQTT messaging, AI/ML inference, and a modern web dashboard. It enables healthcare professionals to remotely monitor patients' heart sounds (PCG) and electrocardiograms (ECG) with AI-assisted classification.
 
 ---
 
@@ -72,8 +72,8 @@
 ### 1. Clone & Configure
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/cardiosense.git
-cd cardiosense
+git clone https://github.com/YOUR_USERNAME/asculticor.git
+cd asculticor
 cp .env.example .env
 ```
 
@@ -108,15 +108,15 @@ This starts:
 ### 4. Login
 
 Default credentials (from seed data):
-- **Email:** `admin@cardiosense.local`
-- **Password:** `admin123`
+- **Email:** `admin@asculticor.local`
+- **Password:** `asculticor123`
 
 ---
 
 ## 📁 Project Structure
 
 ```
-cardiosense/
+asculticor/
 ├── frontend/                 # Next.js 14 web dashboard
 │   ├── src/app/
 │   │   ├── components/       # Navbar, ThemeProvider, Skeleton
@@ -158,6 +158,22 @@ The UI uses a **medical-grade design system** built with CSS custom properties:
 - **Charts:** Recharts for ECG/PCG waveforms and activity visualizations
 
 ---
+
+
+
+## ✅ Recommended quality checks
+
+Before merging production changes, run:
+
+```bash
+# Frontend
+cd frontend && npm ci && npm run lint && npm run typecheck && npm run build
+
+# Inference
+cd ../inference && python -m pip install -r requirements.txt && python -m compileall app
+```
+
+A GitHub Actions CI workflow is included to run equivalent checks on pushes and pull requests.
 
 ## 🔧 Development
 
