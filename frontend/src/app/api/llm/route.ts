@@ -239,8 +239,14 @@ async function processPendingReports(request: Request) {
 // GET /api/llm/reports - List LLM reports
 export async function GET(request: Request) {
   try {
-    const supabase = createRouteHandlerClient({ cookies })
     const { searchParams } = new URL(request.url)
+    const action = searchParams.get('action')
+
+    if (action === 'queue-stats') {
+      return getQueueStats(request)
+    }
+
+    const supabase = createRouteHandlerClient({ cookies })
     const device_id = searchParams.get('device_id')
     const session_id = searchParams.get('session_id')
 
@@ -505,4 +511,43 @@ The ECG analysis indicates some irregularities that may warrant further investig
     .single()
 
   return updatedReport
+}
+
+
+async function getQueueStats(request: Request) {
+  const internalToken = process.env.INTERNAL_API_TOKEN
+  if (!internalToken) {
+    return NextResponse.json({ error: 'INTERNAL_API_TOKEN is not configured' }, { status: 500 })
+  }
+
+  const authHeader = request.headers.get('x-internal-token')
+  if (authHeader !== internalToken) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
+  const supabaseUrl = process.env.SUPABASE_URL
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY
+  if (!supabaseUrl || !serviceRoleKey) {
+    return NextResponse.json({ error: 'Supabase service credentials are missing' }, { status: 500 })
+  }
+
+  const serviceClient = createClient(supabaseUrl, serviceRoleKey)
+
+  const [pendingRes, generatingRes, errorRes, retryReadyRes, oldestPendingRes] = await Promise.all([
+    serviceClient.from('llm_reports').select('id', { count: 'exact', head: true }).eq('status', 'pending'),
+    serviceClient.from('llm_reports').select('id', { count: 'exact', head: true }).eq('status', 'generating'),
+    serviceClient.from('llm_reports').select('id', { count: 'exact', head: true }).eq('status', 'error'),
+    serviceClient.from('llm_reports').select('id', { count: 'exact', head: true }).eq('status', 'pending').lte('next_retry_at', new Date().toISOString()),
+    serviceClient.from('llm_reports').select('created_at').eq('status', 'pending').order('created_at', { ascending: true }).limit(1).maybeSingle()
+  ])
+
+  return NextResponse.json({
+    queue: {
+      pending: pendingRes.count || 0,
+      generating: generatingRes.count || 0,
+      error: errorRes.count || 0,
+      retry_ready: retryReadyRes.count || 0,
+      oldest_pending_created_at: oldestPendingRes.data?.created_at || null
+    }
+  })
 }

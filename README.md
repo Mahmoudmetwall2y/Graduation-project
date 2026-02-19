@@ -148,6 +148,16 @@ Add repository secrets:
 
 Then enable `.github/workflows/process-llm-queue.yml` to trigger processing every 5 minutes.
 
+
+### 3.8 Queue observability endpoint
+
+To inspect queue health (pending/generating/error/retry-ready), call:
+
+```bash
+curl -H "x-internal-token: $INTERNAL_API_TOKEN" \
+  "http://localhost:3000/api/llm?action=queue-stats"
+```
+
 ### 4. Login
 
 Default credentials (from seed data):
@@ -205,6 +215,9 @@ The UI uses a **medical-grade design system** built with CSS custom properties:
 
 
 ## ✅ Recommended quality checks
+
+See `IMPLEMENTATION_PLAN_NEXT_STEPS.md` for the current phased roadmap.
+
 
 Before merging production changes, run:
 

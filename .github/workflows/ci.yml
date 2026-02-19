@@ -75,9 +75,11 @@ jobs:
           test -f supabase/migrations/002_device_management_enhancement.sql
           test -f supabase/migrations/003_fix_device_delete_policy.sql
           test -f supabase/migrations/004_professional_hardening.sql
+          test -f supabase/migrations/005_llm_queue_retries.sql
           test -f supabase/migrations/apply_this_in_supabase.sql
 
       - name: SQL script non-empty check
         run: |
           test -s supabase/migrations/004_professional_hardening.sql
+          test -s supabase/migrations/005_llm_queue_retries.sql
           test -s supabase/migrations/apply_this_in_supabase.sql

@@ -5,9 +5,14 @@ on:
     - cron: '*/5 * * * *'
   workflow_dispatch:
 
+concurrency:
+  group: process-llm-queue
+  cancel-in-progress: false
+
 jobs:
   process-queue:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Trigger queued report processor
         env:
@@ -19,5 +24,5 @@ jobs:
             exit 1
           fi
 
-          curl -fsS -X POST "$APP_URL/api/llm?action=process-pending" \
+          curl -fsS --retry 3 --retry-delay 5 --retry-connrefused -X POST "$APP_URL/api/llm?action=process-pending" \
             -H "x-internal-token: $INTERNAL_API_TOKEN"
