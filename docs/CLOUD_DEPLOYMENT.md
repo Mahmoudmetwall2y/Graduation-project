@@ -45,7 +45,7 @@ Deploy AscultiCor to the cloud for 24/7 independent operation.
 aws configure
 
 # Create a thing for your ESP32
-aws iot create-thing --thing-name cardiosense-device-001
+aws iot create-thing --thing-name asculticor-device-001
 
 # Create certificates
 aws iot create-keys-and-certificate \
@@ -60,7 +60,7 @@ aws iot attach-principal-policy \
   --principal <certificate-arn>
 
 aws iot attach-thing-principal \
-  --thing-name cardiosense-device-001 \
+  --thing-name asculticor-device-001 \
   --principal <certificate-arn>
 ```
 
@@ -138,7 +138,7 @@ void connectAWS() {
   while (!client.connected()) {
     Serial.print("Connecting to AWS IoT...");
     
-    if (client.connect("cardiosense-device-001")) {
+    if (client.connect("asculticor-device-001")) {
       Serial.println("connected");
       
       // Subscribe to control topics
@@ -158,7 +158,7 @@ void connectAWS() {
 #### 2.1 Create ECS Cluster
 ```bash
 # Using AWS CLI
-aws ecs create-cluster --cluster-name cardiosense-cluster
+aws ecs create-cluster --cluster-name asculticor-cluster
 
 # Or use AWS Console:
 # ECS → Clusters → Create Cluster → Fargate
@@ -166,10 +166,10 @@ aws ecs create-cluster --cluster-name cardiosense-cluster
 
 #### 2.2 Create Task Definition
 
-`cardiosense-task.json`:
+`asculticor-task.json`:
 ```json
 {
-  "family": "cardiosense-inference",
+  "family": "asculticor-inference",
   "networkMode": "awsvpc",
   "requiresCompatibilities": ["FARGATE"],
   "cpu": "1024",
@@ -178,7 +178,7 @@ aws ecs create-cluster --cluster-name cardiosense-cluster
   "containerDefinitions": [
     {
       "name": "inference",
-      "image": "YOUR_ECR_REPO/cardiosense-inference:latest",
+      "image": "YOUR_ECR_REPO/asculticor-inference:latest",
       "portMappings": [
         {
           "containerPort": 8000,
@@ -214,7 +214,7 @@ aws ecs create-cluster --cluster-name cardiosense-cluster
       "logConfiguration": {
         "logDriver": "awslogs",
         "options": {
-          "awslogs-group": "/ecs/cardiosense",
+          "awslogs-group": "/ecs/asculticor",
           "awslogs-region": "us-east-1",
           "awslogs-stream-prefix": "inference"
         }
@@ -226,32 +226,32 @@ aws ecs create-cluster --cluster-name cardiosense-cluster
 
 Register task:
 ```bash
-aws ecs register-task-definition --cli-input-json file://cardiosense-task.json
+aws ecs register-task-definition --cli-input-json file://asculticor-task.json
 ```
 
 #### 2.3 Create ECR Repository and Push Image
 
 ```bash
 # Create ECR repo
-aws ecr create-repository --repository-name cardiosense-inference
+aws ecr create-repository --repository-name asculticor-inference
 
 # Login to ECR
 aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin YOUR_ACCOUNT.dkr.ecr.us-east-1.amazonaws.com
 
 # Build and tag
-docker build -t cardiosense-inference ./inference
-docker tag cardiosense-inference:latest YOUR_ACCOUNT.dkr.ecr.us-east-1.amazonaws.com/cardiosense-inference:latest
+docker build -t asculticor-inference ./inference
+docker tag asculticor-inference:latest YOUR_ACCOUNT.dkr.ecr.us-east-1.amazonaws.com/asculticor-inference:latest
 
 # Push
-docker push YOUR_ACCOUNT.dkr.ecr.us-east-1.amazonaws.com/cardiosense-inference:latest
+docker push YOUR_ACCOUNT.dkr.ecr.us-east-1.amazonaws.com/asculticor-inference:latest
 ```
 
 #### 2.4 Create ECS Service
 ```bash
 aws ecs create-service \
-  --cluster cardiosense-cluster \
-  --service-name cardiosense-inference \
-  --task-definition cardiosense-inference \
+  --cluster asculticor-cluster \
+  --service-name asculticor-inference \
+  --task-definition asculticor-inference \
   --desired-count 1 \
   --launch-type FARGATE \
   --network-configuration "awsvpcConfiguration={subnets=[subnet-xxxx],securityGroups=[sg-xxxx],assignPublicIp=ENABLED}"
@@ -261,13 +261,13 @@ aws ecs create-service \
 ```bash
 # Create ALB for HTTP access
 aws elbv2 create-load-balancer \
-  --name cardiosense-alb \
+  --name asculticor-alb \
   --subnets subnet-xxxx subnet-yyyy \
   --security-groups sg-xxxx
 
 # Create target group
 aws elbv2 create-target-group \
-  --name cardiosense-tg \
+  --name asculticor-tg \
   --protocol HTTP \
   --port 8000 \
   --vpc-id vpc-xxxx \
@@ -562,7 +562,7 @@ void reconnect() {
 ```bash
 # Create alarm for high error rate
 aws cloudwatch put-metric-alarm \
-  --alarm-name cardiosense-high-errors \
+  --alarm-name asculticor-high-errors \
   --alarm-description "High error rate in inference" \
   --metric-name ErrorCount \
   --namespace AscultiCor \

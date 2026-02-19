@@ -33,15 +33,19 @@ This directory contains all Supabase-related configuration for AscultiCor.
 
    Or manually via SQL Editor:
    ```bash
-   # Copy content of migrations/001_initial_schema.sql
-   # Paste into Supabase Dashboard > SQL Editor > New Query
-   # Click RUN
+   # Copy/apply migrations in order:
+   # 1) migrations/001_initial_schema.sql
+   # 2) migrations/002_device_management_enhancement.sql
+   # 3) migrations/003_fix_device_delete_policy.sql
+   # 4) migrations/004_professional_hardening.sql
+   # 5) migrations/005_llm_queue_retries.sql
+   # (or run migrations/apply_this_in_supabase.sql for one-shot setup)
    ```
 
 4. **Create users** (via Dashboard):
    - Go to Authentication > Users > Add User
-   - Admin: `admin@cardiosense.local` / `cardiosense123`
-   - Operator: `operator@cardiosense.local` / `cardiosense123`
+   - Admin: `admin@asculticor.local` / `asculticor123`
+   - Operator: `operator@asculticor.local` / `asculticor123`
    - Note their UUIDs
 
 5. **Update and run seed script**:

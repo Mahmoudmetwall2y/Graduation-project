@@ -8,7 +8,7 @@
 
 # 🫀 AscultiCor — AI-Powered Cardiac Monitoring Platform
 
-**AscultiCor** (formerly CardioSense) is a full-stack, real-time cardiac auscultation and monitoring platform that combines IoT hardware (ESP32), MQTT messaging, AI/ML inference, and a modern web dashboard. It enables healthcare professionals to remotely monitor patients' heart sounds (PCG) and electrocardiograms (ECG) with AI-assisted classification.
+**AscultiCor** is a full-stack, real-time cardiac auscultation and monitoring platform that combines IoT hardware (ESP32), MQTT messaging, AI/ML inference, and a modern web dashboard. It enables healthcare professionals to remotely monitor patients' heart sounds (PCG) and electrocardiograms (ECG) with AI-assisted classification.
 
 ---
 
@@ -72,8 +72,8 @@
 ### 1. Clone & Configure
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/cardiosense.git
-cd cardiosense
+git clone https://github.com/YOUR_USERNAME/asculticor.git
+cd asculticor
 cp .env.example .env
 ```
 
@@ -89,7 +89,7 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
 
 ### 2. Apply Database Migrations
 
-Run the SQL in `supabase/migrations/apply_this_in_supabase.sql` in your Supabase SQL Editor to set up:
+Run the SQL in `supabase/migrations/apply_this_in_supabase.sql` in your Supabase SQL Editor to set up (including queue retry hardening from `005_llm_queue_retries.sql`):
 - Tables (profiles, devices, sessions, predictions, telemetry, alerts, audit logs)
 - Row-Level Security (RLS) policies
 - Helper functions for multi-tenancy
@@ -105,18 +105,71 @@ This starts:
 - **Inference API** → [http://localhost:8000](http://localhost:8000)
 - **Mosquitto MQTT** → `mqtt://localhost:1883`
 
+
+
+> **If Mosquitto fails with** `entrypoint.sh: no such file or directory`
+>
+> Rebuild the broker image without cache to ensure the latest entrypoint is embedded:
+>
+> ```bash
+> docker-compose build --no-cache mosquitto
+> docker-compose up -d
+> ```
+
+### 3.5 Process queued reports (async LLM worker trigger)
+
+LLM report requests are queued first. To process pending reports, call:
+
+```bash
+curl -X POST "http://localhost:3000/api/llm?action=process-pending" \
+  -H "x-internal-token: $INTERNAL_API_TOKEN"
+```
+
+Run this periodically (e.g., cron/GitHub Action/worker scheduler) in production.
+
+Queued report failures now retry automatically with exponential backoff (up to `max_retries`).
+
+
+### 3.6 Access inference internal endpoints
+
+`/config` and `/metrics` on the inference service are protected by `x-internal-token`.
+
+```bash
+curl -H "x-internal-token: $INFERENCE_INTERNAL_TOKEN" http://localhost:8000/config
+curl -H "x-internal-token: $INFERENCE_INTERNAL_TOKEN" http://localhost:8000/metrics
+```
+
+
+### 3.7 Optional: schedule queued report processing in GitHub Actions
+
+Add repository secrets:
+- `ASCULTICOR_APP_URL` (e.g., `https://your-app.example.com`)
+- `ASCULTICOR_INTERNAL_API_TOKEN`
+
+Then enable `.github/workflows/process-llm-queue.yml` to trigger processing every 5 minutes.
+
+
+### 3.8 Queue observability endpoint
+
+To inspect queue health (pending/generating/error/retry-ready), call:
+
+```bash
+curl -H "x-internal-token: $INTERNAL_API_TOKEN" \
+  "http://localhost:3000/api/llm?action=queue-stats"
+```
+
 ### 4. Login
 
 Default credentials (from seed data):
-- **Email:** `admin@cardiosense.local`
-- **Password:** `admin123`
+- **Email:** `admin@asculticor.local`
+- **Password:** `asculticor123`
 
 ---
 
 ## 📁 Project Structure
 
 ```
-cardiosense/
+asculticor/
 ├── frontend/                 # Next.js 14 web dashboard
 │   ├── src/app/
 │   │   ├── components/       # Navbar, ThemeProvider, Skeleton
@@ -158,6 +211,25 @@ The UI uses a **medical-grade design system** built with CSS custom properties:
 - **Charts:** Recharts for ECG/PCG waveforms and activity visualizations
 
 ---
+
+
+
+## ✅ Recommended quality checks
+
+See `IMPLEMENTATION_PLAN_NEXT_STEPS.md` for the current phased roadmap.
+
+
+Before merging production changes, run:
+
+```bash
+# Frontend
+cd frontend && npm ci && npm run lint && npm run typecheck && npm run build
+
+# Inference
+cd ../inference && python -m pip install -r requirements.txt && python -m compileall app
+```
+
+A GitHub Actions CI workflow is included to run equivalent checks on pushes and pull requests.
 
 ## 🔧 Development
 

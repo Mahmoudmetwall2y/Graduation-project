@@ -1,16 +1,15 @@
 FROM eclipse-mosquitto:2.0
 
-# Copy configuration
+# Copy configuration and startup entrypoint
 COPY config/mosquitto.conf /mosquitto/config/mosquitto.conf
+COPY scripts/entrypoint.sh /usr/local/bin/entrypoint.sh
 
-# Generate password file with default credentials
-# In production, mount an external password file instead
-RUN mosquitto_passwd -b -c /mosquitto/config/passwd cardiosense cardiosense123 && \
-    chmod 0700 /mosquitto/config/passwd && \
-    chown mosquitto:mosquitto /mosquitto/config/passwd
+# Normalize line endings + ensure executable bit inside image
+RUN sed -i 's/\r$//' /usr/local/bin/entrypoint.sh \
+    && chmod 0755 /usr/local/bin/entrypoint.sh \
+    && test -x /usr/local/bin/entrypoint.sh
 
 # Expose ports
 EXPOSE 1883 9001
 
-# Run mosquitto
-CMD ["/usr/sbin/mosquitto", "-c", "/mosquitto/config/mosquitto.conf"]
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
