@@ -98,11 +98,11 @@ aws iot attach-policy \
   --target arn:aws:iot:region:account:cert/xxxxx
 
 # Create Thing (device representation)
-aws iot create-thing --thing-name cardiosense-device-001
+aws iot create-thing --thing-name asculticor-device-001
 
 # Attach certificate to thing
 aws iot attach-thing-principal \
-  --thing-name cardiosense-device-001 \
+  --thing-name asculticor-device-001 \
   --principal arn:aws:iot:region:account:cert/xxxxx
 ```
 
@@ -123,7 +123,7 @@ class MQTTHandler:
         
         if self.use_aws_iot:
             self.client = mqtt.Client(
-                client_id="cardiosense-inference",
+                client_id="asculticor-inference",
                 protocol=mqtt.MQTTv311
             )
             
@@ -153,7 +153,7 @@ AWS_IOT_PORT=8883
 
 ```bash
 # Create repository
-aws ecr create-repository --repository-name cardiosense/inference
+aws ecr create-repository --repository-name asculticor/inference
 
 # Get login credentials
 aws ecr get-login-password --region us-east-1 | \
@@ -161,24 +161,24 @@ aws ecr get-login-password --region us-east-1 | \
   ACCOUNT.dkr.ecr.us-east-1.amazonaws.com
 
 # Build and push
-docker build -t cardiosense/inference ./inference
-docker tag cardiosense/inference:latest \
-  ACCOUNT.dkr.ecr.us-east-1.amazonaws.com/cardiosense/inference:latest
-docker push ACCOUNT.dkr.ecr.us-east-1.amazonaws.com/cardiosense/inference:latest
+docker build -t asculticor/inference ./inference
+docker tag asculticor/inference:latest \
+  ACCOUNT.dkr.ecr.us-east-1.amazonaws.com/asculticor/inference:latest
+docker push ACCOUNT.dkr.ecr.us-east-1.amazonaws.com/asculticor/inference:latest
 ```
 
 #### 2.2 Create ECS Task Definition
 
 ```json
 {
-  "family": "cardiosense-inference",
+  "family": "asculticor-inference",
   "networkMode": "awsvpc",
   "requiresCompatibilities": ["FARGATE"],
   "cpu": "2048",
   "memory": "4096",
   "containerDefinitions": [{
     "name": "inference",
-    "image": "ACCOUNT.dkr.ecr.us-east-1.amazonaws.com/cardiosense/inference:latest",
+    "image": "ACCOUNT.dkr.ecr.us-east-1.amazonaws.com/asculticor/inference:latest",
     "essential": true,
     "portMappings": [{
       "containerPort": 8000,
@@ -195,7 +195,7 @@ docker push ACCOUNT.dkr.ecr.us-east-1.amazonaws.com/cardiosense/inference:latest
     "logConfiguration": {
       "logDriver": "awslogs",
       "options": {
-        "awslogs-group": "/ecs/cardiosense-inference",
+        "awslogs-group": "/ecs/asculticor-inference",
         "awslogs-region": "us-east-1",
         "awslogs-stream-prefix": "ecs"
       }
@@ -215,13 +215,13 @@ docker push ACCOUNT.dkr.ecr.us-east-1.amazonaws.com/cardiosense/inference:latest
 ```bash
 # Create Application Load Balancer
 aws elbv2 create-load-balancer \
-  --name cardiosense-inference-alb \
+  --name asculticor-inference-alb \
   --subnets subnet-xxx subnet-yyy \
   --security-groups sg-xxx
 
 # Create target group
 aws elbv2 create-target-group \
-  --name cardiosense-inference-tg \
+  --name asculticor-inference-tg \
   --protocol HTTP \
   --port 8000 \
   --vpc-id vpc-xxx \
@@ -239,9 +239,9 @@ aws elbv2 create-listener \
 
 # Create ECS service
 aws ecs create-service \
-  --cluster cardiosense \
+  --cluster asculticor \
   --service-name inference \
-  --task-definition cardiosense-inference \
+  --task-definition asculticor-inference \
   --desired-count 2 \
   --launch-type FARGATE \
   --load-balancers targetGroupArn=arn:aws:elasticloadbalancing:...,containerName=inference,containerPort=8000 \
@@ -254,7 +254,7 @@ aws ecs create-service \
 # Register scalable target
 aws application-autoscaling register-scalable-target \
   --service-namespace ecs \
-  --resource-id service/cardiosense/inference \
+  --resource-id service/asculticor/inference \
   --scalable-dimension ecs:service:DesiredCount \
   --min-capacity 2 \
   --max-capacity 10
@@ -262,7 +262,7 @@ aws application-autoscaling register-scalable-target \
 # Create scaling policy (CPU-based)
 aws application-autoscaling put-scaling-policy \
   --service-namespace ecs \
-  --resource-id service/cardiosense/inference \
+  --resource-id service/asculticor/inference \
   --scalable-dimension ecs:service:DesiredCount \
   --policy-name cpu-scaling \
   --policy-type TargetTrackingScaling \
@@ -285,11 +285,11 @@ cd frontend
 npm run build
 
 # Upload to S3
-aws s3 sync out/ s3://cardiosense-frontend/ --delete
+aws s3 sync out/ s3://asculticor-frontend/ --delete
 
 # Create CloudFront distribution
 aws cloudfront create-distribution \
-  --origin-domain-name cardiosense-frontend.s3.amazonaws.com \
+  --origin-domain-name asculticor-frontend.s3.amazonaws.com \
   --default-root-object index.html
 ```
 
@@ -297,18 +297,18 @@ aws cloudfront create-distribution \
 
 ```json
 {
-  "CallerReference": "cardiosense-frontend",
+  "CallerReference": "asculticor-frontend",
   "Comment": "AscultiCor Frontend Distribution",
   "Enabled": true,
   "Origins": [{
-    "Id": "S3-cardiosense-frontend",
-    "DomainName": "cardiosense-frontend.s3.us-east-1.amazonaws.com",
+    "Id": "S3-asculticor-frontend",
+    "DomainName": "asculticor-frontend.s3.us-east-1.amazonaws.com",
     "S3OriginConfig": {
       "OriginAccessIdentity": ""
     }
   }],
   "DefaultCacheBehavior": {
-    "TargetOriginId": "S3-cardiosense-frontend",
+    "TargetOriginId": "S3-asculticor-frontend",
     "ViewerProtocolPolicy": "redirect-to-https",
     "AllowedMethods": ["GET", "HEAD", "OPTIONS"],
     "CachedMethods": ["GET", "HEAD"],
@@ -341,16 +341,16 @@ aws cloudfront create-distribution \
 ```bash
 # Supabase service role key
 aws secretsmanager create-secret \
-  --name cardiosense/supabase/service-role-key \
+  --name asculticor/supabase/service-role-key \
   --secret-string "your-service-role-key"
 
 # Device certificates
 aws secretsmanager create-secret \
-  --name cardiosense/device/cert \
+  --name asculticor/device/cert \
   --secret-string file://device-cert.pem
 
 aws secretsmanager create-secret \
-  --name cardiosense/device/private-key \
+  --name asculticor/device/private-key \
   --secret-string file://device-private.key
 ```
 
@@ -365,7 +365,7 @@ aws secretsmanager create-secret \
       "secretsmanager:GetSecretValue"
     ],
     "Resource": [
-      "arn:aws:secretsmanager:us-east-1:ACCOUNT:secret:cardiosense/*"
+      "arn:aws:secretsmanager:us-east-1:ACCOUNT:secret:asculticor/*"
     ]
   }, {
     "Effect": "Allow",
@@ -433,7 +433,7 @@ aws cloudwatch put-dashboard \
 ```bash
 # High CPU alarm
 aws cloudwatch put-metric-alarm \
-  --alarm-name cardiosense-high-cpu \
+  --alarm-name asculticor-high-cpu \
   --alarm-description "Inference service high CPU" \
   --metric-name CPUUtilization \
   --namespace AWS/ECS \
@@ -442,11 +442,11 @@ aws cloudwatch put-metric-alarm \
   --threshold 80 \
   --comparison-operator GreaterThanThreshold \
   --evaluation-periods 2 \
-  --alarm-actions arn:aws:sns:us-east-1:ACCOUNT:cardiosense-alerts
+  --alarm-actions arn:aws:sns:us-east-1:ACCOUNT:asculticor-alerts
 
 # Error rate alarm
 aws cloudwatch put-metric-alarm \
-  --alarm-name cardiosense-high-errors \
+  --alarm-name asculticor-high-errors \
   --alarm-description "High error rate" \
   --metric-name 5XXError \
   --namespace AWS/ApplicationELB \
@@ -455,7 +455,7 @@ aws cloudwatch put-metric-alarm \
   --threshold 10 \
   --comparison-operator GreaterThanThreshold \
   --evaluation-periods 2 \
-  --alarm-actions arn:aws:sns:us-east-1:ACCOUNT:cardiosense-alerts
+  --alarm-actions arn:aws:sns:us-east-1:ACCOUNT:asculticor-alerts
 ```
 
 ### Phase 6: Multi-Instance Session Management
@@ -466,7 +466,7 @@ For multiple inference service instances, use Redis for shared session buffers:
 
 ```bash
 aws elasticache create-cache-cluster \
-  --cache-cluster-id cardiosense-sessions \
+  --cache-cluster-id asculticor-sessions \
   --cache-node-type cache.t3.medium \
   --engine redis \
   --num-cache-nodes 1 \

@@ -1,10 +1,24 @@
 import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs'
+import { createClient } from '@supabase/supabase-js'
 import { cookies } from 'next/headers'
 import { NextResponse } from 'next/server'
 import { randomUUID } from 'crypto'
 
-// POST /api/llm/generate-report - Generate LLM report for a session
+// POST /api/llm
+// default action: queue report generation
+// action=process-pending: process pending reports (internal/cron use only)
 export async function POST(request: Request) {
+  const url = new URL(request.url)
+  const action = url.searchParams.get('action')
+
+  if (action === 'process-pending') {
+    return processPendingReports(request)
+  }
+
+  return queueReport(request)
+}
+
+async function queueReport(request: Request) {
   try {
     const supabase = createRouteHandlerClient({ cookies })
     const { session_id, device_id } = await request.json()
@@ -50,22 +64,40 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Session not found' }, { status: 404 })
     }
 
-    // Check if report already exists
-    const { data: existingReport } = await supabase
+    // Return existing completed report if present
+    const { data: existingCompleted } = await supabase
       .from('llm_reports')
       .select('*')
       .eq('session_id', session_id)
       .eq('status', 'completed')
       .single()
 
-    if (existingReport) {
+    if (existingCompleted) {
       return NextResponse.json({
-        report: existingReport,
+        report: existingCompleted,
         message: 'Report already exists'
       })
     }
 
-    // Create pending report entry
+    // Return existing pending/generating report if present
+    const { data: existingQueued } = await supabase
+      .from('llm_reports')
+      .select('*')
+      .eq('session_id', session_id)
+      .in('status', ['pending', 'generating'])
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+
+    if (existingQueued) {
+      return NextResponse.json({
+        report: existingQueued,
+        message: 'Report already queued',
+        queued: true
+      }, { status: 202 })
+    }
+
+    // Create pending report entry (async processing)
     const reportId = randomUUID()
     const { data: report, error: reportError } = await supabase
       .from('llm_reports')
@@ -78,26 +110,127 @@ export async function POST(request: Request) {
         prompt_text: generatePrompt(session),
         report_text: '',
         model_name: 'gpt-4',
-        model_version: '2024-01'
+        model_version: '2024-01',
+        retry_count: 0,
+        max_retries: 3,
+        next_retry_at: null,
+        last_error_at: null
       })
       .select()
       .single()
 
     if (reportError) throw reportError
 
-    // Trigger async report generation
-    // In production, this would be a background job
-    // For now, we'll generate it synchronously
-    const generatedReport = await generateLLMReport(session, reportId, supabase)
+    return NextResponse.json({
+      report,
+      message: 'Report queued successfully. Processing asynchronously.',
+      queued: true
+    }, { status: 202 })
+  } catch (error: any) {
+    console.error('Error queueing LLM report:', error)
+    return NextResponse.json(
+      { error: error.message || 'Failed to queue report' },
+      { status: 500 }
+    )
+  }
+}
+
+async function processPendingReports(request: Request) {
+  try {
+    const internalToken = process.env.INTERNAL_API_TOKEN
+    if (!internalToken) {
+      return NextResponse.json({ error: 'INTERNAL_API_TOKEN is not configured' }, { status: 500 })
+    }
+
+    const authHeader = request.headers.get('x-internal-token')
+    if (authHeader !== internalToken) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+
+    const supabaseUrl = process.env.SUPABASE_URL
+    const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY
+    if (!supabaseUrl || !serviceRoleKey) {
+      return NextResponse.json({ error: 'Supabase service credentials are missing' }, { status: 500 })
+    }
+
+    const serviceClient = createClient(supabaseUrl, serviceRoleKey)
+
+    const { data: pendingReports, error: pendingError } = await serviceClient
+      .from('llm_reports')
+      .select('id, session_id, device_id, retry_count, max_retries, next_retry_at')
+      .eq('status', 'pending')
+      .order('created_at', { ascending: true })
+      .limit(20)
+
+    if (pendingError) throw pendingError
+
+    if (!pendingReports || pendingReports.length === 0) {
+      return NextResponse.json({ processed: 0, message: 'No pending reports found' })
+    }
+
+    const now = Date.now()
+    const readyReports = pendingReports.filter((r: any) => {
+      if (!r.next_retry_at) return true
+      return new Date(r.next_retry_at).getTime() <= now
+    })
+
+    if (readyReports.length === 0) {
+      return NextResponse.json({ processed: 0, message: 'No pending reports are ready for retry yet' })
+    }
+
+    let processed = 0
+    let failed = 0
+
+    for (const pending of readyReports) {
+      try {
+        const { data: session, error: sessionError } = await serviceClient
+          .from('sessions')
+          .select(`
+            *,
+            predictions(*),
+            murmur_severity(*),
+            device:devices(device_name)
+          `)
+          .eq('id', pending.session_id)
+          .single()
+
+        if (sessionError || !session) {
+          throw new Error('Session not found while processing queued report')
+        }
+
+        await generateLLMReport(session, pending.id, serviceClient)
+        processed += 1
+      } catch (err: any) {
+        failed += 1
+        const retryCount = (pending.retry_count || 0) + 1
+        const maxRetries = pending.max_retries ?? 3
+        const shouldRetry = retryCount <= maxRetries
+        const backoffMinutes = Math.min(60, Math.pow(2, Math.max(0, retryCount - 1)))
+        const nextRetryAt = new Date(Date.now() + backoffMinutes * 60 * 1000).toISOString()
+
+        await serviceClient
+          .from('llm_reports')
+          .update({
+            status: shouldRetry ? 'pending' : 'error',
+            retry_count: retryCount,
+            next_retry_at: shouldRetry ? nextRetryAt : null,
+            last_error_at: new Date().toISOString(),
+            error_message: err.message || 'Failed to process report'
+          })
+          .eq('id', pending.id)
+      }
+    }
 
     return NextResponse.json({
-      report: generatedReport,
-      message: 'Report generated successfully'
+      processed,
+      failed,
+      total: readyReports.length,
+      message: 'Queued report processing completed'
     })
   } catch (error: any) {
-    console.error('Error generating LLM report:', error)
+    console.error('Error processing pending reports:', error)
     return NextResponse.json(
-      { error: error.message || 'Failed to generate report' },
+      { error: error.message || 'Failed to process pending reports' },
       { status: 500 }
     )
   }
@@ -239,7 +372,7 @@ async function generateLLMReport(session: any, reportId: string, supabase: any) 
   // Update status to generating
   await supabase
     .from('llm_reports')
-    .update({ status: 'generating' })
+    .update({ status: 'generating', error_message: null })
     .eq('id', reportId)
 
   // Generate template-based report from predictions (no artificial delay)
@@ -321,7 +454,7 @@ The ECG analysis indicates some irregularities that may warrant further investig
 - Analysis Mode: Demo/Template (no LLM)
 
 ---
-*This report was generated by SONOCARDIA AI (demo mode) for educational purposes only.*
+*This report was generated by AscultiCor AI (demo mode) for educational purposes only.*
 `
 
   const structuredData = {
@@ -343,7 +476,7 @@ The ECG analysis indicates some irregularities that may warrant further investig
 
   // Compute actual metrics (not fake)
   const latencyMs = Date.now() - startMs
-  const estimatedTokens = Math.ceil(reportText.length / 4) // Rough chars-to-tokens estimate
+  const estimatedTokens = Math.ceil(reportText.length / 4)
   const avgConfidence = [
     pcgPrediction?.output_json?.probabilities?.[pcgPrediction?.output_json?.label],
     ecgPrediction?.output_json?.confidence
@@ -352,7 +485,6 @@ The ECG analysis indicates some irregularities that may warrant further investig
     ? avgConfidence.reduce((a, b) => a + b, 0) / avgConfidence.length
     : 0
 
-  // Update with completed report
   const { data: updatedReport } = await supabase
     .from('llm_reports')
     .update({
@@ -360,9 +492,13 @@ The ECG analysis indicates some irregularities that may warrant further investig
       report_text: reportText,
       report_json: structuredData,
       completed_at: new Date().toISOString(),
-      tokens_used: estimatedTokens, // Estimated from template length
-      latency_ms: latencyMs,        // Real measured latency
-      confidence_score: confidenceScore // Average of prediction confidences
+      tokens_used: estimatedTokens,
+      latency_ms: latencyMs,
+      confidence_score: confidenceScore,
+      error_message: null,
+      retry_count: 0,
+      next_retry_at: null,
+      last_error_at: null
     })
     .eq('id', reportId)
     .select()
@@ -370,4 +506,3 @@ The ECG analysis indicates some irregularities that may warrant further investig
 
   return updatedReport
 }
-
