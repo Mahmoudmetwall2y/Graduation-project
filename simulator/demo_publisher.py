@@ -16,8 +16,8 @@ import sys
 # Configuration
 DEFAULT_BROKER = "localhost"
 DEFAULT_PORT = 1883
-DEFAULT_USERNAME = "cardiosense"
-DEFAULT_PASSWORD = "cardiosense123"
+DEFAULT_USERNAME = "asculticor"
+DEFAULT_PASSWORD = "asculticor123"
 
 # Device info (from seed data)
 DEFAULT_ORG_ID = "00000000-0000-0000-0000-000000000001"

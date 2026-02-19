@@ -47,7 +47,7 @@
 //    Use serial provisioning (HELP command) or NVS to set secure credentials.
 #define DEFAULT_MQTT_HOST       "192.168.1.100"   // Docker host IP
 #define DEFAULT_MQTT_PORT       1883
-#define DEFAULT_MQTT_USER       "cardiosense"
+#define DEFAULT_MQTT_USER       "asculticor"
 #define DEFAULT_MQTT_PASS       "CHANGE_ME_IN_PRODUCTION"
 
 // Default device identity (overridden after web registration)
@@ -168,7 +168,7 @@ void buildSessionTopic(char *out, size_t len, const char *suffix) {
 // the web UI "provision" flow to set them once.
 
 void loadCredentials() {
-  nvs.begin("cardiosense", true);  // read-only
+  nvs.begin("asculticor", true);  // read-only
 
   strlcpy(wifi_ssid,     nvs.getString("wifi_ssid",     DEFAULT_WIFI_SSID).c_str(),   sizeof(wifi_ssid));
   strlcpy(wifi_pass,     nvs.getString("wifi_pass",     DEFAULT_WIFI_PASS).c_str(),   sizeof(wifi_pass));
@@ -191,7 +191,7 @@ void loadCredentials() {
 }
 
 void saveCredential(const char *key, const char *value) {
-  nvs.begin("cardiosense", false);  // read-write
+  nvs.begin("asculticor", false);  // read-write
   nvs.putString(key, value);
   nvs.end();
   Serial.printf("[NVS] Saved %s = %s\n", key, value);
