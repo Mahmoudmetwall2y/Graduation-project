@@ -22,7 +22,7 @@ Your friends can integrate their hardware and LLM models seamlessly. The project
 - Session management ✅
 
 **What they need to do:**
-1. Flash the firmware from `firmware/cardiosense_esp32/AscultiCor_esp32.ino`
+1. Flash the firmware from `firmware/asculticor_esp32/AscultiCor_esp32.ino`
 2. Configure WiFi credentials via Serial commands
 3. Register device in web dashboard
 4. Power on - **It will auto-connect!**
@@ -229,7 +229,7 @@ llm_reports table:
 docker-compose up --build -d
 
 # 2. Flash ESP32 with firmware
-# Use Arduino IDE to flash: firmware/cardiosense_esp32/AscultiCor_esp32.ino
+# Use Arduino IDE to flash: firmware/asculticor_esp32/AscultiCor_esp32.ino
 
 # 3. Configure device via Serial Monitor
 # Commands: SET wifi_ssid XXX, SET wifi_pass XXX, SET device_id XXX, REBOOT

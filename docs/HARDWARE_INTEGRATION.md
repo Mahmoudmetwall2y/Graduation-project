@@ -67,7 +67,7 @@ Status LED:
    - ArduinoJson
    - WiFiManager
 
-### ESP32 Code (cardiosense_esp32.ino)
+### ESP32 Code (asculticor_esp32.ino)
 
 ```cpp
 #include <WiFi.h>
@@ -83,8 +83,8 @@ const char* password = "YOUR_WIFI_PASSWORD";
 // MQTT Broker (your Docker host IP or cloud)
 const char* mqtt_server = "192.168.1.100";  // Change to your broker IP
 const int mqtt_port = 1883;
-const char* mqtt_user = "cardiosense";
-const char* mqtt_pass = "cardiosense123";
+const char* mqtt_user = "asculticor";
+const char* mqtt_pass = "asculticor123";
 
 // Device & Session Info
 const char* org_id = "00000000-0000-0000-0000-000000000001";
