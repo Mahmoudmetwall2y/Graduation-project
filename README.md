@@ -89,7 +89,7 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
 
 ### 2. Apply Database Migrations
 
-Run the SQL in `supabase/migrations/apply_this_in_supabase.sql` in your Supabase SQL Editor to set up:
+Run the SQL in `supabase/migrations/apply_this_in_supabase.sql` in your Supabase SQL Editor to set up (including queue retry hardening from `005_llm_queue_retries.sql`):
 - Tables (profiles, devices, sessions, predictions, telemetry, alerts, audit logs)
 - Row-Level Security (RLS) policies
 - Helper functions for multi-tenancy
@@ -115,6 +115,8 @@ curl -X POST "http://localhost:3000/api/llm?action=process-pending" \
 ```
 
 Run this periodically (e.g., cron/GitHub Action/worker scheduler) in production.
+
+Queued report failures now retry automatically with exponential backoff (up to `max_retries`).
 
 
 ### 3.6 Access inference internal endpoints

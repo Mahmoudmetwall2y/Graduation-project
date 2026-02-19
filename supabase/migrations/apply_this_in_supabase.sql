@@ -470,3 +470,29 @@ CREATE TRIGGER session_completion_summary
   FOR EACH ROW
   WHEN (NEW.status = 'done' AND OLD.status IS DISTINCT FROM NEW.status)
   EXECUTE FUNCTION update_recording_summary();
+
+-- =============================================================
+-- Step 5: LLM queue retry hardening
+-- =============================================================
+
+ALTER TABLE llm_reports
+  ADD COLUMN IF NOT EXISTS retry_count INTEGER NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS max_retries INTEGER NOT NULL DEFAULT 3,
+  ADD COLUMN IF NOT EXISTS next_retry_at TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS last_error_at TIMESTAMPTZ;
+
+ALTER TABLE llm_reports
+  DROP CONSTRAINT IF EXISTS llm_reports_retry_count_non_negative_check;
+ALTER TABLE llm_reports
+  ADD CONSTRAINT llm_reports_retry_count_non_negative_check
+  CHECK (retry_count >= 0);
+
+ALTER TABLE llm_reports
+  DROP CONSTRAINT IF EXISTS llm_reports_max_retries_non_negative_check;
+ALTER TABLE llm_reports
+  ADD CONSTRAINT llm_reports_max_retries_non_negative_check
+  CHECK (max_retries >= 0);
+
+CREATE INDEX IF NOT EXISTS idx_llm_reports_retry_ready
+  ON llm_reports (status, next_retry_at, created_at)
+  WHERE status = 'pending';

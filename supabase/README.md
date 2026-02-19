@@ -38,6 +38,7 @@ This directory contains all Supabase-related configuration for AscultiCor.
    # 2) migrations/002_device_management_enhancement.sql
    # 3) migrations/003_fix_device_delete_policy.sql
    # 4) migrations/004_professional_hardening.sql
+   # 5) migrations/005_llm_queue_retries.sql
    # (or run migrations/apply_this_in_supabase.sql for one-shot setup)
    ```
 

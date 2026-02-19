@@ -110,7 +110,11 @@ async function queueReport(request: Request) {
         prompt_text: generatePrompt(session),
         report_text: '',
         model_name: 'gpt-4',
-        model_version: '2024-01'
+        model_version: '2024-01',
+        retry_count: 0,
+        max_retries: 3,
+        next_retry_at: null,
+        last_error_at: null
       })
       .select()
       .single()
@@ -153,10 +157,10 @@ async function processPendingReports(request: Request) {
 
     const { data: pendingReports, error: pendingError } = await serviceClient
       .from('llm_reports')
-      .select('id, session_id, device_id')
+      .select('id, session_id, device_id, retry_count, max_retries, next_retry_at')
       .eq('status', 'pending')
       .order('created_at', { ascending: true })
-      .limit(10)
+      .limit(20)
 
     if (pendingError) throw pendingError
 
@@ -164,10 +168,20 @@ async function processPendingReports(request: Request) {
       return NextResponse.json({ processed: 0, message: 'No pending reports found' })
     }
 
+    const now = Date.now()
+    const readyReports = pendingReports.filter((r: any) => {
+      if (!r.next_retry_at) return true
+      return new Date(r.next_retry_at).getTime() <= now
+    })
+
+    if (readyReports.length === 0) {
+      return NextResponse.json({ processed: 0, message: 'No pending reports are ready for retry yet' })
+    }
+
     let processed = 0
     let failed = 0
 
-    for (const pending of pendingReports) {
+    for (const pending of readyReports) {
       try {
         const { data: session, error: sessionError } = await serviceClient
           .from('sessions')
@@ -188,9 +202,21 @@ async function processPendingReports(request: Request) {
         processed += 1
       } catch (err: any) {
         failed += 1
+        const retryCount = (pending.retry_count || 0) + 1
+        const maxRetries = pending.max_retries ?? 3
+        const shouldRetry = retryCount <= maxRetries
+        const backoffMinutes = Math.min(60, Math.pow(2, Math.max(0, retryCount - 1)))
+        const nextRetryAt = new Date(Date.now() + backoffMinutes * 60 * 1000).toISOString()
+
         await serviceClient
           .from('llm_reports')
-          .update({ status: 'error', error_message: err.message || 'Failed to process report' })
+          .update({
+            status: shouldRetry ? 'pending' : 'error',
+            retry_count: retryCount,
+            next_retry_at: shouldRetry ? nextRetryAt : null,
+            last_error_at: new Date().toISOString(),
+            error_message: err.message || 'Failed to process report'
+          })
           .eq('id', pending.id)
       }
     }
@@ -198,7 +224,7 @@ async function processPendingReports(request: Request) {
     return NextResponse.json({
       processed,
       failed,
-      total: pendingReports.length,
+      total: readyReports.length,
       message: 'Queued report processing completed'
     })
   } catch (error: any) {
@@ -469,7 +495,10 @@ The ECG analysis indicates some irregularities that may warrant further investig
       tokens_used: estimatedTokens,
       latency_ms: latencyMs,
       confidence_score: confidenceScore,
-      error_message: null
+      error_message: null,
+      retry_count: 0,
+      next_retry_at: null,
+      last_error_at: null
     })
     .eq('id', reportId)
     .select()
