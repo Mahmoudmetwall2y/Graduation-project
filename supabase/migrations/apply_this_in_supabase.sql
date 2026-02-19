@@ -330,3 +330,128 @@ CREATE TRIGGER session_completion_summary
     EXECUTE FUNCTION update_recording_summary();
 
 -- Done!
+
+-- =============================================================
+-- Step 4: Professional hardening fixes
+-- =============================================================
+
+CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+
+ALTER TABLE sessions
+  DROP CONSTRAINT IF EXISTS sessions_time_order_check;
+ALTER TABLE sessions
+  ADD CONSTRAINT sessions_time_order_check
+  CHECK (ended_at IS NULL OR ended_at >= started_at);
+
+ALTER TABLE recordings
+  DROP CONSTRAINT IF EXISTS recordings_duration_non_negative_check;
+ALTER TABLE recordings
+  ADD CONSTRAINT recordings_duration_non_negative_check
+  CHECK (duration_sec IS NULL OR duration_sec >= 0);
+
+ALTER TABLE predictions
+  DROP CONSTRAINT IF EXISTS predictions_latency_non_negative_check;
+ALTER TABLE predictions
+  ADD CONSTRAINT predictions_latency_non_negative_check
+  CHECK (latency_ms IS NULL OR latency_ms >= 0);
+
+ALTER TABLE llm_reports
+  DROP CONSTRAINT IF EXISTS llm_reports_latency_non_negative_check;
+ALTER TABLE llm_reports
+  ADD CONSTRAINT llm_reports_latency_non_negative_check
+  CHECK (latency_ms IS NULL OR latency_ms >= 0);
+
+ALTER TABLE llm_reports
+  DROP CONSTRAINT IF EXISTS llm_reports_tokens_non_negative_check;
+ALTER TABLE llm_reports
+  ADD CONSTRAINT llm_reports_tokens_non_negative_check
+  CHECK (tokens_used IS NULL OR tokens_used >= 0);
+
+CREATE UNIQUE INDEX IF NOT EXISTS ux_devices_org_device_name
+  ON devices (org_id, device_name);
+
+CREATE UNIQUE INDEX IF NOT EXISTS ux_llm_reports_completed_per_model
+  ON llm_reports (session_id, model_name, model_version)
+  WHERE status = 'completed';
+
+CREATE INDEX IF NOT EXISTS idx_recordings_org_created
+  ON recordings (org_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_predictions_org_created
+  ON predictions (org_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_llm_reports_org_created
+  ON llm_reports (org_id, created_at DESC);
+
+DROP POLICY IF EXISTS "Users can view LLM reports in their org" ON llm_reports;
+DROP POLICY IF EXISTS "Service role can insert LLM reports" ON llm_reports;
+DROP POLICY IF EXISTS "Users can insert LLM reports in their org" ON llm_reports;
+DROP POLICY IF EXISTS "Users can update LLM reports in their org" ON llm_reports;
+DROP POLICY IF EXISTS "Service role can manage LLM reports" ON llm_reports;
+
+CREATE POLICY "Users can view LLM reports in their org"
+  ON llm_reports FOR SELECT
+  TO authenticated
+  USING (org_id = public.user_org_id());
+
+CREATE POLICY "Users can insert LLM reports in their org"
+  ON llm_reports FOR INSERT
+  TO authenticated
+  WITH CHECK (
+    org_id = public.user_org_id()
+    AND EXISTS (
+      SELECT 1
+      FROM sessions s
+      WHERE s.id = session_id
+        AND s.org_id = public.user_org_id()
+        AND s.device_id = llm_reports.device_id
+    )
+  );
+
+CREATE POLICY "Users can update LLM reports in their org"
+  ON llm_reports FOR UPDATE
+  TO authenticated
+  USING (org_id = public.user_org_id())
+  WITH CHECK (org_id = public.user_org_id());
+
+CREATE POLICY "Service role can manage LLM reports"
+  ON llm_reports FOR ALL
+  TO service_role
+  USING (true)
+  WITH CHECK (true);
+
+CREATE OR REPLACE FUNCTION generate_device_api_key(
+  device_uuid UUID,
+  created_by_uuid UUID DEFAULT auth.uid()
+)
+RETURNS TEXT AS $$
+DECLARE
+  new_key TEXT;
+  hashed_key TEXT;
+BEGIN
+  IF created_by_uuid IS NULL THEN
+    RAISE EXCEPTION 'created_by_uuid cannot be null';
+  END IF;
+
+  new_key := 'ac_' || encode(gen_random_bytes(32), 'hex');
+  hashed_key := crypt(new_key, gen_salt('bf'));
+
+  INSERT INTO device_api_keys (device_id, org_id, key_hash, key_prefix, name, created_by)
+  SELECT d.id, d.org_id, hashed_key, left(new_key, 10), 'Auto-generated key', created_by_uuid
+  FROM devices d
+  WHERE d.id = device_uuid;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Device % not found', device_uuid;
+  END IF;
+
+  RETURN new_key;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
+
+DROP TRIGGER IF EXISTS session_completion_summary ON sessions;
+CREATE TRIGGER session_completion_summary
+  AFTER UPDATE OF status ON sessions
+  FOR EACH ROW
+  WHEN (NEW.status = 'done' AND OLD.status IS DISTINCT FROM NEW.status)
+  EXECUTE FUNCTION update_recording_summary();

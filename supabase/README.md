@@ -33,9 +33,12 @@ This directory contains all Supabase-related configuration for AscultiCor.
 
    Or manually via SQL Editor:
    ```bash
-   # Copy content of migrations/001_initial_schema.sql
-   # Paste into Supabase Dashboard > SQL Editor > New Query
-   # Click RUN
+   # Copy/apply migrations in order:
+   # 1) migrations/001_initial_schema.sql
+   # 2) migrations/002_device_management_enhancement.sql
+   # 3) migrations/003_fix_device_delete_policy.sql
+   # 4) migrations/004_professional_hardening.sql
+   # (or run migrations/apply_this_in_supabase.sql for one-shot setup)
    ```
 
 4. **Create users** (via Dashboard):
