@@ -116,6 +116,25 @@ curl -X POST "http://localhost:3000/api/llm?action=process-pending" \
 
 Run this periodically (e.g., cron/GitHub Action/worker scheduler) in production.
 
+
+### 3.6 Access inference internal endpoints
+
+`/config` and `/metrics` on the inference service are protected by `x-internal-token`.
+
+```bash
+curl -H "x-internal-token: $INFERENCE_INTERNAL_TOKEN" http://localhost:8000/config
+curl -H "x-internal-token: $INFERENCE_INTERNAL_TOKEN" http://localhost:8000/metrics
+```
+
+
+### 3.7 Optional: schedule queued report processing in GitHub Actions
+
+Add repository secrets:
+- `ASCULTICOR_APP_URL` (e.g., `https://your-app.example.com`)
+- `ASCULTICOR_INTERNAL_API_TOKEN`
+
+Then enable `.github/workflows/process-llm-queue.yml` to trigger processing every 5 minutes.
+
 ### 4. Login
 
 Default credentials (from seed data):

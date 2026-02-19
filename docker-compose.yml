@@ -62,9 +62,7 @@ services:
       
       # Logging
       - LOG_LEVEL=INFO
-    environment:
-      - MQTT_USERNAME=${MQTT_USERNAME}
-      - MQTT_PASSWORD=${MQTT_PASSWORD}
+      - INFERENCE_INTERNAL_TOKEN=${INFERENCE_INTERNAL_TOKEN}
     volumes:
       - ./inference/models:/app/models:ro
       - inference_cache:/app/cache
