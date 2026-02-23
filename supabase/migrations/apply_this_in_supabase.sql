@@ -496,3 +496,334 @@ ALTER TABLE llm_reports
 CREATE INDEX IF NOT EXISTS idx_llm_reports_retry_ready
   ON llm_reports (status, next_retry_at, created_at)
   WHERE status = 'pending';
+
+-- =============================================================
+-- Step 6: Patient management
+-- =============================================================
+
+CREATE TABLE IF NOT EXISTS patients (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    org_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+    created_by UUID REFERENCES profiles(id) ON DELETE SET NULL,
+    full_name TEXT NOT NULL,
+    dob DATE,
+    sex TEXT CHECK (sex IN ('female', 'male', 'other', 'unknown')) DEFAULT 'unknown',
+    mrn TEXT,
+    notes TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_patients_org_created
+    ON patients (org_id, created_at DESC);
+
+CREATE UNIQUE INDEX IF NOT EXISTS ux_patients_org_mrn
+    ON patients (org_id, mrn)
+    WHERE mrn IS NOT NULL;
+
+ALTER TABLE sessions
+    ADD COLUMN IF NOT EXISTS patient_id UUID REFERENCES patients(id) ON DELETE SET NULL;
+
+CREATE INDEX IF NOT EXISTS idx_sessions_patient
+    ON sessions (patient_id);
+
+ALTER TABLE patients ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Users can view patients in their org" ON patients;
+CREATE POLICY "Users can view patients in their org"
+    ON patients FOR SELECT
+    TO authenticated
+    USING (org_id = public.user_org_id());
+
+DROP POLICY IF EXISTS "Users can insert patients in their org" ON patients;
+CREATE POLICY "Users can insert patients in their org"
+    ON patients FOR INSERT
+    TO authenticated
+    WITH CHECK (org_id = public.user_org_id() AND created_by = auth.uid());
+
+DROP POLICY IF EXISTS "Users can update patients they created" ON patients;
+CREATE POLICY "Users can update patients they created"
+    ON patients FOR UPDATE
+    TO authenticated
+    USING (org_id = public.user_org_id() AND created_by = auth.uid())
+    WITH CHECK (org_id = public.user_org_id());
+
+DROP POLICY IF EXISTS "Admins can update any patient" ON patients;
+CREATE POLICY "Admins can update any patient"
+    ON patients FOR UPDATE
+    TO authenticated
+    USING (org_id = public.user_org_id() AND public.is_admin())
+    WITH CHECK (org_id = public.user_org_id() AND public.is_admin());
+
+DROP POLICY IF EXISTS "Admins can delete patients in their org" ON patients;
+CREATE POLICY "Admins can delete patients in their org"
+    ON patients FOR DELETE
+    TO authenticated
+    USING (org_id = public.user_org_id() AND public.is_admin());
+
+-- =============================================================
+-- Step 7: Session notes
+-- =============================================================
+
+CREATE TABLE IF NOT EXISTS session_notes (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    org_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+    session_id UUID NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    author_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+    note TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_session_notes_session_created
+    ON session_notes (session_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_session_notes_org_created
+    ON session_notes (org_id, created_at DESC);
+
+ALTER TABLE session_notes ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Users can view session notes in their org" ON session_notes;
+CREATE POLICY "Users can view session notes in their org"
+    ON session_notes FOR SELECT
+    TO authenticated
+    USING (org_id = public.user_org_id());
+
+DROP POLICY IF EXISTS "Users can insert session notes in their org" ON session_notes;
+CREATE POLICY "Users can insert session notes in their org"
+    ON session_notes FOR INSERT
+    TO authenticated
+    WITH CHECK (
+        org_id = public.user_org_id()
+        AND author_id = auth.uid()
+        AND EXISTS (
+            SELECT 1
+            FROM sessions s
+            WHERE s.id = session_id
+              AND s.org_id = public.user_org_id()
+        )
+    );
+
+DROP POLICY IF EXISTS "Users can delete their own session notes" ON session_notes;
+CREATE POLICY "Users can delete their own session notes"
+    ON session_notes FOR DELETE
+    TO authenticated
+    USING (org_id = public.user_org_id() AND author_id = auth.uid());
+
+-- =============================================================
+-- Step 8: Saved views (sessions)
+-- =============================================================
+
+CREATE TABLE IF NOT EXISTS saved_views (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    org_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+    view_type TEXT NOT NULL CHECK (view_type IN ('sessions')),
+    name TEXT NOT NULL,
+    filters JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_saved_views_org_user
+    ON saved_views (org_id, user_id, created_at DESC);
+
+CREATE UNIQUE INDEX IF NOT EXISTS ux_saved_views_user_name_type
+    ON saved_views (org_id, user_id, view_type, name);
+
+ALTER TABLE saved_views ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Users can view their saved views" ON saved_views;
+CREATE POLICY "Users can view their saved views"
+    ON saved_views FOR SELECT
+    TO authenticated
+    USING (org_id = public.user_org_id() AND user_id = auth.uid());
+
+DROP POLICY IF EXISTS "Users can insert their saved views" ON saved_views;
+CREATE POLICY "Users can insert their saved views"
+    ON saved_views FOR INSERT
+    TO authenticated
+    WITH CHECK (org_id = public.user_org_id() AND user_id = auth.uid());
+
+DROP POLICY IF EXISTS "Users can delete their saved views" ON saved_views;
+CREATE POLICY "Users can delete their saved views"
+    ON saved_views FOR DELETE
+    TO authenticated
+    USING (org_id = public.user_org_id() AND user_id = auth.uid());
+
+-- =============================================================
+-- Step 12: Audit log insert policy
+-- =============================================================
+
+ALTER TABLE audit_logs ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Users can insert audit logs in their org" ON audit_logs;
+CREATE POLICY "Users can insert audit logs in their org"
+  ON audit_logs FOR INSERT
+  TO authenticated
+  WITH CHECK (org_id = public.user_org_id() AND user_id = auth.uid());
+
+-- =============================================================
+-- Step 13: Roles & permissions
+-- =============================================================
+
+ALTER TABLE profiles DROP CONSTRAINT IF EXISTS profiles_role_check;
+ALTER TABLE profiles ADD CONSTRAINT profiles_role_check
+  CHECK (role IN ('operator', 'admin', 'clinician', 'readonly'));
+
+CREATE OR REPLACE FUNCTION public.user_role()
+RETURNS TEXT AS $$
+  SELECT role FROM public.profiles WHERE id = auth.uid();
+$$ LANGUAGE SQL STABLE;
+
+-- Devices
+DROP POLICY IF EXISTS "Users can insert devices in their org" ON devices;
+CREATE POLICY "Users can insert devices in their org"
+  ON devices FOR INSERT
+  TO authenticated
+  WITH CHECK (
+    org_id = public.user_org_id()
+    AND owner_user_id = auth.uid()
+    AND public.user_role() <> 'readonly'
+  );
+
+DROP POLICY IF EXISTS "Operators can insert their own devices" ON devices;
+CREATE POLICY "Operators can insert their own devices"
+  ON devices FOR INSERT
+  TO authenticated
+  WITH CHECK (
+    org_id = public.user_org_id()
+    AND owner_user_id = auth.uid()
+    AND public.user_role() <> 'readonly'
+  );
+
+DROP POLICY IF EXISTS "Admins can insert any device in their org" ON devices;
+CREATE POLICY "Admins can insert any device in their org"
+  ON devices FOR INSERT
+  TO authenticated
+  WITH CHECK (org_id = public.user_org_id() AND public.is_admin());
+
+DROP POLICY IF EXISTS "Owners can update their devices" ON devices;
+CREATE POLICY "Owners can update their devices"
+  ON devices FOR UPDATE
+  TO authenticated
+  USING (owner_user_id = auth.uid() AND public.user_role() <> 'readonly');
+
+DROP POLICY IF EXISTS "Admins can update any device in their org" ON devices;
+CREATE POLICY "Admins can update any device in their org"
+  ON devices FOR UPDATE
+  TO authenticated
+  USING (org_id = public.user_org_id() AND public.is_admin());
+
+DROP POLICY IF EXISTS "Owners can delete their devices" ON devices;
+CREATE POLICY "Owners can delete their devices"
+  ON devices FOR DELETE
+  TO authenticated
+  USING (
+    owner_user_id = auth.uid()
+    AND org_id = public.user_org_id()
+    AND public.user_role() <> 'readonly'
+  );
+
+DROP POLICY IF EXISTS "Admins can delete any device in their org" ON devices;
+CREATE POLICY "Admins can delete any device in their org"
+  ON devices FOR DELETE
+  TO authenticated
+  USING (org_id = public.user_org_id() AND public.is_admin());
+
+-- Sessions
+DROP POLICY IF EXISTS "Users can insert sessions in their org" ON sessions;
+CREATE POLICY "Users can insert sessions in their org"
+  ON sessions FOR INSERT
+  TO authenticated
+  WITH CHECK (
+    org_id = public.user_org_id()
+    AND created_by = auth.uid()
+    AND public.user_role() <> 'readonly'
+  );
+
+DROP POLICY IF EXISTS "Users can update their own sessions" ON sessions;
+CREATE POLICY "Users can update their own sessions"
+  ON sessions FOR UPDATE
+  TO authenticated
+  USING (
+    created_by = auth.uid()
+    AND public.user_role() <> 'readonly'
+  );
+
+-- Patients
+DROP POLICY IF EXISTS "Users can insert patients in their org" ON patients;
+CREATE POLICY "Users can insert patients in their org"
+  ON patients FOR INSERT
+  TO authenticated
+  WITH CHECK (
+    org_id = public.user_org_id()
+    AND created_by = auth.uid()
+    AND public.user_role() <> 'readonly'
+  );
+
+DROP POLICY IF EXISTS "Users can update patients they created" ON patients;
+CREATE POLICY "Users can update patients they created"
+  ON patients FOR UPDATE
+  TO authenticated
+  USING (org_id = public.user_org_id() AND created_by = auth.uid() AND public.user_role() <> 'readonly')
+  WITH CHECK (org_id = public.user_org_id() AND public.user_role() <> 'readonly');
+
+-- Session notes
+DROP POLICY IF EXISTS "Users can insert session notes in their org" ON session_notes;
+CREATE POLICY "Users can insert session notes in their org"
+  ON session_notes FOR INSERT
+  TO authenticated
+  WITH CHECK (
+    org_id = public.user_org_id()
+    AND author_id = auth.uid()
+    AND public.user_role() <> 'readonly'
+    AND EXISTS (
+      SELECT 1
+      FROM sessions s
+      WHERE s.id = session_id
+        AND s.org_id = public.user_org_id()
+    )
+  );
+
+DROP POLICY IF EXISTS "Users can delete their own session notes" ON session_notes;
+CREATE POLICY "Users can delete their own session notes"
+  ON session_notes FOR DELETE
+  TO authenticated
+  USING (org_id = public.user_org_id() AND author_id = auth.uid() AND public.user_role() <> 'readonly');
+
+-- Saved views
+DROP POLICY IF EXISTS "Users can insert their saved views" ON saved_views;
+CREATE POLICY "Users can insert their saved views"
+  ON saved_views FOR INSERT
+  TO authenticated
+  WITH CHECK (org_id = public.user_org_id() AND user_id = auth.uid() AND public.user_role() <> 'readonly');
+
+DROP POLICY IF EXISTS "Users can delete their saved views" ON saved_views;
+CREATE POLICY "Users can delete their saved views"
+  ON saved_views FOR DELETE
+  TO authenticated
+  USING (org_id = public.user_org_id() AND user_id = auth.uid() AND public.user_role() <> 'readonly');
+
+-- =============================================================
+-- Step 17: Org settings for retention and de-identification
+-- =============================================================
+
+CREATE TABLE IF NOT EXISTS org_settings (
+    org_id UUID PRIMARY KEY REFERENCES organizations(id) ON DELETE CASCADE,
+    retention_days INTEGER NOT NULL DEFAULT 365 CHECK (retention_days >= 0),
+    deidentify_exports BOOLEAN NOT NULL DEFAULT false,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+ALTER TABLE org_settings ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Users can view org settings" ON org_settings;
+CREATE POLICY "Users can view org settings"
+  ON org_settings FOR SELECT
+  TO authenticated
+  USING (org_id = public.user_org_id());
+
+DROP POLICY IF EXISTS "Admins can manage org settings" ON org_settings;
+CREATE POLICY "Admins can manage org settings"
+  ON org_settings FOR ALL
+  TO authenticated
+  USING (org_id = public.user_org_id() AND public.is_admin())
+  WITH CHECK (org_id = public.user_org_id() AND public.is_admin());

@@ -9,12 +9,16 @@ import { Heart, Cpu, FileText, ArrowRight, ChevronLeft, Activity } from 'lucide-
 export default function NewSessionPage() {
   const [deviceId, setDeviceId] = useState('')
   const [devices, setDevices] = useState<any[]>([])
+  const [patientId, setPatientId] = useState('')
+  const [patients, setPatients] = useState<any[]>([])
   const [notes, setNotes] = useState('')
   const [loading, setLoading] = useState(false)
 
   const [error, setError] = useState<string | null>(null)
   const [fetchError, setFetchError] = useState<string | null>(null)
   const [loadingDevices, setLoadingDevices] = useState(true)
+  const [loadingPatients, setLoadingPatients] = useState(true)
+  const [fetchPatientsError, setFetchPatientsError] = useState<string | null>(null)
   const router = useRouter()
   const supabase = createClientComponentClient()
 
@@ -39,9 +43,28 @@ export default function NewSessionPage() {
     }
   }, [supabase])
 
+  const fetchPatients = useCallback(async () => {
+    try {
+      const { data, error } = await supabase
+        .from('patients')
+        .select('*')
+        .order('created_at', { ascending: false })
+
+      if (error) throw error
+      setPatients(data || [])
+      setFetchPatientsError(null)
+    } catch (error) {
+      console.error('Error fetching patients:', error)
+      setFetchPatientsError('Failed to load patients. Please check your connection.')
+    } finally {
+      setLoadingPatients(false)
+    }
+  }, [supabase])
+
   useEffect(() => {
     fetchDevices()
-  }, [fetchDevices])
+    fetchPatients()
+  }, [fetchDevices, fetchPatients])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -69,6 +92,7 @@ export default function NewSessionPage() {
           org_id: profile.org_id,
           created_by: user.id,
           device_id: deviceId,
+          patient_id: patientId || null,
           notes: notes || null,
           status: 'created'
         })
@@ -157,6 +181,52 @@ export default function NewSessionPage() {
                 <p className="mt-2 text-xs text-destructive flex items-center gap-1">
                   <Cpu className="w-3 h-3" />
                   Please <Link href="/devices" className="text-primary underline">register a device</Link> first.
+                </p>
+              ) : null}
+            </div>
+
+            <div>
+              <label htmlFor="patient" className="block text-sm font-medium text-foreground mb-1.5">
+                <span className="flex items-center gap-1.5">
+                  <Heart className="w-3.5 h-3.5 text-muted-foreground" />
+                  Patient <span className="text-muted-foreground font-normal">(Optional)</span>
+                </span>
+              </label>
+              <select
+                id="patient"
+                value={patientId}
+                onChange={(e) => setPatientId(e.target.value)}
+                className="input-field"
+              >
+                <option value="">No patient selected</option>
+                {patients.map((patient) => (
+                  <option key={patient.id} value={patient.id}>
+                    {patient.full_name}{patient.mrn ? ` (MRN ${patient.mrn})` : ''}
+                  </option>
+                ))}
+              </select>
+              {loadingPatients ? (
+                <div className="text-center py-4 text-sm text-muted-foreground">
+                  <Activity className="w-4 h-4 animate-spin inline mr-2" />
+                  Loading patients...
+                </div>
+              ) : fetchPatientsError ? (
+                <div className="text-center py-2">
+                  <p className="text-sm text-destructive mb-2">{fetchPatientsError}</p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setLoadingPatients(true)
+                      fetchPatients()
+                    }}
+                    className="text-xs text-primary hover:underline"
+                  >
+                    Retry loading patients
+                  </button>
+                </div>
+              ) : patients.length === 0 ? (
+                <p className="mt-2 text-xs text-muted-foreground">
+                  No patients yet. <Link href="/patients" className="text-primary underline">Add a patient</Link> to link sessions.
                 </p>
               ) : null}
             </div>

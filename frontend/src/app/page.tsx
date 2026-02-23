@@ -55,6 +55,8 @@ export default function Dashboard() {
   const [weeklyData, setWeeklyData] = useState<DailyActivity[]>([])
   const [predictionCount, setPredictionCount] = useState(0)
   const [todaySessionCount, setTodaySessionCount] = useState(0)
+  const [avgLatencyMs, setAvgLatencyMs] = useState<number | null>(null)
+  const [offlineOverHour, setOfflineOverHour] = useState(0)
 
   const [error, setError] = useState<string | null>(null)
   const router = useRouter()
@@ -87,6 +89,21 @@ export default function Dashboard() {
 
       setPredictionCount(predCount || 0)
 
+      // Avg inference latency (last 24h)
+      const dayAgo = new Date()
+      dayAgo.setDate(dayAgo.getDate() - 1)
+      const { data: latencyRows } = await supabase
+        .from('predictions')
+        .select('latency_ms')
+        .gte('created_at', dayAgo.toISOString())
+
+      if (latencyRows && latencyRows.length > 0) {
+        const sum = latencyRows.reduce((acc: number, row: any) => acc + (row.latency_ms || 0), 0)
+        setAvgLatencyMs(Math.round(sum / latencyRows.length))
+      } else {
+        setAvgLatencyMs(null)
+      }
+
       // Fetch devices
       const response = await fetch('/api/devices')
       if (response.ok) {
@@ -94,6 +111,10 @@ export default function Dashboard() {
         const devices = data.devices || []
         setDeviceCount(devices.length)
         setOnlineDevices(devices.filter((d: any) => d.status === 'online').length)
+        const oneHourAgo = Date.now() - 60 * 60 * 1000
+        setOfflineOverHour(
+          devices.filter((d: any) => d.status === 'offline' && d.last_seen_at && new Date(d.last_seen_at).getTime() < oneHourAgo).length
+        )
       }
 
       // Build real weekly activity from sessions
@@ -155,7 +176,27 @@ export default function Dashboard() {
 
   useEffect(() => {
     fetchDashboardData()
-  }, [fetchDashboardData])
+
+    const channel = supabase
+      .channel('dashboard-realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'sessions' }, () => {
+        fetchDashboardData()
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'predictions' }, () => {
+        fetchDashboardData()
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'devices' }, () => {
+        fetchDashboardData()
+      })
+      .subscribe()
+
+    const interval = setInterval(fetchDashboardData, 30000)
+
+    return () => {
+      clearInterval(interval)
+      supabase.removeChannel(channel)
+    }
+  }, [fetchDashboardData, supabase])
 
   const activeSessions = sessions.filter(s => s.status === 'streaming' || s.status === 'processing').length
   const completedSessions = sessions.filter(s => s.status === 'done').length
@@ -191,16 +232,27 @@ export default function Dashboard() {
           </div>
           <h2 className="text-xl font-bold text-foreground">Something went wrong</h2>
           <p className="text-muted-foreground">{error}</p>
-          <button
-            onClick={() => {
-              setLoading(true)
-              setError(null)
-              fetchDashboardData()
-            }}
-            className="btn-primary"
-          >
-            Try Again
-          </button>
+          <div className="flex flex-wrap gap-3">
+            <button
+              onClick={() => {
+                setLoading(true)
+                setError(null)
+                fetchDashboardData()
+              }}
+              className="btn-primary"
+            >
+              Try Again
+            </button>
+            <Link href="/devices" className="btn-ghost">
+              Check Devices
+            </Link>
+            <Link href="/settings" className="btn-ghost">
+              Open Settings
+            </Link>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Tip: verify your Supabase connection and MQTT broker status.
+          </p>
         </div>
       </div>
     )
@@ -292,7 +344,7 @@ export default function Dashboard() {
         </div>
 
         {/* Stat Cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
           {[
             {
               label: 'Active Sessions',
@@ -326,10 +378,26 @@ export default function Dashboard() {
               textColor: alertCount > 0 ? 'text-amber-700 dark:text-amber-400' : 'text-emerald-700 dark:text-emerald-400',
               change: alertCount > 0 ? 'Needs attention' : 'All clear ✓',
             },
+            {
+              label: 'Avg Latency (24h)',
+              value: avgLatencyMs ? `${avgLatencyMs}ms` : '—',
+              icon: Zap,
+              bgLight: 'bg-sky-50 dark:bg-sky-950/30',
+              textColor: 'text-sky-700 dark:text-sky-400',
+              change: avgLatencyMs ? 'Inference speed' : 'No recent data',
+            },
+            {
+              label: 'Offline > 1h',
+              value: offlineOverHour,
+              icon: WifiOff,
+              bgLight: offlineOverHour > 0 ? 'bg-amber-50 dark:bg-amber-950/30' : 'bg-emerald-50 dark:bg-emerald-950/30',
+              textColor: offlineOverHour > 0 ? 'text-amber-700 dark:text-amber-400' : 'text-emerald-700 dark:text-emerald-400',
+              change: offlineOverHour > 0 ? 'Needs attention' : 'All clear',
+            },
           ].map((stat, i) => (
             <div
               key={stat.label}
-              className={`stat-card bg-card border border-border slide-up stagger-${i + 1}`}
+              className={`stat-card bg-card border border-border slide-up stagger-${(i % 4) + 1}`}
               style={{ animationFillMode: 'backwards' }}
             >
               <div className="flex items-start justify-between">
@@ -349,13 +417,13 @@ export default function Dashboard() {
         {/* Charts Row */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Session Summary */}
-          <div className="bg-card border border-border rounded-xl p-6 slide-up" style={{ animationFillMode: 'backwards', animationDelay: '0.2s' }}>
-            <div className="flex items-center justify-between mb-4">
+          <div className="page-section slide-up" style={{ animationFillMode: 'backwards', animationDelay: '0.2s' }}>
+            <div className="section-header">
               <div className="flex items-center gap-2">
                 <Heart className="w-5 h-5 text-teal-600 dark:text-teal-400" />
-                <h3 className="font-semibold text-foreground">Session Overview</h3>
+                <h3 className="section-title">Session Overview</h3>
               </div>
-              <span className="text-xs text-muted-foreground">{sessions.length} total</span>
+              <span className="section-subtitle">{sessions.length} total</span>
             </div>
             {/* Session status breakdown */}
             <div className="grid grid-cols-2 gap-3 mb-4">
@@ -386,13 +454,13 @@ export default function Dashboard() {
           </div>
 
           {/* Weekly Activity */}
-          <div className="bg-card border border-border rounded-xl p-6 slide-up" style={{ animationFillMode: 'backwards', animationDelay: '0.25s' }}>
-            <div className="flex items-center justify-between mb-4">
+          <div className="page-section slide-up" style={{ animationFillMode: 'backwards', animationDelay: '0.25s' }}>
+            <div className="section-header">
               <div className="flex items-center gap-2">
                 <TrendingUp className="w-5 h-5 text-blue-600 dark:text-blue-400" />
-                <h3 className="font-semibold text-foreground">Weekly Activity</h3>
+                <h3 className="section-title">Weekly Activity</h3>
               </div>
-              <span className="text-xs text-muted-foreground">Last 7 days</span>
+              <span className="section-subtitle">Last 7 days</span>
             </div>
             {weeklyData.every(d => d.sessions === 0 && d.predictions === 0) ? (
               <div className="flex flex-col items-center justify-center h-[200px] text-center">
@@ -434,13 +502,13 @@ export default function Dashboard() {
         </div>
 
         {/* Recent Sessions */}
-        <div className="bg-card border border-border rounded-xl slide-up" style={{ animationFillMode: 'backwards', animationDelay: '0.3s' }}>
-          <div className="flex items-center justify-between p-6 pb-0">
+        <div className="page-section slide-up" style={{ animationFillMode: 'backwards', animationDelay: '0.3s' }}>
+          <div className="section-header">
             <div className="flex items-center gap-2">
               <Clock className="w-5 h-5 text-muted-foreground" />
-              <h3 className="font-semibold text-foreground">Recent Sessions</h3>
+              <h3 className="section-title">Recent Sessions</h3>
             </div>
-            <Link href="/session/new" className="text-sm font-medium text-primary hover:text-primary/80 transition-colors">
+            <Link href="/sessions" className="text-sm font-medium text-primary hover:text-primary/80 transition-colors">
               View all →
             </Link>
           </div>
@@ -458,12 +526,12 @@ export default function Dashboard() {
               </button>
             </div>
           ) : (
-            <div className="divide-y divide-border">
+            <div className="divide-y divide-border mt-4">
               {sessions.slice(0, 8).map((session) => (
                 <Link
                   key={session.id}
                   href={`/session/${session.id}`}
-                  className="flex items-center justify-between px-6 py-4 hover:bg-accent/50 transition-colors group"
+                  className="list-row group"
                 >
                   <div className="flex items-center gap-4">
                     <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">

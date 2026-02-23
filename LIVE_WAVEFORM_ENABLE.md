@@ -29,7 +29,7 @@ docker-compose up -d --build inference frontend
 3) Run the simulator:
 ```bash
 cd simulator
-py -3.11 demo_publisher.py --broker localhost --port 1883 --username asculticor --password asculticor1234 --org-id 00000000-0000-0000-0000-000000000001 --device-id 8f50a7a1-0a89-4603-88a1-0e4d2ff06118 --session-id 4e838255-38de-4a34-a723-c49d4eeb0393
+py -3.11 demo_publisher.py --broker localhost --port 1883 --username asculticor --password asculticor1234 --org-id 00000000-0000-0000-0000-000000000001 --device-id 7d8d7b9e-a9f9-4acf-8497-fcc6f71e81cf --session-id 067d9d07-bd23-4cb4-a3ee-d2abea8a1f11
 ```
 
 ## Expected result

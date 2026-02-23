@@ -15,7 +15,11 @@ import {
     Menu,
     X,
     Heart,
-    Settings
+    Settings,
+    Users,
+    ClipboardList,
+    ShieldAlert,
+    Bell
 } from 'lucide-react'
 import { useState } from 'react'
 
@@ -43,9 +47,13 @@ export default function Navbar({ showBackLink, backHref = '/', backLabel = '← 
 
     const navLinks = [
         { href: '/', label: 'Dashboard', icon: LayoutDashboard },
+        { href: '/patients', label: 'Patients', icon: Users },
         { href: '/devices', label: 'Devices', icon: Cpu },
+        { href: '/sessions', label: 'Sessions', icon: ClipboardList },
+        { href: '/alerts', label: 'Alerts', icon: Bell },
         { href: '/session/new', label: 'New Session', icon: PlusCircle },
         { href: '/admin', label: 'Admin', icon: Shield },
+        { href: '/admin/audit', label: 'Audit Logs', icon: ShieldAlert },
         { href: '/settings', label: 'Settings', icon: Settings },
     ]
 

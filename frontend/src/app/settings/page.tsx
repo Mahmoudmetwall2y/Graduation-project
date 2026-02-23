@@ -22,6 +22,11 @@ interface Organization {
     created_at: string
 }
 
+interface OrgSettings {
+    retention_days: number
+    deidentify_exports: boolean
+}
+
 export default function SettingsPage() {
     const [loading, setLoading] = useState(true)
     const [saving, setSaving] = useState(false)
@@ -30,6 +35,9 @@ export default function SettingsPage() {
     const [org, setOrg] = useState<Organization | null>(null)
     const [email, setEmail] = useState('')
     const [fullName, setFullName] = useState('')
+    const [orgSettings, setOrgSettings] = useState<OrgSettings | null>(null)
+    const [retentionDays, setRetentionDays] = useState(365)
+    const [deidentifyExports, setDeidentifyExports] = useState(false)
     const [newPassword, setNewPassword] = useState('')
     const [confirmPassword, setConfirmPassword] = useState('')
     const [showNewPassword, setShowNewPassword] = useState(false)
@@ -62,6 +70,18 @@ export default function SettingsPage() {
                     .single()
 
                 if (orgData) setOrg(orgData)
+
+                const { data: settingsData } = await supabase
+                    .from('org_settings')
+                    .select('retention_days, deidentify_exports')
+                    .eq('org_id', profileData.org_id)
+                    .single()
+
+                if (settingsData) {
+                    setOrgSettings(settingsData)
+                    setRetentionDays(settingsData.retention_days)
+                    setDeidentifyExports(settingsData.deidentify_exports)
+                }
             }
         } catch (err) {
             console.error('Error fetching settings:', err)
@@ -122,6 +142,50 @@ export default function SettingsPage() {
             setError(err.message)
         } finally {
             setChangingPassword(false)
+        }
+    }
+
+    const handleSaveOrgSettings = async () => {
+        if (!profile || profile.role !== 'admin') {
+            setError('Only admins can update organization settings')
+            return
+        }
+
+        setSaving(true)
+        setError(null)
+        setSuccess(null)
+
+        try {
+            const payload = {
+                org_id: profile.org_id,
+                retention_days: retentionDays,
+                deidentify_exports: deidentifyExports,
+                updated_at: new Date().toISOString(),
+            }
+
+            if (orgSettings) {
+                const { error: updateError } = await supabase
+                    .from('org_settings')
+                    .update(payload)
+                    .eq('org_id', profile.org_id)
+                if (updateError) throw updateError
+            } else {
+                const { error: insertError } = await supabase
+                    .from('org_settings')
+                    .insert(payload)
+                if (insertError) throw insertError
+            }
+
+            setOrgSettings({
+                retention_days: retentionDays,
+                deidentify_exports: deidentifyExports,
+            })
+            setSuccess('Organization settings updated!')
+            setTimeout(() => setSuccess(null), 3000)
+        } catch (err: any) {
+            setError(err.message)
+        } finally {
+            setSaving(false)
         }
     }
 
@@ -245,6 +309,57 @@ export default function SettingsPage() {
                                 {saving ? <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <Save className="w-4 h-4" />}
                                 {saving ? 'Saving...' : 'Save Changes'}
                             </button>
+                        </div>
+
+                        <div className="pt-4 border-t border-border">
+                            <h3 className="text-base font-semibold text-foreground mb-2">Data Retention & Privacy</h3>
+                            <p className="text-sm text-muted-foreground mb-4">
+                                Control how long data is retained and whether exports are de-identified.
+                            </p>
+
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-sm font-medium text-foreground mb-1.5">Retention Days</label>
+                                    <input
+                                        type="number"
+                                        min={0}
+                                        value={retentionDays}
+                                        onChange={(e) => setRetentionDays(Number(e.target.value))}
+                                        className="input-field"
+                                        disabled={profile?.role !== 'admin'}
+                                    />
+                                    <p className="text-xs text-muted-foreground mt-1">
+                                        Set to 0 for immediate deletion policy (requires backend job).
+                                    </p>
+                                </div>
+                                <div className="flex items-center gap-3">
+                                    <input
+                                        id="deidentify"
+                                        type="checkbox"
+                                        checked={deidentifyExports}
+                                        onChange={(e) => setDeidentifyExports(e.target.checked)}
+                                        className="h-4 w-4"
+                                        disabled={profile?.role !== 'admin'}
+                                    />
+                                    <label htmlFor="deidentify" className="text-sm text-foreground">
+                                        De-identify exports by default
+                                    </label>
+                                </div>
+                            </div>
+
+                            <div className="pt-4">
+                                <button
+                                    onClick={handleSaveOrgSettings}
+                                    disabled={saving || profile?.role !== 'admin'}
+                                    className="btn-primary gap-2"
+                                >
+                                    {saving ? <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <Save className="w-4 h-4" />}
+                                    {saving ? 'Saving...' : 'Save Organization Settings'}
+                                </button>
+                                {profile?.role !== 'admin' && (
+                                    <p className="text-xs text-muted-foreground mt-2">Only admins can change these settings.</p>
+                                )}
+                            </div>
                         </div>
                     </div>
                 )}

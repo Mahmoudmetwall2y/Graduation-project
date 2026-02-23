@@ -38,6 +38,10 @@ export default function DevicesPage() {
   const [error, setError] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState<'all' | 'online' | 'offline' | 'error'>('all')
+  const addModalRef = useRef<HTMLDivElement | null>(null)
+  const deleteModalRef = useRef<HTMLDivElement | null>(null)
+  const addFirstFieldRef = useRef<HTMLInputElement | null>(null)
+  const deletePrimaryRef = useRef<HTMLButtonElement | null>(null)
 
   const router = useRouter()
   const supabase = createClientComponentClient()
@@ -65,12 +69,11 @@ export default function DevicesPage() {
     channelRef.current = supabase
       .channel('devices-realtime')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'devices' }, () => {
-        // Re-fetch all devices on any change (insert, update, delete)
         fetchDevices()
       })
       .subscribe()
 
-    // Fallback poll every 30s (in case realtime connection drops)
+    // Poll fallback for environments without Realtime
     const interval = setInterval(fetchDevices, 30000)
 
     return () => {
@@ -80,7 +83,32 @@ export default function DevicesPage() {
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fetchDevices])
+  }, [fetchDevices, supabase])
+
+  useEffect(() => {
+    if (!showAddModal) return
+    const handleKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setShowAddModal(false)
+        setCredentials(null)
+      }
+    }
+    window.addEventListener('keydown', handleKey)
+    setTimeout(() => addFirstFieldRef.current?.focus(), 0)
+    return () => window.removeEventListener('keydown', handleKey)
+  }, [showAddModal])
+
+  useEffect(() => {
+    if (!showDeleteConfirm) return
+    const handleKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setShowDeleteConfirm(null)
+      }
+    }
+    window.addEventListener('keydown', handleKey)
+    setTimeout(() => deletePrimaryRef.current?.focus(), 0)
+    return () => window.removeEventListener('keydown', handleKey)
+  }, [showDeleteConfirm])
 
   const createDevice = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -367,12 +395,18 @@ export default function DevicesPage() {
         {showDeleteConfirm && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
             <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={() => setShowDeleteConfirm(null)} />
-            <div className="relative bg-card border border-border rounded-2xl shadow-2xl max-w-sm w-full p-6 fade-in">
+            <div
+              ref={deleteModalRef}
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="delete-device-title"
+              className="relative bg-card border border-border rounded-2xl shadow-2xl max-w-sm w-full p-6 fade-in"
+            >
               <div className="text-center mb-6">
                 <div className="w-14 h-14 rounded-2xl bg-red-100 dark:bg-red-950/30 flex items-center justify-center mx-auto mb-3">
                   <AlertCircle className="w-7 h-7 text-red-600 dark:text-red-400" />
                 </div>
-                <h2 className="text-xl font-bold text-foreground">Delete Device?</h2>
+                <h2 id="delete-device-title" className="text-xl font-bold text-foreground">Delete Device?</h2>
                 <p className="text-sm text-muted-foreground mt-2">
                   This will permanently delete this device and all its associated sessions, telemetry, and predictions. This action cannot be undone.
                 </p>
@@ -392,6 +426,7 @@ export default function DevicesPage() {
                   Cancel
                 </button>
                 <button
+                  ref={deletePrimaryRef}
                   onClick={() => showDeleteConfirm && deleteDevice(showDeleteConfirm)}
                   disabled={deleting === showDeleteConfirm}
                   className="flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold text-white bg-red-600 hover:bg-red-700 disabled:opacity-50 transition-colors"
@@ -407,11 +442,17 @@ export default function DevicesPage() {
         {showAddModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
             <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={() => { setShowAddModal(false); setCredentials(null) }} />
-            <div className="relative bg-card border border-border rounded-2xl shadow-2xl max-w-lg w-full p-6 fade-in max-h-[90vh] overflow-y-auto">
+            <div
+              ref={addModalRef}
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="add-device-title"
+              className="relative bg-card border border-border rounded-2xl shadow-2xl max-w-lg w-full p-6 fade-in max-h-[90vh] overflow-y-auto"
+            >
               {!credentials ? (
                 <>
                   <div className="flex items-center justify-between mb-6">
-                    <h2 className="text-xl font-bold text-foreground">Add New Device</h2>
+                    <h2 id="add-device-title" className="text-xl font-bold text-foreground">Add New Device</h2>
                     <button onClick={() => setShowAddModal(false)} className="p-1 rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent transition-colors">
                       <X className="w-5 h-5" />
                     </button>
@@ -433,6 +474,7 @@ export default function DevicesPage() {
                         placeholder="e.g., Patient Room 101"
                         required
                         className="input-field"
+                        ref={addFirstFieldRef}
                       />
                     </div>
 
@@ -607,4 +649,3 @@ export default function DevicesPage() {
     </div>
   )
 }
-
