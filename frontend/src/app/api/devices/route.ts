@@ -1,7 +1,8 @@
 import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs'
 import { cookies } from 'next/headers'
 import { NextResponse } from 'next/server'
-import { randomUUID, createHash } from 'crypto'
+import { randomUUID } from 'crypto'
+import bcrypt from 'bcryptjs'
 
 // GET /api/devices - List all devices
 export async function GET(request: Request) {
@@ -83,7 +84,7 @@ export async function POST(request: Request) {
     // Generate device credentials
     const deviceId = randomUUID()
     const deviceSecret = `asc_${randomUUID().replace(/-/g, '')}`
-    const deviceSecretHash = createHash('sha256').update(deviceSecret).digest('hex')
+    const deviceSecretHash = await bcrypt.hash(deviceSecret, 12)
 
     // Create device
     const { data: device, error: deviceError } = await supabase

@@ -22,6 +22,7 @@ async function queueReport(request: Request) {
   try {
     const supabase = createRouteHandlerClient({ cookies })
     const { session_id, device_id } = await request.json()
+    const llmProvider = process.env.LLM_PROVIDER || 'demo'
 
     if (!session_id || !device_id) {
       return NextResponse.json(
@@ -109,8 +110,8 @@ async function queueReport(request: Request) {
         status: 'pending',
         prompt_text: generatePrompt(session),
         report_text: '',
-        model_name: 'gpt-4',
-        model_version: '2024-01',
+        model_name: llmProvider === 'demo' ? 'demo-template' : llmProvider,
+        model_version: llmProvider === 'demo' ? 'v1' : 'unconfigured',
         retry_count: 0,
         max_retries: 3,
         next_retry_at: null,
@@ -374,6 +375,11 @@ Remember to include the medical disclaimer and emphasize this is not a diagnosis
 // In production, replace this function with actual LLM API calls (e.g., OpenAI, Anthropic).
 async function generateLLMReport(session: any, reportId: string, supabase: any) {
   const startMs = Date.now()
+  const llmProvider = process.env.LLM_PROVIDER || 'demo'
+
+  if (llmProvider !== 'demo') {
+    throw new Error(`LLM_PROVIDER=${llmProvider} is not implemented. Switch to demo or add provider integration.`)
+  }
 
   // Update status to generating
   await supabase
@@ -388,9 +394,10 @@ async function generateLLMReport(session: any, reportId: string, supabase: any) 
 
   let reportText = `## Educational Analysis Summary
 
-**⚠️ MEDICAL DISCLAIMER**: This analysis is for educational and research purposes only. It is NOT a medical diagnosis. Always consult qualified healthcare professionals for medical advice.
+**MEDICAL DISCLAIMER**: This analysis is for educational and research purposes only. It is NOT a medical diagnosis. Always consult qualified healthcare professionals for medical advice.
 
 > **Note**: This report was generated using a template engine (demo mode), not a large language model.
+> **Provider**: ${llmProvider}
 
 ### Findings Overview
 `

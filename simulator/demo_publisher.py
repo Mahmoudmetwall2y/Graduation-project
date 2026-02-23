@@ -23,8 +23,8 @@ DEFAULT_PASSWORD = "asculticor123"
 DEFAULT_ORG_ID = "00000000-0000-0000-0000-000000000001"
 DEFAULT_DEVICE_ID = "00000000-0000-0000-0000-000000000004"
 
-# Session ID (generate new for each run)
-SESSION_ID = str(uuid.uuid4())
+# Session ID (generate new for each run if not provided)
+DEFAULT_SESSION_ID = str(uuid.uuid4())
 
 
 def generate_synthetic_pcg(duration_sec=10, sample_rate=22050):
@@ -280,6 +280,7 @@ def main():
     parser.add_argument("--pcg-only", action="store_true", help="Publish only PCG")
     parser.add_argument("--ecg-only", action="store_true", help="Publish only ECG")
     parser.add_argument("--duration", type=int, default=10, help="Duration in seconds")
+    parser.add_argument("--session-id", default=DEFAULT_SESSION_ID, help="Session ID to publish to")
     
     args = parser.parse_args()
     
@@ -289,11 +290,11 @@ def main():
     print(f"Broker: {args.broker}:{args.port}")
     print(f"Org ID: {args.org_id}")
     print(f"Device ID: {args.device_id}")
-    print(f"Session ID: {SESSION_ID}")
+    print(f"Session ID: {args.session_id}")
     print(f"Duration: {args.duration}s")
     
     # Create MQTT client
-    client = mqtt.Client(client_id=f"demo-publisher-{SESSION_ID[:8]}")
+    client = mqtt.Client(client_id=f"demo-publisher-{args.session_id[:8]}")
     client.username_pw_set(args.username, args.password)
     
     # Connect
@@ -310,7 +311,7 @@ def main():
     
     try:
         # Publish heartbeat
-        publish_heartbeat(client, args.org_id, args.device_id, SESSION_ID)
+        publish_heartbeat(client, args.org_id, args.device_id, args.session_id)
         
         # Publish streams
         if not args.ecg_only:
@@ -318,7 +319,7 @@ def main():
                 client, 
                 args.org_id, 
                 args.device_id, 
-                SESSION_ID,
+                args.session_id,
                 duration_sec=args.duration
             )
             time.sleep(2)
@@ -328,13 +329,13 @@ def main():
                 client, 
                 args.org_id, 
                 args.device_id, 
-                SESSION_ID,
+                args.session_id,
                 duration_sec=args.duration
             )
         
         print(f"\n{'='*60}")
         print("Demo completed successfully!")
-        print(f"Session ID: {SESSION_ID}")
+        print(f"Session ID: {args.session_id}")
         print("Check the UI for results!")
         print(f"{'='*60}\n")
         

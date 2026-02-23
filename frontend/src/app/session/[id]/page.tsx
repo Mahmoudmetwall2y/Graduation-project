@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useMemo, useRef } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
@@ -31,6 +31,18 @@ interface Prediction {
   model_version: string
   output_json: any
   latency_ms: number
+  created_at: string
+}
+
+interface LiveMetrics {
+  metrics_json: {
+    waveform?: {
+      modality: 'pcg' | 'ecg'
+      sample_rate: number
+      samples: number[]
+    }
+    timestamp?: string
+  }
   created_at: string
 }
 
@@ -73,6 +85,20 @@ function generatePcgWaveform(count = 120) {
   return data
 }
 
+function buildWaveformSeries(samples: number[], sampleRate: number, maxPoints = 200) {
+  if (!samples || samples.length === 0 || !sampleRate) return []
+  const step = Math.max(1, Math.ceil(samples.length / maxPoints))
+  const data = []
+  for (let i = 0; i < samples.length; i += step) {
+    const t = i / sampleRate
+    data.push({
+      time: t.toFixed(2),
+      amplitude: parseFloat(samples[i].toFixed(3)),
+    })
+  }
+  return data
+}
+
 export default function SessionDetailPage() {
   const params = useParams()
   const router = useRouter()
@@ -83,11 +109,13 @@ export default function SessionDetailPage() {
   const [loading, setLoading] = useState(true)
   const [deleting, setDeleting] = useState(false)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+  const [ecgData, setEcgData] = useState<any[]>([])
+  const [pcgData, setPcgData] = useState<any[]>([])
   const supabase = createClientComponentClient()
   const { showToast } = useToast()
 
-  const ecgData = useMemo(() => generateEcgWaveform(), [])
-  const pcgData = useMemo(() => generatePcgWaveform(), [])
+  const fallbackEcg = useMemo(() => generateEcgWaveform(), [])
+  const fallbackPcg = useMemo(() => generatePcgWaveform(), [])
 
   useEffect(() => {
     if (sessionId) {
@@ -117,6 +145,31 @@ export default function SessionDetailPage() {
 
       if (predError) throw predError
       setPredictions(predictionsData || [])
+
+      const { data: liveData } = await supabase
+        .from('live_metrics')
+        .select('metrics_json, created_at')
+        .eq('session_id', sessionId)
+        .order('created_at', { ascending: false })
+        .limit(10)
+
+      if (liveData && liveData.length > 0) {
+        const byModality: Record<string, LiveMetrics['metrics_json']['waveform']> = {}
+        for (const row of liveData as LiveMetrics[]) {
+          const waveform = row.metrics_json?.waveform
+          if (waveform && !byModality[waveform.modality]) {
+            byModality[waveform.modality] = waveform
+          }
+        }
+
+        if (byModality.ecg) {
+          setEcgData(buildWaveformSeries(byModality.ecg.samples, byModality.ecg.sample_rate))
+        }
+
+        if (byModality.pcg) {
+          setPcgData(buildWaveformSeries(byModality.pcg.samples, byModality.pcg.sample_rate))
+        }
+      }
     } catch (error) {
       console.error('Error fetching session data:', error)
     } finally {
@@ -348,11 +401,11 @@ export default function SessionDetailPage() {
               </div>
               <span className="badge badge-neutral flex items-center gap-1">
                 <Info className="w-3 h-3" />
-                Simulated
+                {session.status === 'streaming' ? 'Live' : 'Simulated'}
               </span>
             </div>
             <ResponsiveContainer width="100%" height={220}>
-              <AreaChart data={ecgData}>
+              <AreaChart data={ecgData.length ? ecgData : fallbackEcg}>
                 <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
                 <XAxis
                   dataKey="time"
@@ -404,11 +457,11 @@ export default function SessionDetailPage() {
               </div>
               <span className="badge badge-neutral flex items-center gap-1">
                 <Info className="w-3 h-3" />
-                Simulated
+                {session.status === 'streaming' ? 'Live' : 'Simulated'}
               </span>
             </div>
             <ResponsiveContainer width="100%" height={220}>
-              <AreaChart data={pcgData}>
+              <AreaChart data={pcgData.length ? pcgData : fallbackPcg}>
                 <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
                 <XAxis
                   dataKey="time"

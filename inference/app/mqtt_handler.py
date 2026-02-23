@@ -112,6 +112,33 @@ class SessionBuffer:
         
         logger.info(f"Reconstructed {self.modality} signal: {len(signal)} samples")
         return signal
+
+    def get_recent_signal(self, max_samples: int) -> np.ndarray:
+        """Get the most recent samples without reconstructing the full signal."""
+        if not self.chunks:
+            return np.array([], dtype=np.float32)
+
+        bytes_per_sample = 2 if 'int16' in self.format or 's16' in self.format else 4
+        target_bytes = max_samples * bytes_per_sample
+        collected = []
+        collected_bytes = 0
+
+        for chunk in reversed(self.chunks):
+            collected.append(chunk)
+            collected_bytes += len(chunk)
+            if collected_bytes >= target_bytes:
+                break
+
+        data = b''.join(reversed(collected))
+        if 'int16' in self.format or 's16' in self.format:
+            signal = np.frombuffer(data, dtype=np.int16).astype(np.float32) / 32768.0
+        else:
+            signal = np.frombuffer(data, dtype=np.float32)
+
+        if signal.size > max_samples:
+            signal = signal[-max_samples:]
+
+        return signal
     
     def get_quality_metrics(self) -> Dict[str, Any]:
         """Compute quality metrics with caching to avoid O(n²) reconstruction."""
@@ -264,14 +291,15 @@ class MQTTHandler:
             topic_parts = msg.topic.split('/')
             
             # Parse topic: org/{orgId}/device/{deviceId}/session/{sessionId}/{type}
-            if len(topic_parts) != 8:
+            # Expected parts: ["org", orgId, "device", deviceId, "session", sessionId, type]
+            if len(topic_parts) != 7:
                 logger.warning(f"Invalid topic format: {msg.topic}")
                 return
             
             org_id = topic_parts[1]
             device_id = topic_parts[3]
             session_id = topic_parts[5]
-            msg_type = topic_parts[7]
+            msg_type = topic_parts[6]
             
             # Route message
             if msg_type == 'meta':
@@ -649,6 +677,16 @@ class MQTTHandler:
                         'quality': buffer.get_quality_metrics(),
                         'timestamp': datetime.now(timezone.utc).isoformat()
                     }
+
+                    # Include a small rolling waveform window for live charts
+                    max_samples = 2000 if buffer.modality == 'pcg' else 800
+                    recent = buffer.get_recent_signal(max_samples)
+                    if recent.size > 0:
+                        metrics['waveform'] = {
+                            'modality': buffer.modality,
+                            'sample_rate': buffer.sample_rate,
+                            'samples': recent.tolist()
+                        }
                     
                     # Publish to DB via thread pool
                     await loop.run_in_executor(_executor,

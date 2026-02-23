@@ -38,6 +38,7 @@ build/
 .next/
 out/
 *.egg-info/
+*.tsbuildinfo
 
 # Models (large files)
 inference/models/*.pkl
@@ -81,4 +82,3 @@ minikube-*
 
 # System files
 nul
-
