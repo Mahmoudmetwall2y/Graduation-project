@@ -66,7 +66,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
                     return (
                         <div
                             key={toast.id}
-                            className={`pointer-events-auto flex items-start gap-3 p-4 rounded-xl border shadow-lg backdrop-blur-sm slide-up ${colorMap[toast.type]}`}
+                            className={`toast-card pointer-events-auto flex items-start gap-3 p-4 rounded-xl border shadow-lg backdrop-blur-sm slide-up ${colorMap[toast.type]}`}
                             role="alert"
                         >
                             <Icon className={`w-5 h-5 shrink-0 mt-0.5 ${iconColorMap[toast.type]}`} />
@@ -77,6 +77,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
                             >
                                 <X className="w-4 h-4" />
                             </button>
+                            <span className={`toast-bar toast-bar-${toast.type}`} />
                         </div>
                     )
                 })}

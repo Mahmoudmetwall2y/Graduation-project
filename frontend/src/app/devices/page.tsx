@@ -7,7 +7,7 @@ import Link from 'next/link'
 import {
   Plus, Activity, Battery, Wifi, AlertCircle, CheckCircle,
   Clock, ChevronRight, Cpu, X, Eye, Trash2, Copy, Check,
-  Terminal, Mic, Heart, Search, Filter
+  Terminal, Mic, Heart, Search, Filter, MoreVertical
 } from 'lucide-react'
 import { PageSkeleton } from '../components/Skeleton'
 import { useToast } from '../components/Toast'
@@ -29,6 +29,7 @@ export default function DevicesPage() {
   const [loading, setLoading] = useState(true)
   const [showAddModal, setShowAddModal] = useState(false)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(null)
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null)
   const [newDeviceName, setNewDeviceName] = useState('')
   const [newDeviceType, setNewDeviceType] = useState('sonocardia-kit')
   const [creating, setCreating] = useState(false)
@@ -189,6 +190,12 @@ export default function DevicesPage() {
     return `${Math.floor(diff / 86400)}d ago`
   }
 
+  const getHealthBadge = (device: Device) => {
+    if (device.status === 'error') return { label: 'Critical', className: 'badge-danger' }
+    if (device.status === 'offline') return { label: 'At Risk', className: 'badge-warning' }
+    return { label: 'Healthy', className: 'badge-success' }
+  }
+
   const getDeviceTypeIcon = (type: string) => {
     switch (type) {
       case 'sonocardia-kit': return <Heart className="w-5 h-5 text-primary" />
@@ -201,7 +208,7 @@ export default function DevicesPage() {
 
   const getDeviceTypeLabel = (type: string) => {
     const labels: Record<string, string> = {
-      'sonocardia-kit': 'SONOCARDIA Kit',
+      'sonocardia-kit': 'AscultiCor Kit',
       'esp32': 'ESP32',
       'esp32-s3': 'ESP32-S3',
       'esp32-c3': 'ESP32-C3',
@@ -274,10 +281,12 @@ export default function DevicesPage() {
 
         {devices.length === 0 ? (
           <div className="bg-card border border-border rounded-xl p-12 text-center fade-in">
-            <Cpu className="w-14 h-14 text-muted-foreground/30 mx-auto mb-4" />
+            <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-teal-500/15 to-blue-500/10 mx-auto mb-4 flex items-center justify-center">
+              <Cpu className="w-7 h-7 text-teal-600" />
+            </div>
             <h3 className="text-lg font-semibold text-foreground mb-2">No devices yet</h3>
             <p className="text-sm text-muted-foreground mb-6 max-w-sm mx-auto">
-              Add your first SONOCARDIA device to start monitoring patients with real-time cardiac analysis
+              Add your first AscultiCor device to capture live signals for clinical review.
             </p>
             <button onClick={() => setShowAddModal(true)} className="btn-primary gap-2">
               <Plus className="w-4 h-4" />
@@ -315,32 +324,64 @@ export default function DevicesPage() {
                   style={{ animationDelay: `${i * 0.05}s`, animationFillMode: 'backwards' }}
                 >
                   <div className="p-5">
-                    <div className="flex items-start justify-between mb-4">
-                      <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
-                          {getDeviceTypeIcon(device.device_type)}
-                        </div>
-                        <div>
-                          <h3 className="font-semibold text-foreground">{device.device_name}</h3>
-                          <p className="text-xs text-muted-foreground">
-                            {getDeviceTypeLabel(device.device_type)} &bull; {device.id.slice(0, 8)}
-                          </p>
-                        </div>
+                  <div className="flex items-start justify-between mb-4">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
+                        {getDeviceTypeIcon(device.device_type)}
                       </div>
-                      <div className="flex items-center gap-2">
-                        <span className={`badge ${device.status === 'online' ? 'badge-success' :
-                          device.status === 'error' ? 'badge-danger' : 'badge-neutral'
-                          }`}>
-                          <span className={`pulse-dot ${device.status}`} style={{ width: '8px', height: '8px' }} />
-                          {device.status}
-                        </span>
+                      <div>
+                        <h3 className="font-semibold text-foreground">{device.device_name}</h3>
+                        <p className="text-xs text-muted-foreground">
+                          {getDeviceTypeLabel(device.device_type)} &bull; {device.id.slice(0, 8)}
+                        </p>
                       </div>
                     </div>
+                    <div className="flex items-center gap-2">
+                      <span className={`badge ${device.status === 'online' ? 'badge-success' :
+                        device.status === 'error' ? 'badge-danger' : 'badge-neutral'
+                        }`}>
+                        <span className={`pulse-dot ${device.status}`} style={{ width: '8px', height: '8px' }} />
+                        {device.status}
+                      </span>
+                      <span className={`badge ${getHealthBadge(device).className}`}>
+                        {getHealthBadge(device).label}
+                      </span>
+                      <div className="relative">
+                        <button
+                          onClick={() => setOpenMenuId(openMenuId === device.id ? null : device.id)}
+                          className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+                          aria-label="Open device menu"
+                        >
+                          <MoreVertical className="w-4 h-4" />
+                        </button>
+                        {openMenuId === device.id && (
+                          <div className="absolute right-0 mt-2 w-36 rounded-lg border border-border bg-card shadow-lg z-10">
+                            <Link
+                              href={`/devices/${device.id}`}
+                              className="block px-3 py-2 text-sm text-foreground hover:bg-accent"
+                              onClick={() => setOpenMenuId(null)}
+                            >
+                              View
+                            </Link>
+                            <button
+                              onClick={() => {
+                                setOpenMenuId(null)
+                                setShowDeleteConfirm(device.id)
+                              }}
+                              className="w-full text-left px-3 py-2 text-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30"
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
 
                     <div className="grid grid-cols-2 gap-3 mb-4">
                       <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                        <Clock className="w-3.5 h-3.5" />
-                        <span>{formatLastSeen(device.last_seen_at)}</span>
+                        <span className={`w-2 h-2 rounded-full ${device.status === 'online' ? 'bg-emerald-500' : device.status === 'error' ? 'bg-red-500' : 'bg-gray-400'}`} />
+                        <span>Last seen {formatLastSeen(device.last_seen_at)}</span>
                       </div>
                       <div className="flex items-center gap-2 text-sm text-muted-foreground">
                         <Activity className="w-3.5 h-3.5" />
@@ -376,14 +417,6 @@ export default function DevicesPage() {
                       View
                       <ChevronRight className="w-4 h-4" />
                     </Link>
-                    <div className="w-px bg-border" />
-                    <button
-                      onClick={() => setShowDeleteConfirm(device.id)}
-                      className="flex items-center justify-center gap-2 px-4 py-3 text-sm font-medium text-red-500 hover:bg-red-50 dark:hover:bg-red-950/20 transition-colors"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                      Delete
-                    </button>
                   </div>
                 </div>
               ))}
@@ -465,7 +498,7 @@ export default function DevicesPage() {
                   )}
 
                   <form onSubmit={createDevice} className="space-y-4">
-                    <div>
+                    <div className="form-group">
                       <label className="block text-sm font-medium text-foreground mb-1.5">Device Name</label>
                       <input
                         type="text"
@@ -476,9 +509,10 @@ export default function DevicesPage() {
                         className="input-field"
                         ref={addFirstFieldRef}
                       />
+                      <p className="form-hint">Use a location or patient-friendly label for quick identification.</p>
                     </div>
 
-                    <div>
+                    <div className="form-group">
                       <label className="block text-sm font-medium text-foreground mb-1.5">Device Type</label>
                       <select
                         value={newDeviceType}
@@ -486,7 +520,7 @@ export default function DevicesPage() {
                         className="input-field"
                       >
                         <optgroup label="Complete Kits">
-                          <option value="sonocardia-kit">SONOCARDIA Kit (ESP32 + AD8232 + MAX9814)</option>
+                          <option value="sonocardia-kit">AscultiCor Kit (ESP32 + AD8232 + MAX9814)</option>
                         </optgroup>
                         <optgroup label="Microcontrollers">
                           <option value="esp32">ESP32-WROOM-32</option>
@@ -497,6 +531,7 @@ export default function DevicesPage() {
                           <option value="custom">Custom Device</option>
                         </optgroup>
                       </select>
+                      <p className="form-hint">Choose the hardware bundle to generate the correct provisioning details.</p>
                     </div>
 
                     {/* Hardware info callout */}

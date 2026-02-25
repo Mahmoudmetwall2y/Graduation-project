@@ -5,7 +5,7 @@ import { ThemeProvider } from './components/ThemeProvider'
 import { ToastProvider } from './components/Toast'
 
 export const metadata: Metadata = {
-  title: 'SONOCARDIA — AI-Powered Heart Disease Detection',
+  title: 'AscultiCor - AI-Powered Cardiac Auscultation',
   description: 'AI-powered cardiac auscultation and monitoring platform for real-time PCG and ECG analysis using heart sounds.',
 }
 
@@ -19,8 +19,12 @@ export default function RootLayout({
       <body>
         <ThemeProvider>
           <ToastProvider>
-            <Navbar />
-            {children}
+            <div className="app-shell">
+              <Navbar />
+              <main className="app-main">
+                {children}
+              </main>
+            </div>
           </ToastProvider>
         </ThemeProvider>
       </body>

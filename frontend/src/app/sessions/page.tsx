@@ -132,6 +132,17 @@ export default function SessionsPage() {
     }
   }, [buildSessionQuery])
 
+  const getStatusBadge = (status: string) => {
+    const map: Record<string, { badge: string; dot: string }> = {
+      created: { badge: 'badge-neutral', dot: 'bg-gray-400' },
+      streaming: { badge: 'badge-info', dot: 'bg-sky-500' },
+      processing: { badge: 'badge-warning', dot: 'bg-amber-500' },
+      done: { badge: 'badge-success', dot: 'bg-emerald-500' },
+      error: { badge: 'badge-danger', dot: 'bg-red-500' },
+    }
+    return map[status] || { badge: 'badge-neutral', dot: 'bg-gray-400' }
+  }
+
   useEffect(() => {
     fetchLookups()
   }, [fetchLookups])
@@ -379,30 +390,42 @@ export default function SessionsPage() {
               No sessions match your filters.
             </div>
           ) : (
-            <div className="divide-y divide-border mt-4">
-              {filteredSessions.map((session) => (
-                <Link key={session.id} href={`/session/${session.id}`} className="list-row group">
-                  <div className="flex items-center gap-4">
-                    <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
-                      <Heart className="w-5 h-5 text-primary" />
-                    </div>
-                    <div>
-                      <p className="text-sm font-medium text-foreground">
-                        Session {session.id.slice(0, 8)}
-                      </p>
-                      <p className="text-xs text-muted-foreground mt-0.5">
-                        {new Date(session.created_at).toLocaleString()}
-                        {session.patient?.full_name ? ` • ${session.patient.full_name}` : ''}
-                        {session.device?.device_name ? ` • ${session.device.device_name}` : ''}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <span className="badge badge-neutral">{session.status}</span>
-                    <ChevronRight className="w-4 h-4 text-muted-foreground group-hover:text-foreground transition-colors" />
-                  </div>
-                </Link>
-              ))}
+            <div className="mt-4">
+              <div className="grid grid-cols-2 gap-3 px-6 table-header">
+                <span>Session</span>
+                <span className="text-right">Status</span>
+              </div>
+              <div className="divide-y divide-border mt-2">
+                {filteredSessions.map((session) => {
+                  const statusMeta = getStatusBadge(session.status)
+                  return (
+                    <Link key={session.id} href={`/session/${session.id}`} className="list-row group">
+                      <div className="flex items-center gap-4">
+                        <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
+                          <Heart className="w-5 h-5 text-primary" />
+                        </div>
+                        <div>
+                          <p className="text-sm font-medium text-foreground">
+                            Session {session.id.slice(0, 8)}
+                          </p>
+                          <p className="text-xs text-muted-foreground mt-0.5">
+                            {new Date(session.created_at).toLocaleString()}
+                            {session.patient?.full_name ? ` - ${session.patient.full_name}` : ''}
+                            {session.device?.device_name ? ` - ${session.device.device_name}` : ''}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <span className={`badge ${statusMeta.badge}`}>
+                          <span className={`w-1.5 h-1.5 rounded-full ${statusMeta.dot}`} />
+                          {session.status}
+                        </span>
+                        <ChevronRight className="w-4 h-4 text-muted-foreground group-hover:text-foreground transition-colors" />
+                      </div>
+                    </Link>
+                  )
+                })}
+              </div>
             </div>
           )}
         </div>

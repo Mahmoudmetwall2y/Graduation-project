@@ -57,6 +57,7 @@ export default function Dashboard() {
   const [todaySessionCount, setTodaySessionCount] = useState(0)
   const [avgLatencyMs, setAvgLatencyMs] = useState<number | null>(null)
   const [offlineOverHour, setOfflineOverHour] = useState(0)
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null)
 
   const [error, setError] = useState<string | null>(null)
   const router = useRouter()
@@ -165,6 +166,7 @@ export default function Dashboard() {
       })
 
       setWeeklyData(weekly)
+      setLastUpdated(new Date())
 
     } catch (error) {
       console.error('Error fetching dashboard data:', error)
@@ -201,6 +203,39 @@ export default function Dashboard() {
   const activeSessions = sessions.filter(s => s.status === 'streaming' || s.status === 'processing').length
   const completedSessions = sessions.filter(s => s.status === 'done').length
   const alertCount = sessions.filter(s => s.status === 'error').length
+  const lastUpdatedLabel = lastUpdated ? `Updated ${lastUpdated.toLocaleTimeString()}` : 'Updating...'
+
+  const sparklineData = {
+    sessions: [2, 4, 3, 6, 4, 7, 5],
+    devices: [1, 2, 2, 3, 2, 3, 3],
+    predictions: [1, 3, 2, 5, 4, 6, 7],
+    alerts: [0, 1, 0, 2, 1, 0, 1],
+    latency: [120, 110, 130, 100, 95, 105, 98],
+    offline: [3, 2, 3, 2, 1, 2, 1],
+  }
+
+  const Sparkline = ({ values, color }: { values: number[]; color: string }) => {
+    const max = Math.max(...values)
+    const min = Math.min(...values)
+    const range = max - min || 1
+    const points = values.map((v, i) => {
+      const x = (i / (values.length - 1)) * 60
+      const y = 20 - ((v - min) / range) * 18
+      return `${x},${y}`
+    }).join(' ')
+    return (
+      <svg viewBox="0 0 60 22" className="w-16 h-6">
+        <polyline
+          fill="none"
+          stroke={color}
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          points={points}
+        />
+      </svg>
+    )
+  }
 
   const getStatusBadge = (status: string) => {
     const map: Record<string, string> = {
@@ -268,13 +303,15 @@ export default function Dashboard() {
         <div className="page-content">
           <div className="max-w-2xl mx-auto text-center py-16 fade-in">
             <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-teal-500 to-teal-700 flex items-center justify-center mx-auto mb-6 shadow-xl">
-              <Stethoscope className="w-10 h-10 text-white" />
+              <svg viewBox="0 0 32 32" className="logo-mark" aria-hidden="true">
+                <path d="M3 16h6l2.2-6.2 3.6 12.4 2.8-7.2 1.8 1.8H29" fill="none" stroke="white" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
             </div>
             <h1 className="text-3xl font-bold text-foreground tracking-tight mb-3">
-              Welcome to SONOCARDIA
+              Welcome to <span className="gradient-text">AscultiCor</span>
             </h1>
             <p className="text-lg text-muted-foreground mb-10 leading-relaxed">
-              AI-Powered Heart Disease Detection & Prediction using heart sounds.
+              AI-Powered Cardiac Auscultation and Prediction using heart sounds.
               <br />Get started by following the steps below.
             </p>
 
@@ -286,7 +323,7 @@ export default function Dashboard() {
                   <Cpu className="w-5 h-5 text-teal-600 dark:text-teal-400" />
                 </div>
                 <h3 className="font-semibold text-foreground mb-1">Register Device</h3>
-                <p className="text-sm text-muted-foreground mb-4">Add your ESP32 + SONOCARDIA Kit and get credentials</p>
+                <p className="text-sm text-muted-foreground mb-4">Add your ESP32 + AscultiCor Kit and get credentials</p>
                 <Link href="/devices" className="btn-primary text-sm gap-1 w-full justify-center">
                   Add Device <ArrowUpRight className="w-3.5 h-3.5" />
                 </Link>
@@ -333,6 +370,7 @@ export default function Dashboard() {
           <div>
             <h1 className="text-2xl font-bold text-foreground tracking-tight">Dashboard</h1>
             <p className="text-sm text-muted-foreground mt-1">Monitor your cardiac analysis sessions in real-time</p>
+            <p className="text-xs text-muted-foreground mt-1">{lastUpdatedLabel}</p>
           </div>
           <button
             onClick={() => router.push('/session/new')}
@@ -353,6 +391,8 @@ export default function Dashboard() {
               bgLight: 'bg-teal-50 dark:bg-teal-950/30',
               textColor: 'text-teal-700 dark:text-teal-400',
               change: todaySessionCount > 0 ? `+${todaySessionCount} today` : 'No sessions today',
+              spark: sparklineData.sessions,
+              sparkColor: 'hsl(172, 66%, 35%)',
             },
             {
               label: 'Devices',
@@ -361,6 +401,8 @@ export default function Dashboard() {
               bgLight: 'bg-blue-50 dark:bg-blue-950/30',
               textColor: 'text-blue-700 dark:text-blue-400',
               change: onlineDevices > 0 ? `${onlineDevices} online` : 'All offline',
+              spark: sparklineData.devices,
+              sparkColor: 'hsl(213, 94%, 48%)',
             },
             {
               label: 'Predictions',
@@ -369,6 +411,8 @@ export default function Dashboard() {
               bgLight: 'bg-purple-50 dark:bg-purple-950/30',
               textColor: 'text-purple-700 dark:text-purple-400',
               change: `${completedSessions} sessions completed`,
+              spark: sparklineData.predictions,
+              sparkColor: 'hsl(262, 83%, 58%)',
             },
             {
               label: 'Alerts',
@@ -376,15 +420,19 @@ export default function Dashboard() {
               icon: AlertTriangle,
               bgLight: alertCount > 0 ? 'bg-amber-50 dark:bg-amber-950/30' : 'bg-emerald-50 dark:bg-emerald-950/30',
               textColor: alertCount > 0 ? 'text-amber-700 dark:text-amber-400' : 'text-emerald-700 dark:text-emerald-400',
-              change: alertCount > 0 ? 'Needs attention' : 'All clear ✓',
+              change: alertCount > 0 ? 'Needs attention' : 'All clear OK',
+              spark: sparklineData.alerts,
+              sparkColor: alertCount > 0 ? 'hsl(38, 92%, 50%)' : 'hsl(142, 71%, 35%)',
             },
             {
               label: 'Avg Latency (24h)',
-              value: avgLatencyMs ? `${avgLatencyMs}ms` : '—',
+              value: avgLatencyMs ? `${avgLatencyMs}ms` : '-',
               icon: Zap,
               bgLight: 'bg-sky-50 dark:bg-sky-950/30',
               textColor: 'text-sky-700 dark:text-sky-400',
               change: avgLatencyMs ? 'Inference speed' : 'No recent data',
+              spark: sparklineData.latency,
+              sparkColor: 'hsl(199, 89%, 48%)',
             },
             {
               label: 'Offline > 1h',
@@ -393,6 +441,8 @@ export default function Dashboard() {
               bgLight: offlineOverHour > 0 ? 'bg-amber-50 dark:bg-amber-950/30' : 'bg-emerald-50 dark:bg-emerald-950/30',
               textColor: offlineOverHour > 0 ? 'text-amber-700 dark:text-amber-400' : 'text-emerald-700 dark:text-emerald-400',
               change: offlineOverHour > 0 ? 'Needs attention' : 'All clear',
+              spark: sparklineData.offline,
+              sparkColor: offlineOverHour > 0 ? 'hsl(38, 92%, 50%)' : 'hsl(142, 71%, 35%)',
             },
           ].map((stat, i) => (
             <div
@@ -405,6 +455,9 @@ export default function Dashboard() {
                   <p className="text-sm font-medium text-muted-foreground">{stat.label}</p>
                   <p className="text-3xl font-bold text-foreground mt-1">{stat.value}</p>
                   <p className={`text-xs font-medium mt-2 ${stat.textColor}`}>{stat.change}</p>
+                  <div className="mt-3">
+                    <Sparkline values={stat.spark} color={stat.sparkColor} />
+                  </div>
                 </div>
                 <div className={`p-2.5 rounded-xl ${stat.bgLight}`}>
                   <stat.icon className={`w-5 h-5 ${stat.textColor}`} />
@@ -502,23 +555,27 @@ export default function Dashboard() {
         </div>
 
         {/* Recent Sessions */}
-        <div className="page-section slide-up" style={{ animationFillMode: 'backwards', animationDelay: '0.3s' }}>
-          <div className="section-header">
-            <div className="flex items-center gap-2">
-              <Clock className="w-5 h-5 text-muted-foreground" />
-              <h3 className="section-title">Recent Sessions</h3>
-            </div>
+          <div className="page-section slide-up" style={{ animationFillMode: 'backwards', animationDelay: '0.3s' }}>
+            <div className="section-header">
+              <div className="flex items-center gap-2">
+                <Clock className="w-5 h-5 text-muted-foreground" />
+                <h3 className="section-title">Recent Sessions</h3>
+              </div>
             <Link href="/sessions" className="text-sm font-medium text-primary hover:text-primary/80 transition-colors">
-              View all →
+              <span className="inline-flex items-center gap-1">
+                View all <ChevronRight className="w-3.5 h-3.5" />
+              </span>
             </Link>
           </div>
 
           {sessions.length === 0 ? (
             <div className="p-12 text-center">
-              <Activity className="w-12 h-12 text-muted-foreground/30 mx-auto mb-4" />
-              <h3 className="text-lg font-medium text-foreground mb-1">No sessions yet</h3>
+              <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-teal-500/15 to-blue-500/10 mx-auto mb-4 flex items-center justify-center">
+                <Heart className="w-7 h-7 text-teal-600" />
+              </div>
+              <h3 className="text-lg font-semibold text-foreground mb-1">No sessions yet</h3>
               <p className="text-sm text-muted-foreground mb-4">
-                Create your first session to start monitoring
+                Start a session to capture heart sounds and build your patient baseline.
               </p>
               <button onClick={() => router.push('/session/new')} className="btn-primary gap-2">
                 <Plus className="w-4 h-4" />
@@ -526,7 +583,12 @@ export default function Dashboard() {
               </button>
             </div>
           ) : (
-            <div className="divide-y divide-border mt-4">
+            <div className="mt-4">
+              <div className="grid grid-cols-2 gap-3 px-6 table-header">
+                <span>Session</span>
+                <span className="text-right">Status</span>
+              </div>
+              <div className="divide-y divide-border mt-2">
               {sessions.slice(0, 8).map((session) => (
                 <Link
                   key={session.id}
@@ -543,7 +605,7 @@ export default function Dashboard() {
                       </p>
                       <p className="text-xs text-muted-foreground mt-0.5">
                         {new Date(session.created_at).toLocaleString()}
-                        {session.ended_at && ` • Duration: ${Math.round((new Date(session.ended_at).getTime() - new Date(session.created_at).getTime()) / 1000)}s`}
+                        {session.ended_at && `  -  Duration: ${Math.round((new Date(session.ended_at).getTime() - new Date(session.created_at).getTime()) / 1000)}s`}
                       </p>
                     </div>
                   </div>
@@ -555,6 +617,7 @@ export default function Dashboard() {
                   </div>
                 </Link>
               ))}
+            </div>
             </div>
           )}
         </div>

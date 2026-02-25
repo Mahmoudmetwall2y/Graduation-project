@@ -104,16 +104,18 @@ export default function LoginPage() {
 
         <div className="relative z-10 text-center px-12 max-w-lg">
           <div className="flex items-center justify-center mb-8">
-            <div className="relative flex items-center justify-center w-20 h-20 rounded-2xl bg-gradient-to-br from-teal-400 to-teal-600 shadow-2xl">
-              <Heart className="w-10 h-10 text-white" strokeWidth={2} />
+              <div className="relative flex items-center justify-center w-20 h-20 rounded-2xl bg-gradient-to-br from-teal-400 to-teal-600 shadow-2xl">
+              <svg viewBox="0 0 32 32" className="logo-mark" aria-hidden="true">
+                <path d="M3 16h6l2.2-6.2 3.6 12.4 2.8-7.2 1.8 1.8H29" fill="none" stroke="white" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
               <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 rounded-full border-2 border-white/20 animate-pulse" />
             </div>
           </div>
           <h1 className="text-4xl font-bold text-white mb-4 tracking-tight">
-            SONOCARDIA
+            Asculti<span className="text-teal-300">Cor</span>
           </h1>
           <p className="text-lg text-teal-200/80 leading-relaxed">
-            AI-Powered Heart Disease Detection & Prediction
+            AI-Powered Cardiac Auscultation and Prediction
           </p>
           <p className="text-sm text-teal-300/50 mt-4">
             Real-time PCG & ECG analysis using heart sounds and machine learning
@@ -132,16 +134,18 @@ export default function LoginPage() {
 
       {/* Right side — Form */}
       <div className="flex-1 flex items-center justify-center bg-background px-4 sm:px-6 lg:px-8">
-        <div className="max-w-sm w-full space-y-8">
+        <div className="max-w-sm w-full space-y-8 surface-card bg-card/85 p-8 backdrop-blur">
           {/* Mobile logo */}
           <div className="text-center lg:hidden">
             <div className="flex items-center justify-center gap-2.5 mb-2">
               <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-gradient-to-br from-teal-500 to-teal-700 shadow-lg">
-                <Heart className="w-5 h-5 text-white" strokeWidth={2.5} />
+                <svg viewBox="0 0 32 32" className="logo-mark" aria-hidden="true">
+                  <path d="M3 16h6l2.2-6.2 3.6 12.4 2.8-7.2 1.8 1.8H29" fill="none" stroke="white" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
               </div>
-              <span className="text-2xl font-bold text-foreground tracking-tight">SONOCARDIA</span>
+              <span className="text-2xl font-bold text-foreground tracking-tight">AscultiCor</span>
             </div>
-            <p className="text-sm text-muted-foreground">AI-Powered Heart Disease Detection</p>
+            <p className="text-sm text-muted-foreground">AI-Powered Cardiac Auscultation</p>
           </div>
 
           <div>
