@@ -4,6 +4,82 @@ import { cookies } from 'next/headers'
 import { NextResponse } from 'next/server'
 import { randomUUID } from 'crypto'
 
+// Type definitions for better type safety
+interface SessionData {
+  id: string;
+  org_id: string;
+  created_at: string;
+  status: string;
+  device_id: string;
+  predictions?: PredictionData[];
+  murmur_severity?: MurmurSeverityData[];
+  device?: {
+    device_name: string;
+  };
+}
+
+interface PredictionData {
+  id: string;
+  modality: string;
+  output_json: {
+    label?: string;
+    prediction?: string;
+    probabilities?: Record<string, number>;
+    confidence?: number;
+  };
+  created_at: string;
+}
+
+interface MurmurSeverityData {
+  id: string;
+  location_json?: { predicted?: string };
+  timing_json?: { predicted?: string };
+  shape_json?: { predicted?: string };
+  grading_json?: { predicted?: string };
+  pitch_json?: { predicted?: string };
+  quality_json?: { predicted?: string };
+}
+
+interface LLMReportData {
+  id: string;
+  session_id: string;
+  org_id: string;
+  device_id: string;
+  status: 'pending' | 'generating' | 'completed' | 'error';
+  prompt_text: string;
+  report_text: string;
+  model_name: string;
+  model_version: string;
+  retry_count: number;
+  max_retries: number;
+  next_retry_at: string | null;
+  last_error_at: string | null;
+  error_message: string | null;
+  created_at: string;
+}
+
+// Simple in-memory rate limiter for report generation
+const reportQueue = new Map<string, { count: number; resetTime: number }>();
+const RATE_LIMIT_MAX = 10; // Max 10 pending reports per user
+const RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000; // 1 hour
+
+function checkRateLimit(userId: string): boolean {
+  const now = Date.now();
+  const userLimit = reportQueue.get(userId);
+  
+  if (!userLimit || now > userLimit.resetTime) {
+    reportQueue.set(userId, { count: 1, resetTime: now + RATE_LIMIT_WINDOW_MS });
+    return true;
+  }
+  
+  if (userLimit.count >= RATE_LIMIT_MAX) {
+    return false;
+  }
+  
+  userLimit.count++;
+  return true;
+}
+
 // POST /api/llm
 // default action: queue report generation
 // action=process-pending: process pending reports (internal/cron use only)
@@ -35,6 +111,14 @@ async function queueReport(request: Request) {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+
+    // Check rate limit
+    if (!checkRateLimit(user.id)) {
+      return NextResponse.json(
+        { error: 'Rate limit exceeded. Maximum 10 pending reports per hour.' },
+        { status: 429 }
+      )
     }
 
     // Get user's org_id

@@ -3,6 +3,7 @@ import type { Metadata } from 'next'
 import Navbar from './components/Navbar'
 import { ThemeProvider } from './components/ThemeProvider'
 import { ToastProvider } from './components/Toast'
+import { ErrorBoundary } from './components/error-boundary'
 
 export const metadata: Metadata = {
   title: 'AscultiCor - AI-Powered Cardiac Auscultation',
@@ -17,16 +18,18 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body>
-        <ThemeProvider>
-          <ToastProvider>
-            <div className="app-shell">
-              <Navbar />
-              <main className="app-main">
-                {children}
-              </main>
-            </div>
-          </ToastProvider>
-        </ThemeProvider>
+        <ErrorBoundary>
+          <ThemeProvider>
+            <ToastProvider>
+              <div className="app-shell">
+                <Navbar />
+                <main className="app-main">
+                  {children}
+                </main>
+              </div>
+            </ToastProvider>
+          </ThemeProvider>
+        </ErrorBoundary>
       </body>
     </html>
   )

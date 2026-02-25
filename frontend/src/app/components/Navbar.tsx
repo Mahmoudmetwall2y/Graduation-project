@@ -152,6 +152,7 @@ export default function Navbar({ showBackLink, backHref = '/', backLabel = '<- B
             items: [
                 { href: '/admin', label: 'Admin', icon: Shield },
                 { href: '/admin/audit', label: 'Audit Logs', icon: ShieldAlert },
+                { href: '/debug', label: 'Debug', icon: Activity },
                 { href: '/settings', label: 'Settings', icon: Settings },
             ],
         },
@@ -175,6 +176,12 @@ export default function Navbar({ showBackLink, backHref = '/', backLabel = '<- B
                             </span>
                         )}
                     </Link>
+                    {/* Demo Mode Indicator */}
+                    <div className={`mt-2 px-2 py-1 rounded-md bg-amber-100 dark:bg-amber-900/30 ${isCollapsed ? 'mx-auto w-fit' : ''}`} title="Demo Mode - Using simulated ML predictions">
+                        <span className="text-[10px] font-semibold text-amber-700 dark:text-amber-400 uppercase tracking-wide">
+                            {isCollapsed ? 'DEMO' : 'Demo Mode'}
+                        </span>
+                    </div>
                 </div>
 
                 <nav className="px-3 space-y-4">

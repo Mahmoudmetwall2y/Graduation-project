@@ -299,13 +299,32 @@ class InferenceEngine:
     
     # ========== DEMO MODE PREDICTIONS ==========
     
-    def _demo_pcg_prediction(self, audio: np.ndarray) -> Dict[str, Any]:
-        """Deterministic demo PCG prediction based on audio characteristics."""
-        # Simple heuristic: use audio energy
-        energy = np.mean(np.abs(audio))
+    def _demo_pcg_prediction(self, audio: np.ndarray, scenario: str = 'normal') -> Dict[str, Any]:
+        """Deterministic demo PCG prediction based on scenario and audio characteristics."""
+        # Map scenarios to expected labels
+        scenario_labels = {
+            'normal': 'Normal',
+            'tachycardia': 'Normal',
+            'bradycardia': 'Normal',
+            'systolic_murmur': 'Murmur',
+            'diastolic_murmur': 'Murmur',
+            'combined_murmur': 'Murmur',
+            'abnormal_ecg': 'Normal',  # PCG may still be normal
+            'afib': 'Normal',  # PCG may still be normal
+        }
         
-        if energy < 0.05:
-            # Low energy -> Artifact
+        expected_label = scenario_labels.get(scenario, 'Normal')
+        
+        if expected_label == 'Murmur':
+            return {
+                'label': 'Murmur',
+                'probabilities': {
+                    'Normal': 0.20,
+                    'Murmur': 0.70,
+                    'Artifact': 0.10
+                }
+            }
+        elif expected_label == 'Artifact':
             return {
                 'label': 'Artifact',
                 'probabilities': {
@@ -314,23 +333,13 @@ class InferenceEngine:
                     'Artifact': 0.65
                 }
             }
-        elif energy > 0.15:
-            # High energy -> Murmur
-            return {
-                'label': 'Murmur',
-                'probabilities': {
-                    'Normal': 0.25,
-                    'Murmur': 0.60,
-                    'Artifact': 0.15
-                }
-            }
         else:
-            # Medium energy -> Normal
+            # Normal
             return {
                 'label': 'Normal',
                 'probabilities': {
-                    'Normal': 0.70,
-                    'Murmur': 0.20,
+                    'Normal': 0.75,
+                    'Murmur': 0.15,
                     'Artifact': 0.10
                 }
             }

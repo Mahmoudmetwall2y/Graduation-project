@@ -58,6 +58,21 @@ class SupabaseClient:
             logger.error(f"Error updating session status: {e}")
             return False
     
+    def get_stale_sessions(self, max_duration_minutes: int) -> List[Dict[str, Any]]:
+        """Get sessions that have been in streaming/processing state for too long."""
+        try:
+            from datetime import timedelta
+            cutoff_time = datetime.now(timezone.utc) - timedelta(minutes=max_duration_minutes)
+            
+            response = self.client.table("sessions").select("id, org_id, status, created_at").in_(
+                "status", ["streaming", "processing"]
+            ).lt("created_at", cutoff_time.isoformat()).execute()
+            
+            return response.data or []
+        except Exception as e:
+            logger.error(f"Error getting stale sessions: {e}")
+            return []
+    
     # ========== DEVICE OPERATIONS ==========
     
     def update_device_last_seen(self, device_id: str) -> bool:

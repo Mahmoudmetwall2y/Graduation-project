@@ -202,6 +202,10 @@ class MQTTHandler:
         self.timeout_sec = int(os.getenv("STREAM_TIMEOUT_SEC", 10))
         self.metrics_update_hz = float(os.getenv("METRICS_UPDATE_HZ", 2))
         
+        # Session timeout configuration
+        self.max_session_duration_minutes = int(os.getenv("MAX_SESSION_DURATION_MINUTES", 30))
+        self.session_timeout_check_interval = int(os.getenv("SESSION_TIMEOUT_CHECK_INTERVAL", 60))
+        
         # State
         self.buffers: Dict[str, SessionBuffer] = {}
         self.running = False
@@ -252,6 +256,7 @@ class MQTTHandler:
             # Start background monitoring tasks on the event loop
             asyncio.ensure_future(self._monitor_timeouts())
             asyncio.ensure_future(self._publish_live_metrics())
+            asyncio.ensure_future(self._monitor_db_session_timeouts())
             
         except Exception as e:
             logger.error(f"Failed to start MQTT handler: {e}")
@@ -654,6 +659,53 @@ class MQTTHandler:
                         
             except Exception as e:
                 logger.error(f"Error in timeout monitor: {e}")
+    
+    async def _monitor_db_session_timeouts(self):
+        """Monitor database for orphaned sessions that are stuck in streaming/processing state."""
+        while self.running:
+            try:
+                # Check every minute (configurable)
+                await asyncio.sleep(self.session_timeout_check_interval)
+                
+                loop = asyncio.get_running_loop()
+                
+                # Get sessions that have been in streaming/processing for too long
+                stale_sessions = await loop.run_in_executor(
+                    _executor,
+                    self.supabase.get_stale_sessions,
+                    self.max_session_duration_minutes
+                )
+                
+                if stale_sessions:
+                    logger.warning(f"Found {len(stale_sessions)} stale sessions to timeout")
+                    
+                    for session in stale_sessions:
+                        session_id = session.get('id')
+                        org_id = session.get('org_id')
+                        
+                        # Update session status to error
+                        await loop.run_in_executor(
+                            _executor,
+                            self.supabase.update_session_status,
+                            session_id, 'error'
+                        )
+                        
+                        # Create audit log
+                        await loop.run_in_executor(
+                            _executor,
+                            self.supabase.create_audit_log,
+                            org_id, None, 'session_timeout_db', 'session',
+                            session_id,
+                            {
+                                'reason': 'max_duration_exceeded',
+                                'max_duration_minutes': self.max_session_duration_minutes
+                            }
+                        )
+                        
+                        logger.info(f"Timed out stale session {session_id}")
+                        
+            except Exception as e:
+                logger.error(f"Error in database session timeout monitor: {e}")
     
     async def _publish_live_metrics(self):
         """Publish live metrics for active buffers."""

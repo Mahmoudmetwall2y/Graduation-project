@@ -13,10 +13,10 @@ from pydantic import BaseModel
 from typing import Dict, Any, Optional
 import sys
 
-# Configure logging
+# Configure logging with structured format
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    format='{"time":"%(asctime)s","level":"%(levelname)s","service":"inference","message":"%(message)s"}',
     handlers=[
         logging.StreamHandler(sys.stdout)
     ]
