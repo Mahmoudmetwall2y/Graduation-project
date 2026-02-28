@@ -66,16 +66,16 @@ const RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000; // 1 hour
 function checkRateLimit(userId: string): boolean {
   const now = Date.now();
   const userLimit = reportQueue.get(userId);
-  
+
   if (!userLimit || now > userLimit.resetTime) {
     reportQueue.set(userId, { count: 1, resetTime: now + RATE_LIMIT_WINDOW_MS });
     return true;
   }
-  
+
   if (userLimit.count >= RATE_LIMIT_MAX) {
     return false;
   }
-  
+
   userLimit.count++;
   return true;
 }
@@ -455,14 +455,16 @@ Remember to include the medical disclaimer and emphasize this is not a diagnosis
   return prompt
 }
 
+import OpenAI from 'openai'
+
 // DEMO MODE: Template-based report generation.
 // In production, replace this function with actual LLM API calls (e.g., OpenAI, Anthropic).
 async function generateLLMReport(session: any, reportId: string, supabase: any) {
   const startMs = Date.now()
   const llmProvider = process.env.LLM_PROVIDER || 'demo'
 
-  if (llmProvider !== 'demo') {
-    throw new Error(`LLM_PROVIDER=${llmProvider} is not implemented. Switch to demo or add provider integration.`)
+  if (llmProvider !== 'openai') {
+    throw new Error(`LLM_PROVIDER=${llmProvider} is not supported yet by the new integration. Please set it to 'openai'.`);
   }
 
   // Update status to generating
@@ -471,116 +473,48 @@ async function generateLLMReport(session: any, reportId: string, supabase: any) 
     .update({ status: 'generating', error_message: null })
     .eq('id', reportId)
 
-  // Generate template-based report from predictions (no artificial delay)
-  const predictions = session.predictions || []
-  const pcgPrediction = predictions.find((p: any) => p.modality === 'pcg')
-  const ecgPrediction = predictions.find((p: any) => p.modality === 'ecg')
+  // Fetch the prompt that was already generated to the DB
+  const { data: report } = await supabase
+    .from('llm_reports')
+    .select('prompt_text')
+    .eq('id', reportId)
+    .single();
 
-  let reportText = `## Educational Analysis Summary
+  const userPrompt = report.prompt_text;
 
-**MEDICAL DISCLAIMER**: This analysis is for educational and research purposes only. It is NOT a medical diagnosis. Always consult qualified healthcare professionals for medical advice.
+  // Initialize OpenAI Client
+  const openai = new OpenAI({
+    apiKey: process.env.OPENAI_API_KEY,
+  });
 
-> **Note**: This report was generated using a template engine (demo mode), not a large language model.
-> **Provider**: ${llmProvider}
+  let reportText = '';
+  let estimatedTokens = 0;
 
-### Findings Overview
-`
+  try {
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4o", // Default to GPT-4o
+      messages: [
+        { role: "system", content: "You are a specialized medical AI assistant analyzing cardiac signal data (PCG and ECG). Your responses should be professional, highly structured, and strictly educational. You must include a medical disclaimer that this is not a diagnosis. Format your output in clean Markdown." },
+        { role: "user", content: userPrompt }
+      ],
+      temperature: 0.2,
+    });
 
-  if (pcgPrediction?.output_json?.label === 'Normal') {
-    reportText += `
-The PCG (heart sound) analysis indicates normal heart sounds with regular S1 and S2 patterns. No significant murmurs or abnormal sounds were detected in this recording.
-
-**Key Observations:**
-- Normal heart sound classification with ${((pcgPrediction.output_json.probabilities?.Normal || 0) * 100).toFixed(0)}% confidence
-- Regular cardiac rhythm detected
-- No evidence of valvular abnormalities in the recorded segments
-`
-  } else if (pcgPrediction?.output_json?.label === 'Murmur') {
-    reportText += `
-The PCG analysis detected a heart murmur, which is an additional sound during the heartbeat cycle. This finding warrants further clinical evaluation.
-
-**Key Observations:**
-- Murmur detected with ${((pcgPrediction.output_json.probabilities?.Murmur || 0) * 100).toFixed(0)}% confidence
-- Abnormal sound patterns present in the recording
-- Additional analysis may be needed to characterize the murmur
-`
+    reportText = completion.choices[0].message.content || 'Failed to generate content.';
+    estimatedTokens = completion.usage?.total_tokens || 0;
+  } catch (error) {
+    console.error("OpenAI API Error:", error);
+    throw new Error("Failed to communicate with OpenAI.");
   }
 
-  if (ecgPrediction?.output_json?.prediction === 'Normal') {
-    reportText += `
-### ECG Analysis
-The ECG recording shows normal sinus rhythm without significant arrhythmias or conduction abnormalities.
-
-**Key Observations:**
-- Normal ECG classification with ${((ecgPrediction.output_json.confidence || 0) * 100).toFixed(0)}% confidence
-- Regular rhythm maintained throughout recording
-- No critical abnormalities detected
-`
-  } else if (ecgPrediction?.output_json?.prediction === 'Abnormal') {
-    reportText += `
-### ECG Analysis
-The ECG analysis indicates some irregularities that may warrant further investigation by a healthcare professional.
-
-**Key Observations:**
-- Abnormal ECG patterns detected with ${((ecgPrediction.output_json.confidence || 0) * 100).toFixed(0)}% confidence
-- Irregularities present in the cardiac rhythm
-- Clinical correlation recommended
-`
-  }
-
-  reportText += `
-### Suggested Follow-up
-
-1. **Clinical Review**: Share these recordings with a cardiologist or primary care physician
-2. **Comparison**: Compare with previous recordings if available
-3. **Additional Testing**: Consider additional cardiac workup if clinically indicated
-4. **Patient History**: Correlate findings with patient symptoms and medical history
-
-### Limitations
-
-- This analysis is based on a limited-duration recording
-- Environmental factors may affect signal quality
-- AI analysis should always be confirmed by medical professionals
-- This report was generated using a template engine, not a real LLM
-
-### Technical Notes
-
-- Recording Duration: ~10 seconds
-- PCG Sample Rate: 22,050 Hz
-- ECG Sample Rate: 500 Hz
-- Analysis Mode: Demo/Template (no LLM)
-
----
-*This report was generated by AscultiCor AI (demo mode) for educational purposes only.*
-`
 
   const structuredData = {
-    summary: reportText.split('## Educational Analysis Summary')[1]?.split('###')[0]?.trim() || 'Analysis completed',
-    findings: [
-      pcgPrediction?.output_json?.label && `PCG: ${pcgPrediction.output_json.label}`,
-      ecgPrediction?.output_json?.prediction && `ECG: ${ecgPrediction.output_json.prediction}`
-    ].filter(Boolean),
-    recommendations: [
-      'Consult healthcare professional',
-      'Review with cardiologist',
-      'Correlate with clinical symptoms'
-    ],
-    confidence: {
-      pcg: pcgPrediction?.output_json?.probabilities?.[pcgPrediction?.output_json?.label] || 0,
-      ecg: ecgPrediction?.output_json?.confidence || 0
-    }
-  }
+    summary: reportText.substring(0, 150) + '...', // Very basic extraction for the preview
+    findings: [],
+    recommendations: [],
+  };
 
-  // Compute actual metrics (not fake)
   const latencyMs = Date.now() - startMs
-  const estimatedTokens = Math.ceil(reportText.length / 4)
-  const avgConfidence = [
-    pcgPrediction?.output_json?.probabilities?.[pcgPrediction?.output_json?.label],
-    ecgPrediction?.output_json?.confidence
-  ].filter((v): v is number => typeof v === 'number')
-  const confidenceScore = avgConfidence.length > 0
-    ? avgConfidence.reduce((a, b) => a + b, 0) / avgConfidence.length
-    : 0
 
   const { data: updatedReport } = await supabase
     .from('llm_reports')
@@ -591,7 +525,7 @@ The ECG analysis indicates some irregularities that may warrant further investig
       completed_at: new Date().toISOString(),
       tokens_used: estimatedTokens,
       latency_ms: latencyMs,
-      confidence_score: confidenceScore,
+      confidence_score: null, // Confidence scores handled internally by models
       error_message: null,
       retry_count: 0,
       next_retry_at: null,

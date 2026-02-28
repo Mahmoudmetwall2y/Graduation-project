@@ -199,16 +199,16 @@ export default function SettingsPage() {
 
     return (
         <div className="page-wrapper">
-            <div className="page-content space-y-6">
+            <div className="page-content space-y-7">
                 {/* Header */}
                 <div className="fade-in">
-                    <div className="flex items-center gap-3 mb-1">
-                        <div className="p-2.5 rounded-xl bg-primary/10">
-                            <Settings className="w-5 h-5 text-primary" />
+                    <div className="flex items-start gap-4 mb-1">
+                        <div className="p-3 rounded-2xl bg-gradient-to-br from-slate-500/10 to-slate-500/5 ring-1 ring-slate-500/10">
+                            <Settings className="w-6 h-6 text-slate-600 dark:text-slate-400" />
                         </div>
                         <div>
                             <h1 className="text-2xl font-bold text-foreground tracking-tight">Settings</h1>
-                            <p className="text-sm text-muted-foreground">Manage your account and preferences</p>
+                            <p className="text-sm text-muted-foreground mt-0.5">Manage your account and preferences</p>
                         </div>
                     </div>
                 </div>
@@ -236,8 +236,8 @@ export default function SettingsPage() {
                                 key={tab.key}
                                 onClick={() => { setActiveTab(tab.key); setError(null); setSuccess(null) }}
                                 className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium transition-all ${activeTab === tab.key
-                                        ? 'bg-primary/10 text-primary'
-                                        : 'text-muted-foreground hover:text-foreground hover:bg-accent/50'
+                                    ? 'bg-primary/10 text-primary'
+                                    : 'text-muted-foreground hover:text-foreground hover:bg-accent/50'
                                     }`}
                             >
                                 <Icon className="w-4 h-4" />
@@ -249,7 +249,7 @@ export default function SettingsPage() {
 
                 {/* Profile Tab */}
                 {activeTab === 'profile' && (
-                    <div className="bg-card border border-border rounded-xl p-6 space-y-5 slide-up">
+                    <div className="glass-card p-6 space-y-5 slide-up">
                         <h2 className="text-lg font-semibold text-foreground">Profile Information</h2>
 
                         <div>
@@ -366,7 +366,7 @@ export default function SettingsPage() {
 
                 {/* Security Tab */}
                 {activeTab === 'security' && (
-                    <div className="bg-card border border-border rounded-xl p-6 space-y-5 slide-up">
+                    <div className="glass-card p-6 space-y-5 slide-up">
                         <h2 className="text-lg font-semibold text-foreground">Change Password</h2>
                         <p className="text-sm text-muted-foreground">Update your password to keep your account secure</p>
 
@@ -432,7 +432,7 @@ export default function SettingsPage() {
 
                 {/* Organization Tab */}
                 {activeTab === 'organization' && (
-                    <div className="bg-card border border-border rounded-xl p-6 space-y-5 slide-up">
+                    <div className="glass-card p-6 space-y-5 slide-up">
                         <h2 className="text-lg font-semibold text-foreground">Organization</h2>
                         <p className="text-sm text-muted-foreground">Your organization details</p>
 

@@ -81,50 +81,76 @@ export default function LoginPage() {
 
   return (
     <div className="min-h-screen flex">
-      {/* Left side — Hero */}
-      <div className="hidden lg:flex lg:w-1/2 relative overflow-hidden items-center justify-center"
-        style={{ background: 'var(--gradient-hero)' }}>
-        {/* Animated background elements */}
-        <div className="absolute inset-0">
-          <div className="absolute top-20 left-10 w-72 h-72 bg-teal-500/10 rounded-full blur-3xl animate-pulse" />
-          <div className="absolute bottom-20 right-10 w-96 h-96 bg-teal-600/10 rounded-full blur-3xl animate-pulse" style={{ animationDelay: '1s' }} />
-          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-64 h-64 bg-red-500/5 rounded-full blur-3xl animate-pulse" style={{ animationDelay: '2s' }} />
+      {/* ─── Left Hero Panel ─── */}
+      <div
+        className="hidden lg:flex lg:w-[52%] relative overflow-hidden items-center justify-center"
+        style={{ background: 'var(--gradient-hero)' }}
+      >
+        {/* Ambient glow orbs */}
+        <div className="absolute inset-0 overflow-hidden">
+          <div className="absolute top-[10%] left-[5%] w-[400px] h-[400px] bg-teal-500/[0.07] rounded-full blur-[120px]" style={{ animation: 'float 8s ease-in-out infinite' }} />
+          <div className="absolute bottom-[10%] right-[5%] w-[500px] h-[500px] bg-teal-600/[0.08] rounded-full blur-[120px]" style={{ animation: 'float 10s ease-in-out infinite', animationDelay: '2s' }} />
+          <div className="absolute top-[40%] left-[40%] w-[300px] h-[300px] bg-blue-500/[0.04] rounded-full blur-[100px]" style={{ animation: 'float 12s ease-in-out infinite', animationDelay: '4s' }} />
         </div>
 
-        {/* ECG line animation */}
-        <svg className="absolute bottom-32 left-0 right-0 w-full opacity-20" viewBox="0 0 800 100" preserveAspectRatio="none">
+        {/* Animated ECG line SVG */}
+        <svg className="absolute bottom-[15%] left-0 w-full opacity-[0.15]" viewBox="0 0 1200 120" preserveAspectRatio="none">
           <path
-            d="M0,50 L100,50 L120,50 L140,20 L160,80 L180,10 L200,90 L220,50 L240,50 L400,50 L420,50 L440,20 L460,80 L480,10 L500,90 L520,50 L540,50 L700,50 L720,50 L740,20 L760,80 L780,10 L800,50"
+            d="M0,60 L150,60 L180,60 L200,25 L220,95 L240,15 L260,105 L280,60 L310,60 L500,60 L530,60 L550,25 L570,95 L590,15 L610,105 L630,60 L660,60 L850,60 L880,60 L900,25 L920,95 L940,15 L960,105 L980,60 L1010,60 L1200,60"
             fill="none"
-            stroke="hsl(172, 66%, 45%)"
-            strokeWidth="2"
-            className="animate-pulse"
-          />
+            stroke="url(#ecg-gradient)"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            style={{ filter: 'drop-shadow(0 0 8px hsl(172 66% 50% / 0.4))' }}
+          >
+            <animate attributeName="stroke-dasharray" values="0 2400;2400 0" dur="3s" repeatCount="indefinite" />
+          </path>
+          <defs>
+            <linearGradient id="ecg-gradient" x1="0%" y1="0%" x2="100%" y2="0%">
+              <stop offset="0%" stopColor="hsl(172, 66%, 50%)" stopOpacity="0.3" />
+              <stop offset="50%" stopColor="hsl(172, 66%, 55%)" stopOpacity="1" />
+              <stop offset="100%" stopColor="hsl(217, 91%, 65%)" stopOpacity="0.3" />
+            </linearGradient>
+          </defs>
         </svg>
 
-        <div className="relative z-10 text-center px-12 max-w-lg">
-          <div className="flex items-center justify-center mb-8">
-              <div className="relative flex items-center justify-center w-20 h-20 rounded-2xl bg-gradient-to-br from-teal-400 to-teal-600 shadow-2xl">
-              <svg viewBox="0 0 32 32" className="logo-mark" aria-hidden="true">
-                <path d="M3 16h6l2.2-6.2 3.6 12.4 2.8-7.2 1.8 1.8H29" fill="none" stroke="white" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
+        {/* Grid pattern overlay */}
+        <div className="absolute inset-0 opacity-[0.03]"
+          style={{
+            backgroundImage: 'linear-gradient(rgba(255,255,255,0.1) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.1) 1px, transparent 1px)',
+            backgroundSize: '40px 40px',
+          }}
+        />
+
+        {/* Hero content */}
+        <div className="relative z-10 text-center px-12 max-w-lg scale-in">
+          <div className="flex items-center justify-center mb-10">
+            <div className="relative flex items-center justify-center w-24 h-24 rounded-3xl bg-gradient-to-br from-teal-400 to-teal-600 shadow-2xl ring-1 ring-white/10">
+              <svg viewBox="0 0 32 32" className="w-10 h-10" aria-hidden="true">
+                <path d="M3 16h6l2.2-6.2 3.6 12.4 2.8-7.2 1.8 1.8H29" fill="none" stroke="white" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
               <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 rounded-full border-2 border-white/20 animate-pulse" />
+              <div className="absolute inset-0 rounded-3xl" style={{ boxShadow: '0 0 60px -10px hsl(172 66% 50% / 0.4)' }} />
             </div>
           </div>
-          <h1 className="text-4xl font-bold text-white mb-4 tracking-tight">
+
+          <h1 className="text-5xl font-bold text-white mb-5 tracking-tight leading-[1.1]">
             Asculti<span className="text-teal-300">Cor</span>
           </h1>
-          <p className="text-lg text-teal-200/80 leading-relaxed">
-            AI-Powered Cardiac Auscultation and Prediction
+          <p className="text-lg text-teal-200/70 leading-relaxed font-light">
+            AI-Powered Cardiac Auscultation
+            <br />and Prediction Platform
           </p>
-          <p className="text-sm text-teal-300/50 mt-4">
-            Real-time PCG & ECG analysis using heart sounds and machine learning
+          <p className="text-sm text-teal-300/40 mt-4 font-light">
+            Real-time PCG & ECG analysis using heart sounds
+            <br />and machine learning
           </p>
 
           {/* Feature badges */}
-          <div className="flex flex-wrap gap-3 justify-center mt-10">
-            {['Heart Sound Analysis', 'ML Inference', 'ECG/PCG', 'IoT Devices'].map((feature) => (
-              <span key={feature} className="px-3 py-1.5 rounded-full text-xs font-medium bg-white/10 text-teal-200/80 border border-white/10 backdrop-blur-sm">
+          <div className="flex flex-wrap gap-2.5 justify-center mt-12">
+            {['Heart Sound Analysis', 'ML Inference', 'ECG / PCG', 'IoT Devices'].map((feature) => (
+              <span key={feature} className="px-3.5 py-1.5 rounded-full text-xs font-medium bg-white/[0.06] text-teal-200/70 border border-white/[0.08] backdrop-blur-md">
                 {feature}
               </span>
             ))}
@@ -132,55 +158,64 @@ export default function LoginPage() {
         </div>
       </div>
 
-      {/* Right side — Form */}
-      <div className="flex-1 flex items-center justify-center bg-background px-4 sm:px-6 lg:px-8">
-        <div className="max-w-sm w-full space-y-8 surface-card bg-card/85 p-8 backdrop-blur">
+      {/* ─── Right Form Panel ─── */}
+      <div className="flex-1 flex items-center justify-center bg-background px-4 sm:px-6 lg:px-8 relative">
+        {/* Subtle background glow */}
+        <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-primary/[0.03] rounded-full blur-[150px] pointer-events-none" />
+
+        <div className="max-w-[380px] w-full space-y-7 fade-in">
           {/* Mobile logo */}
           <div className="text-center lg:hidden">
             <div className="flex items-center justify-center gap-2.5 mb-2">
-              <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-gradient-to-br from-teal-500 to-teal-700 shadow-lg">
+              <div className="flex items-center justify-center w-11 h-11 rounded-xl bg-gradient-to-br from-teal-500 to-teal-700 shadow-lg">
                 <svg viewBox="0 0 32 32" className="logo-mark" aria-hidden="true">
                   <path d="M3 16h6l2.2-6.2 3.6 12.4 2.8-7.2 1.8 1.8H29" fill="none" stroke="white" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
                 </svg>
               </div>
-              <span className="text-2xl font-bold text-foreground tracking-tight">AscultiCor</span>
+              <span className="text-2xl font-bold text-foreground tracking-tight">
+                Asculti<span className="gradient-text">Cor</span>
+              </span>
             </div>
-            <p className="text-sm text-muted-foreground">AI-Powered Cardiac Auscultation</p>
+            <p className="text-sm text-muted-foreground font-light">AI-Powered Cardiac Auscultation</p>
           </div>
 
+          {/* Title */}
           <div>
             <h2 className="text-2xl font-bold text-foreground tracking-tight">
               {getTitle()}
             </h2>
-            <p className="mt-1 text-sm text-muted-foreground">
+            <p className="mt-1.5 text-sm text-muted-foreground font-light">
               {getSubtitle()}
             </p>
           </div>
 
+          {/* Error */}
           {error && (
-            <div className="rounded-lg bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900/50 p-4 fade-in">
-              <p className="text-sm text-red-700 dark:text-red-400">{error}</p>
+            <div className="rounded-xl bg-red-50 dark:bg-red-950/20 border border-red-200/60 dark:border-red-900/40 p-4 fade-in">
+              <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
             </div>
           )}
 
+          {/* Success */}
           {message && (
-            <div className="rounded-lg bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-900/50 p-4 fade-in">
-              <div className="flex items-start gap-2">
+            <div className="rounded-xl bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200/60 dark:border-emerald-900/40 p-4 fade-in">
+              <div className="flex items-start gap-2.5">
                 <CheckCircle className="w-4 h-4 text-emerald-600 dark:text-emerald-400 mt-0.5 shrink-0" />
                 <p className="text-sm text-emerald-700 dark:text-emerald-400">{message}</p>
               </div>
             </div>
           )}
 
+          {/* Form */}
           <form onSubmit={handleSubmit} className="space-y-5">
-            {/* Full Name — only for sign up */}
+            {/* Full Name — sign up only */}
             {isSignUp && (
               <div className="fade-in">
                 <label htmlFor="fullName" className="block text-sm font-medium text-foreground mb-1.5">
                   Full Name
                 </label>
-                <div className="relative">
-                  <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                <div className="relative group">
+                  <User className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground/60 group-focus-within:text-primary transition-colors duration-300" />
                   <input
                     id="fullName"
                     name="fullName"
@@ -196,12 +231,13 @@ export default function LoginPage() {
               </div>
             )}
 
+            {/* Email */}
             <div>
               <label htmlFor="email" className="block text-sm font-medium text-foreground mb-1.5">
                 Email address
               </label>
-              <div className="relative">
-                <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+              <div className="relative group">
+                <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground/60 group-focus-within:text-primary transition-colors duration-300" />
                 <input
                   id="email"
                   name="email"
@@ -233,8 +269,8 @@ export default function LoginPage() {
                     </button>
                   )}
                 </div>
-                <div className="relative">
-                  <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                <div className="relative group">
+                  <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground/60 group-focus-within:text-primary transition-colors duration-300" />
                   <input
                     id="password"
                     name="password"
@@ -250,7 +286,7 @@ export default function LoginPage() {
                   <button
                     type="button"
                     onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                    className="absolute right-3.5 top-1/2 -translate-y-1/2 text-muted-foreground/60 hover:text-foreground transition-colors duration-200"
                     aria-label={showPassword ? 'Hide password' : 'Show password'}
                   >
                     {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
@@ -262,10 +298,11 @@ export default function LoginPage() {
               </div>
             )}
 
+            {/* Submit */}
             <button
               type="submit"
               disabled={loading}
-              className="btn-primary w-full gap-2"
+              className="btn-primary w-full gap-2 py-3"
             >
               {loading ? (
                 <Activity className="w-4 h-4 animate-spin" />
@@ -277,7 +314,8 @@ export default function LoginPage() {
               {!loading && <ArrowRight className="w-4 h-4" />}
             </button>
 
-            <div className="text-center space-y-2">
+            {/* Switch mode */}
+            <div className="text-center">
               {isForgotPassword ? (
                 <button
                   type="button"
@@ -290,16 +328,21 @@ export default function LoginPage() {
                 <button
                   type="button"
                   onClick={() => switchMode(isSignUp ? 'login' : 'signup')}
-                  className="text-sm text-primary hover:text-primary/80 font-medium transition-colors"
+                  className="text-sm text-muted-foreground hover:text-foreground transition-colors"
                 >
                   {isSignUp
-                    ? 'Already have an account? Sign in'
-                    : "Don't have an account? Sign up"
+                    ? <>Already have an account? <span className="text-primary font-medium">Sign in</span></>
+                    : <>Don&apos;t have an account? <span className="text-primary font-medium">Sign up</span></>
                   }
                 </button>
               )}
             </div>
           </form>
+
+          {/* Footer */}
+          <p className="text-center text-[11px] text-muted-foreground/50 pt-4">
+            Secured with end-to-end encryption
+          </p>
         </div>
       </div>
     </div>

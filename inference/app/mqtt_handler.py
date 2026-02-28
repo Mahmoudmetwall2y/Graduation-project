@@ -208,6 +208,8 @@ class MQTTHandler:
         
         # State
         self.buffers: Dict[str, SessionBuffer] = {}
+        # F6 fix: track how many modalities are pending per session
+        self._session_modality_count: Dict[str, int] = {}
         self.running = False
         self.loop: Optional[asyncio.AbstractEventLoop] = None
         
@@ -238,8 +240,9 @@ class MQTTHandler:
                 self.loop
             )
         else:
-            logger.warning("Event loop not available, running synchronously")
-            return func(*args)
+            # F8 fix: raise instead of silently blocking the MQTT network thread
+            logger.error("Event loop not available — cannot dispatch Supabase call safely")
+            raise RuntimeError("Cannot dispatch sync call: event loop is not running")
     
     def start(self):
         """Start MQTT connection and monitoring."""
@@ -288,7 +291,26 @@ class MQTTHandler:
     def _on_disconnect(self, client, userdata, rc):
         """Callback for MQTT disconnection."""
         if rc != 0:
-            logger.warning(f"Unexpected MQTT disconnection (code {rc})")
+            logger.warning(f"Unexpected MQTT disconnection (code {rc}), scheduling reconnect")
+            # F16 fix: schedule async exponential-backoff reconnect
+            if self.loop and self.loop.is_running():
+                asyncio.run_coroutine_threadsafe(self._reconnect(), self.loop)
+        else:
+            logger.info("MQTT disconnected cleanly")
+
+    async def _reconnect(self, initial_delay: float = 5.0):
+        """Exponential-backoff MQTT reconnect loop (F16)."""
+        delay = initial_delay
+        max_delay = 60.0
+        while self.running:
+            await asyncio.sleep(delay)
+            try:
+                self.client.reconnect()
+                logger.info("MQTT reconnected successfully")
+                return
+            except Exception as e:
+                logger.error(f"MQTT reconnect failed: {e}, retrying in {delay:.0f}s")
+                delay = min(delay * 2, max_delay)
     
     def _on_message(self, client, userdata, msg):
         """Callback for MQTT message — runs in the paho-mqtt thread."""
@@ -300,11 +322,21 @@ class MQTTHandler:
             if len(topic_parts) != 7:
                 logger.warning(f"Invalid topic format: {msg.topic}")
                 return
-            
-            org_id = topic_parts[1]
+
+            import re
+            _UUID_RE = re.compile(
+                r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+                re.IGNORECASE
+            )
+            org_id    = topic_parts[1]
             device_id = topic_parts[3]
             session_id = topic_parts[5]
-            msg_type = topic_parts[6]
+            msg_type  = topic_parts[6]
+
+            # F7 fix: validate UUIDs from MQTT topic before use as buffer keys
+            if not (_UUID_RE.match(org_id) and _UUID_RE.match(device_id) and _UUID_RE.match(session_id)):
+                logger.warning(f"Invalid UUID in topic: {msg.topic} — dropping message")
+                return
             
             # Route message
             if msg_type == 'meta':
@@ -373,6 +405,8 @@ class MQTTHandler:
             modality='pcg',
             config=config
         )
+        # F6 fix: increment modality counter
+        self._session_modality_count[session_id] = self._session_modality_count.get(session_id, 0) + 1
         
         # Update session status (sync call dispatched to thread pool)
         self._run_sync_in_executor(
@@ -402,6 +436,8 @@ class MQTTHandler:
             modality='ecg',
             config=config
         )
+        # F6 fix: increment modality counter
+        self._session_modality_count[session_id] = self._session_modality_count.get(session_id, 0) + 1
         
         self._run_sync_in_executor(
             self.supabase.update_session_status, session_id, 'streaming'
@@ -531,8 +567,18 @@ class MQTTHandler:
                 buffer.org_id, None, 'pcg_inference_failed', 'session', session_id,
                 {'error': str(e)})
         finally:
-            # Clean up buffer
+            # Clean up buffer + F6 fix: decrement modality counter and mark done when all finish
             self.buffers.pop(buffer_key, None)
+            remaining = self._session_modality_count.get(session_id, 1) - 1
+            self._session_modality_count[session_id] = remaining
+            if remaining <= 0:
+                self._session_modality_count.pop(session_id, None)
+                try:
+                    await loop.run_in_executor(_executor,
+                        self.supabase.update_session_status, session_id, 'done',
+                        datetime.now(timezone.utc).isoformat())
+                except Exception as e2:
+                    logger.error(f"Failed to mark session {session_id} done after PCG: {e2}")
     
     async def _handle_end_ecg(self, session_id: str):
         """Handle end_ecg message - finalize and run inference."""
@@ -599,15 +645,29 @@ class MQTTHandler:
             
         except Exception as e:
             logger.error(f"Error processing ECG: {e}")
-            await loop.run_in_executor(_executor,
-                self.supabase.update_session_status, session_id, 'error')
+            # F14 fix: only set error if session is not already done
+            remaining_on_err = self._session_modality_count.get(session_id, 1) - 1
+            if remaining_on_err > 0:
+                # Other modalities still pending — mark error
+                await loop.run_in_executor(_executor,
+                    self.supabase.update_session_status, session_id, 'error')
             await loop.run_in_executor(_executor,
                 self.supabase.create_audit_log,
                 buffer.org_id, None, 'ecg_inference_failed', 'session', session_id,
                 {'error': str(e)})
         finally:
-            # Clean up buffer
+            # Clean up buffer + F6 fix: decrement and mark done when all modalities finish
             self.buffers.pop(buffer_key, None)
+            remaining = self._session_modality_count.get(session_id, 1) - 1
+            self._session_modality_count[session_id] = remaining
+            if remaining <= 0:
+                self._session_modality_count.pop(session_id, None)
+                try:
+                    await loop.run_in_executor(_executor,
+                        self.supabase.update_session_status, session_id, 'done',
+                        datetime.now(timezone.utc).isoformat())
+                except Exception as e2:
+                    logger.error(f"Failed to mark session {session_id} done after ECG: {e2}")
     
     async def _force_end_session(self, session_id: str, modality: str):
         """Force end session when max duration exceeded."""
@@ -716,7 +776,8 @@ class MQTTHandler:
                 
                 loop = asyncio.get_running_loop()
                 
-                for buffer_key, buffer in self.buffers.items():
+                # F9 fix: snapshot buffers before iterating to avoid dict-changed-during-iteration
+                for buffer_key, buffer in list(self.buffers.items()):
                     if buffer.ended:
                         continue
                     

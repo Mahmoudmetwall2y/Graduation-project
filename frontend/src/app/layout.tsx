@@ -4,6 +4,7 @@ import Navbar from './components/Navbar'
 import { ThemeProvider } from './components/ThemeProvider'
 import { ToastProvider } from './components/Toast'
 import { ErrorBoundary } from './components/error-boundary'
+import ChatBot from './components/ChatBot'
 
 export const metadata: Metadata = {
   title: 'AscultiCor - AI-Powered Cardiac Auscultation',
@@ -22,10 +23,13 @@ export default function RootLayout({
           <ThemeProvider>
             <ToastProvider>
               <div className="app-shell">
-                <Navbar />
-                <main className="app-main">
-                  {children}
-                </main>
+                <div className="app-container">
+                  <Navbar />
+                  <main className="app-main">
+                    {children}
+                  </main>
+                  <ChatBot />
+                </div>
               </div>
             </ToastProvider>
           </ThemeProvider>

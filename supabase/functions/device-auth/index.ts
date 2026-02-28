@@ -8,15 +8,44 @@ import * as bcrypt from 'https://deno.land/x/bcrypt@v0.4.1/mod.ts'
 function getCorsHeaders(req: Request) {
   const envOrigins = (Deno.env.get('CORS_ORIGIN') || '').split(',').map((o) => o.trim()).filter(Boolean)
   const requestOrigin = req.headers.get('Origin') || ''
+  // F5 fix: unknown origins get 'null' (opaque), not the first allowed origin
   const allowOrigin = envOrigins.length === 0
     ? '*'
-    : (envOrigins.includes(requestOrigin) ? requestOrigin : envOrigins[0])
+    : (envOrigins.includes(requestOrigin) ? requestOrigin : 'null')
 
   return {
     'Access-Control-Allow-Origin': allowOrigin,
     'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
     'Vary': 'Origin',
   }
+}
+
+// F1: Generate a cryptographically signed token (HMAC-SHA256) that encodes
+// device_id, org_id, and expiry. Can be verified offline by any service
+// holding the DEVICE_JWT_SECRET environment variable.
+async function generateDeviceToken(
+  deviceId: string,
+  orgId: string,
+  expiresIn: number
+): Promise<string> {
+  const secret = Deno.env.get('DEVICE_JWT_SECRET')
+  if (!secret || secret.length < 32) {
+    throw new Error('DEVICE_JWT_SECRET must be set and at least 32 characters')
+  }
+
+  const expiresAt = Math.floor(Date.now() / 1000) + expiresIn
+  const payload = JSON.stringify({ sub: deviceId, org: orgId, exp: expiresAt })
+  const payloadB64 = btoa(payload).replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_')
+
+  const keyBytes = new TextEncoder().encode(secret)
+  const key = await crypto.subtle.importKey(
+    'raw', keyBytes, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']
+  )
+  const signature = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(payloadB64))
+  const sigB64 = btoa(String.fromCharCode(...new Uint8Array(signature)))
+    .replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_')
+
+  return `${payloadB64}.${sigB64}`
 }
 
 serve(async (req) => {
@@ -74,9 +103,9 @@ serve(async (req) => {
       .update({ last_seen_at: new Date().toISOString() })
       .eq('id', device_id)
 
-    // Generate short-lived token (simplified - in production use JWT)
-    const token = `device_${device_id}_${Date.now()}`
+    // F1 fix: Generate a proper HMAC-SHA256 signed token (replaces the fake timestamp token)
     const expiresIn = 3600 // 1 hour
+    const token = await generateDeviceToken(device_id, device.org_id, expiresIn)
 
     // Insert audit log
     await supabase

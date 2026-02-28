@@ -87,8 +87,8 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# Security middleware (only in production)
-if os.getenv("SECURITY_HEADERS_ENABLED", "false").lower() == "true":
+# F11 fix: Security headers default to enabled (opt-out for local dev only)
+if os.getenv("SECURITY_HEADERS_ENABLED", "true").lower() == "true":
     app.add_middleware(
         TrustedHostMiddleware,
         allowed_hosts=["*.asculticor.com", "localhost", "127.0.0.1"]
@@ -103,7 +103,7 @@ app.add_middleware(
     allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST"],  # Restrict to necessary methods only
-    allow_headers=["*"],
+    allow_headers=["Content-Type", "Authorization", "x-internal-token", "x-client-info", "apikey"],  # F12 fix: explicit list
     max_age=600,  # Cache preflight requests for 10 minutes
 )
 
@@ -246,25 +246,6 @@ async def get_metrics(request: Request):
         "mqtt_connected": mqtt_handler.client.is_connected()
     }
 
-
-@app.post("/simulate")
-async def simulate_inference():
-    """
-    Optional endpoint to test inference pipeline without MQTT.
-    For debugging and testing.
-    """
-    global mqtt_handler
-    
-    if not mqtt_handler:
-        raise HTTPException(status_code=503, detail="Service not initialized")
-    
-    # This could trigger a simulated data flow
-    # For now, just return demo mode status
-    
-    return {
-        "message": "Use the demo_publisher.py script for full simulation",
-        "demo_mode": mqtt_handler.inference_engine.demo_mode_active
-    }
 
 
 if __name__ == "__main__":

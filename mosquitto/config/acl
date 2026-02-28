@@ -1,0 +1,29 @@
+# Mosquitto ACL Configuration
+# F2 audit fix: topic-level access control to prevent cross-org data injection
+#
+# Mosquitto ACL pattern rules:
+#  - Use %u for MQTT username, %c for clientid
+#  - Wildcards allowed: + (single level), # (only at end of topic)
+#  - Pattern ACLs with %u CANNOT have # before the %u substitution
+#
+# Topic structure: org/{orgId}/device/{deviceId}/session/{sessionId}/{type}
+#
+# Device MQTT username MUST be the device_id so that %u matches the 4th segment.
+# Example: org/abc/device/<device_id>/session/xyz/data
+
+# -------------------------------------------------------
+# Inference service account: full read/write access
+# -------------------------------------------------------
+user asculticor
+topic readwrite #
+
+# -------------------------------------------------------
+# Per-device pattern ACL (username = device_id)
+#
+# Devices may only publish to their own org/+/device/{device_id}/# path.
+# NOTE: Mosquitto pattern ACLs treat %u as a literal string replacement,
+# and require the pattern to be a valid MQTT filter after substitution.
+# The two-segment prefix (org/+) uses + to match any single org ID.
+# -------------------------------------------------------
+pattern write org/+/device/%u/#
+pattern read  org/+/device/%u/control/#

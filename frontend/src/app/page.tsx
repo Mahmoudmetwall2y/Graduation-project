@@ -5,31 +5,10 @@ import { createClientComponentClient } from '@supabase/auth-helpers-nextjs'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import {
-  Activity,
-  Cpu,
-  AlertTriangle,
-  Clock,
-  ChevronRight,
-  TrendingUp,
-  Heart,
-  Zap,
-  Plus,
-  Wifi,
-  WifiOff,
-  ArrowUpRight,
-  BarChart3,
-  Stethoscope
+  Activity, Cpu, AlertTriangle, Clock, TrendingUp, Heart, Zap, Plus, Wifi, WifiOff, BarChart3, Search, Phone, Bell, ArrowUpRight
 } from 'lucide-react'
 import {
-  AreaChart,
-  Area,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  BarChart,
-  Bar,
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer
 } from 'recharts'
 import { PageSkeleton } from './components/Skeleton'
 
@@ -47,6 +26,41 @@ interface DailyActivity {
   predictions: number
 }
 
+const Header = () => (
+  <div className="flex items-center justify-between w-full pt-4 pb-2">
+    <div className="flex items-center gap-6">
+      <div className="flex bg-white rounded-full p-1.5 shadow-sm border border-border">
+        <button className="px-5 py-1.5 rounded-full text-sm font-medium text-muted-foreground hover:bg-slate-50 transition-colors">Diagnose</button>
+        <button className="px-5 py-1.5 rounded-full text-sm font-bold text-foreground flex items-center gap-2 shadow-sm bg-white ring-1 ring-border">
+          <span className="w-1.5 h-1.5 bg-primary rounded-full"></span>
+          Overview Dashboard
+        </button>
+      </div>
+    </div>
+
+    <div className="flex items-center gap-4">
+      <div className="relative">
+        <Search className="w-4 h-4 absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground" />
+        <input
+          type="text"
+          placeholder="Search..."
+          className="pl-11 pr-4 py-2 bg-white rounded-full text-sm border border-border w-64 focus:outline-none focus:ring-2 focus:ring-primary/20 shadow-sm transition-all"
+        />
+      </div>
+      <button className="w-10 h-10 flex-shrink-0 rounded-full bg-primary text-white flex items-center justify-center shadow-md shadow-primary/30 hover:bg-blue-600 transition-colors">
+        <Phone className="w-4 h-4 fill-current" />
+      </button>
+      <button className="relative flex-shrink-0 w-10 h-10 rounded-full bg-white text-foreground flex items-center justify-center border border-border hover:bg-slate-50 transition-colors shadow-sm">
+        <Bell className="w-4 h-4" />
+        <span className="absolute top-0 right-0 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-white"></span>
+      </button>
+      <Link href="/settings" className="w-10 h-10 flex-shrink-0 hover:ring-2 hover:ring-primary/50 transition-all rounded-full bg-slate-200 border-2 border-white shadow-sm overflow-hidden flex items-center justify-center text-slate-500 font-bold text-sm">
+        AJ
+      </Link>
+    </div>
+  </div>
+)
+
 export default function Dashboard() {
   const [sessions, setSessions] = useState<Session[]>([])
   const [loading, setLoading] = useState(true)
@@ -58,14 +72,13 @@ export default function Dashboard() {
   const [avgLatencyMs, setAvgLatencyMs] = useState<number | null>(null)
   const [offlineOverHour, setOfflineOverHour] = useState(0)
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null)
-
   const [error, setError] = useState<string | null>(null)
+
   const router = useRouter()
   const supabase = createClientComponentClient()
 
   const fetchDashboardData = useCallback(async () => {
     try {
-      // Fetch recent sessions
       const { data: sessionsData, error: sessionsError } = await supabase
         .from('sessions')
         .select('*')
@@ -75,7 +88,6 @@ export default function Dashboard() {
       if (sessionsError) throw sessionsError
       setSessions(sessionsData || [])
 
-      // Count today's sessions
       const today = new Date()
       today.setHours(0, 0, 0, 0)
       const todayCount = (sessionsData || []).filter(
@@ -83,14 +95,11 @@ export default function Dashboard() {
       ).length
       setTodaySessionCount(todayCount)
 
-      // Fetch prediction count
       const { count: predCount } = await supabase
         .from('predictions')
         .select('*', { count: 'exact', head: true })
-
       setPredictionCount(predCount || 0)
 
-      // Avg inference latency (last 24h)
       const dayAgo = new Date()
       dayAgo.setDate(dayAgo.getDate() - 1)
       const { data: latencyRows } = await supabase
@@ -105,7 +114,6 @@ export default function Dashboard() {
         setAvgLatencyMs(null)
       }
 
-      // Fetch devices
       const response = await fetch('/api/devices')
       if (response.ok) {
         const data = await response.json()
@@ -118,7 +126,6 @@ export default function Dashboard() {
         )
       }
 
-      // Build real weekly activity from sessions
       const weekAgo = new Date()
       weekAgo.setDate(weekAgo.getDate() - 6)
       weekAgo.setHours(0, 0, 0, 0)
@@ -134,7 +141,6 @@ export default function Dashboard() {
         .select('created_at')
         .gte('created_at', weekAgo.toISOString())
 
-      // Group by day
       const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
       const dailyMap: Record<string, { sessions: number; predictions: number }> = {}
 
@@ -142,7 +148,6 @@ export default function Dashboard() {
         const d = new Date()
         d.setDate(d.getDate() - (6 - i))
         const key = d.toISOString().split('T')[0]
-        const dayName = dayNames[d.getDay()]
         dailyMap[key] = { sessions: 0, predictions: 0 }
       }
 
@@ -167,7 +172,6 @@ export default function Dashboard() {
 
       setWeeklyData(weekly)
       setLastUpdated(new Date())
-
     } catch (error) {
       console.error('Error fetching dashboard data:', error)
       setError('Failed to load dashboard data. Please check your connection.')
@@ -181,15 +185,9 @@ export default function Dashboard() {
 
     const channel = supabase
       .channel('dashboard-realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'sessions' }, () => {
-        fetchDashboardData()
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'predictions' }, () => {
-        fetchDashboardData()
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'devices' }, () => {
-        fetchDashboardData()
-      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'sessions' }, () => fetchDashboardData())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'predictions' }, () => fetchDashboardData())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'devices' }, () => fetchDashboardData())
       .subscribe()
 
     const interval = setInterval(fetchDashboardData, 30000)
@@ -201,159 +199,64 @@ export default function Dashboard() {
   }, [fetchDashboardData, supabase])
 
   const activeSessions = sessions.filter(s => s.status === 'streaming' || s.status === 'processing').length
-  const completedSessions = sessions.filter(s => s.status === 'done').length
   const alertCount = sessions.filter(s => s.status === 'error').length
-  const lastUpdatedLabel = lastUpdated ? `Updated ${lastUpdated.toLocaleTimeString()}` : 'Updating...'
-
-  const sparklineData = {
-    sessions: [2, 4, 3, 6, 4, 7, 5],
-    devices: [1, 2, 2, 3, 2, 3, 3],
-    predictions: [1, 3, 2, 5, 4, 6, 7],
-    alerts: [0, 1, 0, 2, 1, 0, 1],
-    latency: [120, 110, 130, 100, 95, 105, 98],
-    offline: [3, 2, 3, 2, 1, 2, 1],
-  }
-
-  const Sparkline = ({ values, color }: { values: number[]; color: string }) => {
-    const max = Math.max(...values)
-    const min = Math.min(...values)
-    const range = max - min || 1
-    const points = values.map((v, i) => {
-      const x = (i / (values.length - 1)) * 60
-      const y = 20 - ((v - min) / range) * 18
-      return `${x},${y}`
-    }).join(' ')
-    return (
-      <svg viewBox="0 0 60 22" className="w-16 h-6">
-        <polyline
-          fill="none"
-          stroke={color}
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          points={points}
-        />
-      </svg>
-    )
-  }
-
-  const getStatusBadge = (status: string) => {
-    const map: Record<string, string> = {
-      created: 'badge-neutral',
-      streaming: 'badge-info',
-      processing: 'badge-warning',
-      done: 'badge-success',
-      error: 'badge-danger',
-    }
-    return map[status] || 'badge-neutral'
-  }
+  const isNewUser = !loading && deviceCount === 0 && sessions.length === 0
 
   if (loading) {
     return (
-      <div className="page-wrapper">
-        <div className="page-content">
-          <PageSkeleton />
-        </div>
+      <div className="w-full h-full flex flex-col px-8">
+        <Header />
+        <div className="flex-1 mt-8"><PageSkeleton /></div>
       </div>
     )
   }
 
   if (error) {
     return (
-      <div className="page-wrapper">
-        <div className="page-content flex flex-col items-center justify-center min-h-[60vh] space-y-4">
-          <div className="p-4 rounded-full bg-red-50 dark:bg-red-950/30">
-            <AlertTriangle className="w-8 h-8 text-red-600 dark:text-red-400" />
+      <div className="w-full h-full flex flex-col px-8">
+        <Header />
+        <div className="flex-1 flex flex-col items-center justify-center mb-20 space-y-4">
+          <div className="p-4 rounded-full bg-red-50">
+            <AlertTriangle className="w-8 h-8 text-red-600" />
           </div>
           <h2 className="text-xl font-bold text-foreground">Something went wrong</h2>
           <p className="text-muted-foreground">{error}</p>
-          <div className="flex flex-wrap gap-3">
-            <button
-              onClick={() => {
-                setLoading(true)
-                setError(null)
-                fetchDashboardData()
-              }}
-              className="btn-primary"
-            >
-              Try Again
-            </button>
-            <Link href="/devices" className="btn-ghost">
-              Check Devices
-            </Link>
-            <Link href="/settings" className="btn-ghost">
-              Open Settings
-            </Link>
+          <div className="flex gap-3">
+            <button onClick={() => { setLoading(true); setError(null); fetchDashboardData() }} className="px-6 py-2 bg-primary text-white rounded-xl font-medium">Try Again</button>
           </div>
-          <p className="text-xs text-muted-foreground">
-            Tip: verify your Supabase connection and MQTT broker status.
-          </p>
         </div>
       </div>
     )
   }
 
-
-  // Onboarding empty state when user has no devices or sessions
-  const isNewUser = deviceCount === 0 && sessions.length === 0
-
   if (isNewUser) {
     return (
-      <div className="page-wrapper">
-        <div className="page-content">
-          <div className="max-w-2xl mx-auto text-center py-16 fade-in">
-            <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-teal-500 to-teal-700 flex items-center justify-center mx-auto mb-6 shadow-xl">
-              <svg viewBox="0 0 32 32" className="logo-mark" aria-hidden="true">
-                <path d="M3 16h6l2.2-6.2 3.6 12.4 2.8-7.2 1.8 1.8H29" fill="none" stroke="white" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
+      <div className="w-full h-full flex flex-col px-8">
+        <Header />
+        <div className="flex-1 bg-white rounded-[3rem] p-12 shadow-sm border border-border flex flex-col items-center justify-center mb-8">
+          <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-blue-500 to-blue-700 flex items-center justify-center mb-6 shadow-xl">
+            <svg viewBox="0 0 32 32" className="w-10 h-10" aria-hidden="true">
+              <path d="M3 16h6l2.2-6.2 3.6 12.4 2.8-7.2 1.8 1.8H29" fill="none" stroke="white" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </div>
+          <h1 className="text-3xl font-bold text-foreground tracking-tight mb-3">Welcome to AscultiCor</h1>
+          <p className="text-lg text-muted-foreground mb-10 text-center">AI-Powered Cardiac Auscultation and Prediction.<br />Get started with 3 easy steps.</p>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 w-full max-w-4xl">
+            <div className="bg-slate-50 border border-slate-100 rounded-2xl p-6 relative">
+              <div className="p-3 rounded-xl bg-teal-100 w-fit mb-4"><Cpu className="w-6 h-6 text-teal-600" /></div>
+              <h3 className="font-semibold text-lg text-foreground mb-1">1. Register Device</h3>
+              <p className="text-sm text-muted-foreground mb-6">Add your ESP32 + AscultiCor Kit and get credentials</p>
+              <Link href="/devices" className="w-full py-2 bg-primary text-white rounded-lg font-medium text-sm flex items-center justify-center gap-2">Add Device <ArrowUpRight className="w-3.5 h-3.5" /></Link>
             </div>
-            <h1 className="text-3xl font-bold text-foreground tracking-tight mb-3">
-              Welcome to <span className="gradient-text">AscultiCor</span>
-            </h1>
-            <p className="text-lg text-muted-foreground mb-10 leading-relaxed">
-              AI-Powered Cardiac Auscultation and Prediction using heart sounds.
-              <br />Get started by following the steps below.
-            </p>
-
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-left">
-              {/* Step 1 */}
-              <div className="bg-card border border-border rounded-xl p-6 relative overflow-hidden group hover:border-primary/30 transition-colors">
-                <div className="absolute top-3 right-3 text-5xl font-black text-muted-foreground/10">1</div>
-                <div className="p-2.5 rounded-xl bg-teal-50 dark:bg-teal-950/30 w-fit mb-3">
-                  <Cpu className="w-5 h-5 text-teal-600 dark:text-teal-400" />
-                </div>
-                <h3 className="font-semibold text-foreground mb-1">Register Device</h3>
-                <p className="text-sm text-muted-foreground mb-4">Add your ESP32 + AscultiCor Kit and get credentials</p>
-                <Link href="/devices" className="btn-primary text-sm gap-1 w-full justify-center">
-                  Add Device <ArrowUpRight className="w-3.5 h-3.5" />
-                </Link>
-              </div>
-
-              {/* Step 2 */}
-              <div className="bg-card border border-border rounded-xl p-6 relative overflow-hidden group hover:border-primary/30 transition-colors">
-                <div className="absolute top-3 right-3 text-5xl font-black text-muted-foreground/10">2</div>
-                <div className="p-2.5 rounded-xl bg-blue-50 dark:bg-blue-950/30 w-fit mb-3">
-                  <Wifi className="w-5 h-5 text-blue-600 dark:text-blue-400" />
-                </div>
-                <h3 className="font-semibold text-foreground mb-1">Flash & Provision</h3>
-                <p className="text-sm text-muted-foreground mb-4">Flash firmware and send credentials via Serial Monitor</p>
-                <span className="inline-flex items-center text-sm text-muted-foreground">
-                  <Clock className="w-3.5 h-3.5 mr-1" /> After step 1
-                </span>
-              </div>
-
-              {/* Step 3 */}
-              <div className="bg-card border border-border rounded-xl p-6 relative overflow-hidden group hover:border-primary/30 transition-colors">
-                <div className="absolute top-3 right-3 text-5xl font-black text-muted-foreground/10">3</div>
-                <div className="p-2.5 rounded-xl bg-rose-50 dark:bg-rose-950/30 w-fit mb-3">
-                  <Heart className="w-5 h-5 text-rose-600 dark:text-rose-400" />
-                </div>
-                <h3 className="font-semibold text-foreground mb-1">Start Recording</h3>
-                <p className="text-sm text-muted-foreground mb-4">Create a session and record cardiac signals</p>
-                <span className="inline-flex items-center text-sm text-muted-foreground">
-                  <Clock className="w-3.5 h-3.5 mr-1" /> After step 2
-                </span>
-              </div>
+            <div className="bg-slate-50 border border-slate-100 rounded-2xl p-6 relative">
+              <div className="p-3 rounded-xl bg-blue-100 w-fit mb-4"><Wifi className="w-6 h-6 text-blue-600" /></div>
+              <h3 className="font-semibold text-lg text-foreground mb-1">2. Flash & Provision</h3>
+              <p className="text-sm text-muted-foreground mb-6">Flash firmware and send credentials via Serial Monitor</p>
+            </div>
+            <div className="bg-slate-50 border border-slate-100 rounded-2xl p-6 relative">
+              <div className="p-3 rounded-xl bg-rose-100 w-fit mb-4"><Heart className="w-6 h-6 text-rose-600" /></div>
+              <h3 className="font-semibold text-lg text-foreground mb-1">3. Start Recording</h3>
+              <p className="text-sm text-muted-foreground mb-6">Create a session and record cardiac signals instantly.</p>
             </div>
           </div>
         </div>
@@ -362,266 +265,232 @@ export default function Dashboard() {
   }
 
   return (
-    <div className="page-wrapper">
-      <div className="page-content space-y-6">
+    <div className="w-full h-full xl:h-screen flex flex-col px-6 overflow-y-auto overflow-x-hidden">
+      <Header />
 
-        {/* Header */}
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 fade-in">
-          <div>
-            <h1 className="text-2xl font-bold text-foreground tracking-tight">Dashboard</h1>
-            <p className="text-sm text-muted-foreground mt-1">Monitor your cardiac analysis sessions in real-time</p>
-            <p className="text-xs text-muted-foreground mt-1">{lastUpdatedLabel}</p>
+      <div className="flex flex-col xl:flex-row gap-6 pb-2 flex-1 min-h-0">
+
+        {/* Left Column: Hero Title & Main Visual (Heart) */}
+        <div className="xl:w-1/3 flex flex-col min-h-0 shrink-0 flex-grow-0">
+          <h1 className="text-5xl font-black leading-[1.1] text-foreground tracking-tight mb-4 relative z-30">
+            Overview<br />Conditions
+          </h1>
+          <div className="flex-1 relative bg-white/40 rounded-[2.5rem] flex flex-col items-center justify-center min-h-[350px]">
+            {/* The Heart text bubble */}
+            <div className="absolute top-6 left-6 bg-white/95 backdrop-blur-md rounded-2xl p-3 shadow-elevated border border-white z-20 transition-transform hover:scale-105">
+              <div className="flex items-center gap-2 mb-2">
+                <span className="relative flex h-3 w-3">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
+                </span>
+                <span className="text-xs font-semibold text-muted-foreground uppercase tracking-widest">Live Connect</span>
+              </div>
+              <p className="text-xl font-bold">{onlineDevices} / {deviceCount} <span className="text-xs font-medium text-muted-foreground">Devices</span></p>
+              <div className="mt-2 text-[10px] text-muted-foreground">{lastUpdated ? `Last updated: ${lastUpdated.toLocaleTimeString()}` : ''}</div>
+            </div>
+
+            {/* The Animated Heart Visual */}
+            <div className="relative z-10 w-full h-full flex items-center justify-center pointer-events-none">
+              <img
+                src="https://media4.giphy.com/media/v1.Y2lkPTc5MGI3NjExdzNwaDdvdHd4NTR2anI3MnU3amtkazhta3F6ZWxwYWNiMTljYzVweiZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9cw/l6JC0IxMDIS4QrUxO5/giphy.gif"
+                alt="Animated Anatomical Heart"
+                className="w-[85%] h-[85%] object-contain opacity-95 transition-transform hover:scale-105 duration-700 ease-out"
+              />
+            </div>
           </div>
-          <button
-            onClick={() => router.push('/session/new')}
-            className="btn-primary gap-2"
-          >
-            <Plus className="w-4 h-4" />
-            New Session
-          </button>
         </div>
 
-        {/* Stat Cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
-          {[
-            {
-              label: 'Active Sessions',
-              value: activeSessions,
-              icon: Activity,
-              bgLight: 'bg-teal-50 dark:bg-teal-950/30',
-              textColor: 'text-teal-700 dark:text-teal-400',
-              change: todaySessionCount > 0 ? `+${todaySessionCount} today` : 'No sessions today',
-              spark: sparklineData.sessions,
-              sparkColor: 'hsl(172, 66%, 35%)',
-            },
-            {
-              label: 'Devices',
-              value: `${onlineDevices}/${deviceCount}`,
-              icon: Cpu,
-              bgLight: 'bg-blue-50 dark:bg-blue-950/30',
-              textColor: 'text-blue-700 dark:text-blue-400',
-              change: onlineDevices > 0 ? `${onlineDevices} online` : 'All offline',
-              spark: sparklineData.devices,
-              sparkColor: 'hsl(213, 94%, 48%)',
-            },
-            {
-              label: 'Predictions',
-              value: predictionCount,
-              icon: BarChart3,
-              bgLight: 'bg-purple-50 dark:bg-purple-950/30',
-              textColor: 'text-purple-700 dark:text-purple-400',
-              change: `${completedSessions} sessions completed`,
-              spark: sparklineData.predictions,
-              sparkColor: 'hsl(262, 83%, 58%)',
-            },
-            {
-              label: 'Alerts',
-              value: alertCount,
-              icon: AlertTriangle,
-              bgLight: alertCount > 0 ? 'bg-amber-50 dark:bg-amber-950/30' : 'bg-emerald-50 dark:bg-emerald-950/30',
-              textColor: alertCount > 0 ? 'text-amber-700 dark:text-amber-400' : 'text-emerald-700 dark:text-emerald-400',
-              change: alertCount > 0 ? 'Needs attention' : 'All clear OK',
-              spark: sparklineData.alerts,
-              sparkColor: alertCount > 0 ? 'hsl(38, 92%, 50%)' : 'hsl(142, 71%, 35%)',
-            },
-            {
-              label: 'Avg Latency (24h)',
-              value: avgLatencyMs ? `${avgLatencyMs}ms` : '-',
-              icon: Zap,
-              bgLight: 'bg-sky-50 dark:bg-sky-950/30',
-              textColor: 'text-sky-700 dark:text-sky-400',
-              change: avgLatencyMs ? 'Inference speed' : 'No recent data',
-              spark: sparklineData.latency,
-              sparkColor: 'hsl(199, 89%, 48%)',
-            },
-            {
-              label: 'Offline > 1h',
-              value: offlineOverHour,
-              icon: WifiOff,
-              bgLight: offlineOverHour > 0 ? 'bg-amber-50 dark:bg-amber-950/30' : 'bg-emerald-50 dark:bg-emerald-950/30',
-              textColor: offlineOverHour > 0 ? 'text-amber-700 dark:text-amber-400' : 'text-emerald-700 dark:text-emerald-400',
-              change: offlineOverHour > 0 ? 'Needs attention' : 'All clear',
-              spark: sparklineData.offline,
-              sparkColor: offlineOverHour > 0 ? 'hsl(38, 92%, 50%)' : 'hsl(142, 71%, 35%)',
-            },
-          ].map((stat, i) => (
-            <div
-              key={stat.label}
-              className={`stat-card bg-card border border-border slide-up stagger-${(i % 4) + 1}`}
-              style={{ animationFillMode: 'backwards' }}
-            >
-              <div className="flex items-start justify-between">
-                <div>
-                  <p className="text-sm font-medium text-muted-foreground">{stat.label}</p>
-                  <p className="text-3xl font-bold text-foreground mt-1">{stat.value}</p>
-                  <p className={`text-xs font-medium mt-2 ${stat.textColor}`}>{stat.change}</p>
-                  <div className="mt-3">
-                    <Sparkline values={stat.spark} color={stat.sparkColor} />
-                  </div>
+        {/* Middle & Right columns grid */}
+        <div className="xl:w-2/3 flex flex-col gap-4 shrink-0 flex-grow-0 pt-1 h-full min-h-0">
+
+          {/* Top: Stats Grid */}
+          <div className="flex items-center gap-2 mb-1">
+            <span className="w-2 h-2 rounded-full bg-primary"></span>
+            <h2 className="text-sm font-semibold text-foreground tracking-wide">Infrastructure Health</h2>
+          </div>
+          <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 mb-1 shrink-0">
+
+            {/* Active Sessions */}
+            <div className="bg-primary rounded-[1.5rem] p-4 shadow-elevated border border-primary flex flex-col justify-between transform transition-transform hover:-translate-y-1">
+              <div className="flex gap-3">
+                <div className="w-9 h-9 rounded-xl bg-white/20 flex flex-shrink-0 items-center justify-center text-white">
+                  <Activity className="w-4 h-4 fill-current" />
                 </div>
-                <div className={`p-2.5 rounded-xl ${stat.bgLight}`}>
-                  <stat.icon className={`w-5 h-5 ${stat.textColor}`} />
+                <div className="flex flex-col flex-1 truncate">
+                  <p className="text-[10px] text-primary-foreground/80 font-medium mb-0.5 uppercase tracking-wider">Active Sessions</p>
+                  <p className="font-bold text-lg text-white leading-tight">{activeSessions}</p>
                 </div>
               </div>
-            </div>
-          ))}
-        </div>
-
-        {/* Charts Row */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Session Summary */}
-          <div className="page-section slide-up" style={{ animationFillMode: 'backwards', animationDelay: '0.2s' }}>
-            <div className="section-header">
-              <div className="flex items-center gap-2">
-                <Heart className="w-5 h-5 text-teal-600 dark:text-teal-400" />
-                <h3 className="section-title">Session Overview</h3>
+              <div className="h-8 w-full mt-2">
+                <svg viewBox="0 0 100 30" preserveAspectRatio="none" className="w-full h-full stroke-white fill-none stroke-2 opacity-80 mt-1">
+                  <polyline points="0,15 10,15 15,5 20,25 25,15 35,15 40,-5 45,35 50,15 60,15 65,10 70,20 75,15 100,15" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
               </div>
-              <span className="section-subtitle">{sessions.length} total</span>
             </div>
-            {/* Session status breakdown */}
-            <div className="grid grid-cols-2 gap-3 mb-4">
-              {[
-                { label: 'Completed', count: completedSessions, color: 'text-emerald-600 dark:text-emerald-400', bg: 'bg-emerald-50 dark:bg-emerald-950/30' },
-                { label: 'Active', count: activeSessions, color: 'text-blue-600 dark:text-blue-400', bg: 'bg-blue-50 dark:bg-blue-950/30' },
-                { label: 'Created', count: sessions.filter(s => s.status === 'created').length, color: 'text-gray-600 dark:text-gray-400', bg: 'bg-gray-50 dark:bg-gray-950/30' },
-                { label: 'Errors', count: alertCount, color: 'text-red-600 dark:text-red-400', bg: 'bg-red-50 dark:bg-red-950/30' },
-              ].map(item => (
-                <div key={item.label} className={`rounded-lg p-3 ${item.bg}`}>
-                  <p className={`text-2xl font-bold ${item.color}`}>{item.count}</p>
-                  <p className="text-xs text-muted-foreground">{item.label}</p>
+
+            {/* Predictions */}
+            <div className="bg-white rounded-[1.5rem] p-4 shadow-sm border border-border flex flex-col justify-between group hover:shadow-card transition-all">
+              <div className="flex gap-3">
+                <div className="w-9 h-9 rounded-xl bg-purple-50 flex items-center justify-center text-purple-600 group-hover:bg-purple-600 group-hover:text-white transition-colors">
+                  <BarChart3 className="w-4 h-4" />
                 </div>
-              ))}
+                <div className="flex flex-col flex-1 truncate">
+                  <p className="text-[10px] text-muted-foreground font-medium mb-0.5 uppercase tracking-wider">Total Predictions</p>
+                  <p className="font-bold text-lg text-foreground leading-tight">{predictionCount}</p>
+                </div>
+              </div>
+              <div className="h-8 w-full mt-2 opacity-30 flex items-end gap-1">
+                {[40, 60, 45, 80, 50, 70, 45].map((h, i) => (
+                  <div key={i} className="flex-1 bg-slate-300 rounded-sm" style={{ height: `${h}%` }}></div>
+                ))}
+              </div>
             </div>
 
-            {/* Device status */}
-            <div className="flex items-center gap-4 pt-3 border-t border-border">
-              <div className="flex items-center gap-2">
-                <div className={`w-2 h-2 rounded-full ${onlineDevices > 0 ? 'bg-emerald-500 animate-pulse' : 'bg-gray-400'}`} />
-                <span className="text-sm text-muted-foreground">{onlineDevices} device{onlineDevices !== 1 ? 's' : ''} online</span>
+            {/* Avg Latency */}
+            <div className="bg-white rounded-[1.5rem] p-4 shadow-sm border border-border flex flex-col justify-between group hover:shadow-card transition-all">
+              <div className="flex gap-3">
+                <div className="w-9 h-9 rounded-xl bg-sky-50 flex items-center justify-center text-sky-600 group-hover:bg-sky-600 group-hover:text-white transition-colors">
+                  <Zap className="w-4 h-4" />
+                </div>
+                <div className="flex flex-col flex-1 truncate">
+                  <p className="text-[10px] text-muted-foreground font-medium mb-0.5 uppercase tracking-wider">Avg Latency</p>
+                  <p className="font-bold text-lg text-foreground leading-tight">{avgLatencyMs ? `${avgLatencyMs}ms` : '-'}</p>
+                </div>
               </div>
-              <div className="flex items-center gap-2">
-                <WifiOff className="w-3.5 h-3.5 text-muted-foreground" />
-                <span className="text-sm text-muted-foreground">{deviceCount - onlineDevices} offline</span>
+              <div className="h-8 w-full mt-2 relative">
+                <svg viewBox="0 0 100 20" preserveAspectRatio="none" className="w-full h-full stroke-slate-200 fill-transparent stroke-[3px] mt-1">
+                  <path d="M0,20 Q25,5 50,20 T100,20 L100,20 L0,20 Z" />
+                </svg>
+              </div>
+            </div>
+
+            {/* Alerts */}
+            <div className={`bg-white rounded-[1.5rem] p-4 shadow-sm border ${alertCount > 0 ? 'border-red-200' : 'border-border'} flex flex-col justify-between group hover:shadow-card transition-all`}>
+              <div className="flex gap-3">
+                <div className={`w-9 h-9 rounded-xl flex items-center justify-center transition-colors ${alertCount > 0 ? 'bg-red-50 text-red-600' : 'bg-emerald-50 text-emerald-600'}`}>
+                  {alertCount > 0 ? <AlertTriangle className="w-4 h-4" /> : <Wifi className="w-4 h-4" />}
+                </div>
+                <div className="flex flex-col flex-1 truncate">
+                  <p className="text-[10px] text-muted-foreground font-medium mb-0.5 uppercase tracking-wider">System Alerts</p>
+                  <p className={`font-bold text-lg leading-tight ${alertCount > 0 ? 'text-red-600' : 'text-emerald-600'}`}>{alertCount > 0 ? alertCount : 'All Clear'}</p>
+                </div>
+              </div>
+              <div className="h-8 w-full mt-2 flex items-end">
+                <div className={`w-full h-1 rounded-full ${alertCount > 0 ? 'bg-red-200' : 'bg-emerald-100'}`}></div>
+              </div>
+            </div>
+
+            {/* Offline Devices */}
+            <div className={`bg-white rounded-[1.5rem] p-4 shadow-sm border ${offlineOverHour > 0 ? 'border-amber-200' : 'border-border'} flex flex-col justify-between group hover:shadow-card transition-all`}>
+              <div className="flex gap-3">
+                <div className={`w-9 h-9 rounded-xl flex items-center justify-center transition-colors ${offlineOverHour > 0 ? 'bg-amber-50 text-amber-600' : 'bg-slate-50 text-slate-500'}`}>
+                  <WifiOff className="w-4 h-4" />
+                </div>
+                <div className="flex flex-col flex-1 truncate">
+                  <p className="text-[10px] text-muted-foreground font-medium mb-0.5 uppercase tracking-wider">Offline &gt; 1h</p>
+                  <p className={`font-bold text-lg leading-tight ${offlineOverHour > 0 ? 'text-amber-600' : 'text-foreground'}`}>{offlineOverHour}</p>
+                </div>
+              </div>
+              <div className="h-8 w-full mt-2 flex items-end">
+                <div className={`w-full h-1 rounded-full ${offlineOverHour > 0 ? 'bg-amber-200' : 'bg-slate-100'}`}></div>
+              </div>
+            </div>
+
+            {/* Total Devices */}
+            <div className={`bg-white rounded-[1.5rem] p-4 shadow-sm border border-border flex flex-col justify-between group hover:shadow-card transition-all`}>
+              <div className="flex gap-3">
+                <div className={`w-9 h-9 rounded-xl flex items-center justify-center transition-colors bg-indigo-50 text-indigo-600 group-hover:bg-indigo-600 group-hover:text-white`}>
+                  <Cpu className="w-4 h-4" />
+                </div>
+                <div className="flex flex-col flex-1 truncate">
+                  <p className="text-[10px] text-muted-foreground font-medium mb-0.5 uppercase tracking-wider">Total Devices</p>
+                  <p className={`font-bold text-lg leading-tight text-foreground`}>{deviceCount}</p>
+                </div>
+              </div>
+              <div className="h-8 w-full mt-2 flex items-end">
+                <div className={`w-full h-1 rounded-full bg-indigo-100`}></div>
               </div>
             </div>
           </div>
 
-          {/* Weekly Activity */}
-          <div className="page-section slide-up" style={{ animationFillMode: 'backwards', animationDelay: '0.25s' }}>
-            <div className="section-header">
-              <div className="flex items-center gap-2">
-                <TrendingUp className="w-5 h-5 text-blue-600 dark:text-blue-400" />
-                <h3 className="section-title">Weekly Activity</h3>
+          {/* Bottom section: Recharts & Sessions */}
+          <div className="flex-1 flex flex-col lg:flex-row gap-4 min-h-0 pb-2">
+
+            {/* Weekly Activity Bar Chart */}
+            <div className="flex-[2] bg-white rounded-[1.5rem] p-4 flex flex-col shadow-sm border border-border hover:shadow-card transition-shadow min-h-0">
+              <div className="flex items-center justify-between mb-3 shrink-0">
+                <div className="flex items-center gap-2">
+                  <TrendingUp className="w-4 h-4 text-blue-600" />
+                  <h2 className="font-bold text-base text-foreground tracking-tight">Weekly Activity</h2>
+                </div>
+                <div className="flex gap-3 text-[11px] font-semibold">
+                  <div className="flex items-center gap-1 text-slate-500"><div className="w-2 h-2 rounded bg-teal-600"></div>Sessions</div>
+                  <div className="flex items-center gap-1 text-slate-500"><div className="w-2 h-2 rounded bg-blue-500"></div>Predictions</div>
+                </div>
               </div>
-              <span className="section-subtitle">Last 7 days</span>
+              {weeklyData.every(d => d.sessions === 0 && d.predictions === 0) ? (
+                <div className="flex-1 flex flex-col items-center justify-center text-center pb-8">
+                  <BarChart3 className="w-10 h-10 text-muted-foreground/20 mb-3" />
+                  <p className="text-sm text-muted-foreground">No activity this week</p>
+                </div>
+              ) : (
+                <div className="flex-1 min-h-[200px]">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={weeklyData} barCategoryGap="25%">
+                      <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
+                      <XAxis dataKey="day" tick={{ fontSize: 11, fill: '#64748b' }} tickLine={false} axisLine={false} />
+                      <YAxis tick={{ fontSize: 11, fill: '#64748b' }} tickLine={false} axisLine={false} allowDecimals={false} />
+                      <Tooltip
+                        contentStyle={{ backgroundColor: '#fff', border: '1px solid #e2e8f0', borderRadius: '12px', fontSize: '12px', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
+                        cursor={{ fill: '#f8fafc' }}
+                      />
+                      <Bar dataKey="sessions" fill="#0d9488" radius={[6, 6, 0, 0]} name="Sessions" />
+                      <Bar dataKey="predictions" fill="#3b82f6" radius={[6, 6, 0, 0]} name="Predictions" />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
             </div>
-            {weeklyData.every(d => d.sessions === 0 && d.predictions === 0) ? (
-              <div className="flex flex-col items-center justify-center h-[200px] text-center">
-                <BarChart3 className="w-10 h-10 text-muted-foreground/20 mb-3" />
-                <p className="text-sm text-muted-foreground">No activity this week</p>
-                <p className="text-xs text-muted-foreground/60 mt-1">Start a session to see data here</p>
+
+            {/* Recent Sessions List */}
+            <div className="w-full lg:w-1/3 bg-white rounded-[1.5rem] p-4 flex flex-col shadow-sm border border-border hover:shadow-card transition-shadow min-h-0">
+              <div className="flex items-center justify-between mb-3 flex-shrink-0">
+                <div className="flex items-center gap-2">
+                  <Clock className="w-4 h-4 text-muted-foreground" />
+                  <h2 className="font-bold text-base text-foreground tracking-tight">Recent</h2>
+                </div>
+                <Link href="/sessions" className="text-primary text-[11px] font-semibold hover:underline">View All</Link>
               </div>
-            ) : (
-              <ResponsiveContainer width="100%" height={200}>
-                <BarChart data={weeklyData} barCategoryGap="25%">
-                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
-                  <XAxis
-                    dataKey="day"
-                    tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }}
-                    tickLine={false}
-                    axisLine={{ stroke: 'hsl(var(--border))' }}
-                  />
-                  <YAxis
-                    tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }}
-                    tickLine={false}
-                    axisLine={false}
-                    allowDecimals={false}
-                  />
-                  <Tooltip
-                    contentStyle={{
-                      backgroundColor: 'hsl(var(--card))',
-                      border: '1px solid hsl(var(--border))',
-                      borderRadius: '8px',
-                      fontSize: '12px',
-                      color: 'hsl(var(--foreground))',
-                    }}
-                  />
-                  <Bar dataKey="sessions" fill="hsl(172, 66%, 35%)" radius={[6, 6, 0, 0]} name="Sessions" />
-                  <Bar dataKey="predictions" fill="hsl(213, 94%, 48%)" radius={[6, 6, 0, 0]} name="Predictions" />
-                </BarChart>
-              </ResponsiveContainer>
-            )}
+              <div className="flex-1 overflow-y-auto space-y-2.5 pr-1 scrollbar-thin">
+                {sessions.length === 0 ? (
+                  <div className="text-center py-10">
+                    <p className="text-sm text-muted-foreground">No sessions yet.</p>
+                  </div>
+                ) : (
+                  sessions.slice(0, 5).map(session => (
+                    <Link href={`/session/${session.id}`} key={session.id} className="bg-slate-50 hover:bg-slate-100 border border-slate-100 rounded-2xl p-3 flex flex-col gap-2 transition-colors cursor-pointer block">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <div className={`w-8 h-8 flex-shrink-0 rounded-full bg-white flex items-center justify-center font-bold text-xs shadow-sm border border-slate-100 ${session.status === 'done' ? 'text-emerald-500' : session.status === 'error' ? 'text-red-500' : 'text-blue-500'}`}>
+                            {session.status.charAt(0).toUpperCase()}
+                          </div>
+                          <div className="overflow-hidden">
+                            <p className="font-bold text-xs text-slate-800 truncate">S: {session.id.slice(0, 6)}</p>
+                            <p className="text-[10px] text-slate-500 truncate">{new Date(session.created_at).toLocaleTimeString()}</p>
+                          </div>
+                        </div>
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-lg bg-white border shadow-sm flex-shrink-0 ${session.status === 'done' ? 'text-emerald-700 border-emerald-100' : session.status === 'error' ? 'text-red-700 border-red-100' : 'text-blue-700 border-blue-100'}`}>
+                          {session.status}
+                        </span>
+                      </div>
+                    </Link>
+                  ))
+                )}
+              </div>
+            </div>
+
           </div>
         </div>
-
-        {/* Recent Sessions */}
-          <div className="page-section slide-up" style={{ animationFillMode: 'backwards', animationDelay: '0.3s' }}>
-            <div className="section-header">
-              <div className="flex items-center gap-2">
-                <Clock className="w-5 h-5 text-muted-foreground" />
-                <h3 className="section-title">Recent Sessions</h3>
-              </div>
-            <Link href="/sessions" className="text-sm font-medium text-primary hover:text-primary/80 transition-colors">
-              <span className="inline-flex items-center gap-1">
-                View all <ChevronRight className="w-3.5 h-3.5" />
-              </span>
-            </Link>
-          </div>
-
-          {sessions.length === 0 ? (
-            <div className="p-12 text-center">
-              <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-teal-500/15 to-blue-500/10 mx-auto mb-4 flex items-center justify-center">
-                <Heart className="w-7 h-7 text-teal-600" />
-              </div>
-              <h3 className="text-lg font-semibold text-foreground mb-1">No sessions yet</h3>
-              <p className="text-sm text-muted-foreground mb-4">
-                Start a session to capture heart sounds and build your patient baseline.
-              </p>
-              <button onClick={() => router.push('/session/new')} className="btn-primary gap-2">
-                <Plus className="w-4 h-4" />
-                Start First Session
-              </button>
-            </div>
-          ) : (
-            <div className="mt-4">
-              <div className="grid grid-cols-2 gap-3 px-6 table-header">
-                <span>Session</span>
-                <span className="text-right">Status</span>
-              </div>
-              <div className="divide-y divide-border mt-2">
-              {sessions.slice(0, 8).map((session) => (
-                <Link
-                  key={session.id}
-                  href={`/session/${session.id}`}
-                  className="list-row group"
-                >
-                  <div className="flex items-center gap-4">
-                    <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
-                      <Heart className="w-5 h-5 text-primary" />
-                    </div>
-                    <div>
-                      <p className="text-sm font-medium text-foreground">
-                        Session {session.id.slice(0, 8)}
-                      </p>
-                      <p className="text-xs text-muted-foreground mt-0.5">
-                        {new Date(session.created_at).toLocaleString()}
-                        {session.ended_at && `  -  Duration: ${Math.round((new Date(session.ended_at).getTime() - new Date(session.created_at).getTime()) / 1000)}s`}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <span className={`badge ${getStatusBadge(session.status)}`}>
-                      {session.status}
-                    </span>
-                    <ChevronRight className="w-4 h-4 text-muted-foreground group-hover:text-foreground transition-colors" />
-                  </div>
-                </Link>
-              ))}
-            </div>
-            </div>
-          )}
-        </div>
-
       </div>
     </div>
   )

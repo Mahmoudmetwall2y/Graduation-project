@@ -6,8 +6,8 @@ services:
       dockerfile: Dockerfile
     container_name: asculticor-mosquitto
     ports:
-      - "1883:1883"      # MQTT
-      - "9001:9001"      # MQTT over WebSocket
+      - "1883:1883" # MQTT
+      - "9001:9001" # MQTT over WebSocket
     environment:
       - MQTT_USERNAME=${MQTT_USERNAME}
       - MQTT_PASSWORD=${MQTT_PASSWORD}
@@ -18,7 +18,7 @@ services:
       - asculticor-network
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "mosquitto_sub", "-t", "$$SYS/#", "-C", "1", "-i", "healthcheck", "-W", "3", "-u", "${MQTT_USERNAME:?MQTT_USERNAME is required}", "-P", "${MQTT_PASSWORD:?MQTT_PASSWORD is required}"]
+      test: [ "CMD", "mosquitto_pub", "-t", "healthcheck/ping", "-m", "ok", "-i", "hc", "-u", "${MQTT_USERNAME}", "-P", "${MQTT_PASSWORD}", "-q", "0" ]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -36,14 +36,14 @@ services:
       # Supabase
       - SUPABASE_URL=${SUPABASE_URL:?SUPABASE_URL is required}
       - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY:?SUPABASE_SERVICE_ROLE_KEY is required}
-      
+
       # MQTT
       - MQTT_BROKER=mosquitto
       - MQTT_PORT=1883
       - MQTT_USERNAME=${MQTT_USERNAME:?MQTT_USERNAME is required}
       - MQTT_PASSWORD=${MQTT_PASSWORD:?MQTT_PASSWORD is required}
       - MQTT_KEEPALIVE=60
-      
+
       # ML Settings
       - PCG_SAMPLE_RATE=22050
       - PCG_TARGET_DURATION=10
@@ -51,15 +51,15 @@ services:
       - ECG_SAMPLE_RATE=500
       - ECG_WINDOW_SIZE=500
       - ECG_MAX_DURATION=60
-      
+
       # Processing
       - STREAM_TIMEOUT_SEC=10
       - METRICS_UPDATE_HZ=2
       - PREPROCESSING_VERSION=v1.0.0
-      
+
       # Demo Mode
       - ENABLE_DEMO_MODE=${ENABLE_DEMO_MODE:-false}
-      
+
       # Logging
       - LOG_LEVEL=INFO
       - INFERENCE_INTERNAL_TOKEN=${INFERENCE_INTERNAL_TOKEN:?INFERENCE_INTERNAL_TOKEN is required}
@@ -73,7 +73,7 @@ services:
         condition: service_healthy
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      test: [ "CMD", "curl", "-f", "http://localhost:8000/health" ]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -99,9 +99,11 @@ services:
       - asculticor-network
     depends_on:
       - inference
+    env_file:
+      - ./frontend/.env.local
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      test: [ "CMD", "curl", "-f", "http://localhost:3000/api/health" ]
       interval: 30s
       timeout: 10s
       retries: 3

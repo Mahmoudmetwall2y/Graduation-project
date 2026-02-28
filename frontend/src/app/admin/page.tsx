@@ -139,7 +139,7 @@ export default function AdminPage() {
 
   return (
     <div className="page-wrapper">
-      <div className="page-content space-y-6">
+      <div className="page-content space-y-7">
 
         {/* Header */}
         <div className="fade-in">
@@ -161,8 +161,8 @@ export default function AdminPage() {
               key={tab}
               onClick={() => setActiveTab(tab)}
               className={`px-4 py-2 rounded-lg text-sm font-medium capitalize transition-all ${activeTab === tab
-                  ? 'bg-primary/10 text-primary'
-                  : 'text-muted-foreground hover:text-foreground hover:bg-accent/50'
+                ? 'bg-primary/10 text-primary'
+                : 'text-muted-foreground hover:text-foreground hover:bg-accent/50'
                 }`}
             >
               {tab === 'overview' ? 'System Overview' : 'Audit Logs'}
@@ -181,7 +181,7 @@ export default function AdminPage() {
                 { label: 'Predictions', value: systemStats.totalPredictions, icon: Heart, color: 'text-rose-600 dark:text-rose-400', bg: 'bg-rose-50 dark:bg-rose-950/30' },
                 { label: 'Users', value: systemStats.totalUsers, icon: Users, color: 'text-amber-600 dark:text-amber-400', bg: 'bg-amber-50 dark:bg-amber-950/30' },
               ].map(stat => (
-                <div key={stat.label} className="bg-card border border-border rounded-xl p-4">
+                <div key={stat.label} className="bg-card border border-border/60 rounded-2xl p-4 transition-all duration-300 hover:shadow-md">
                   <div className="flex items-center justify-between mb-2">
                     <span className="text-xs font-medium text-muted-foreground uppercase">{stat.label}</span>
                     <div className={`p-1.5 rounded-lg ${stat.bg}`}>

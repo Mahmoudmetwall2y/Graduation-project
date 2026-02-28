@@ -7,9 +7,10 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 function getCorsHeaders(req: Request) {
   const envOrigins = (Deno.env.get('CORS_ORIGIN') || '').split(',').map((o) => o.trim()).filter(Boolean)
   const requestOrigin = req.headers.get('Origin') || ''
+  // F5 fix: unknown origins get 'null' (opaque), not the first allowed origin
   const allowOrigin = envOrigins.length === 0
     ? '*'
-    : (envOrigins.includes(requestOrigin) ? requestOrigin : envOrigins[0])
+    : (envOrigins.includes(requestOrigin) ? requestOrigin : 'null')
 
   return {
     'Access-Control-Allow-Origin': allowOrigin,

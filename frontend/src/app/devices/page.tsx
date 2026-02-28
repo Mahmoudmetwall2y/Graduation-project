@@ -11,6 +11,7 @@ import {
 } from 'lucide-react'
 import { PageSkeleton } from '../components/Skeleton'
 import { useToast } from '../components/Toast'
+import { ConfirmModal } from '../components/ConfirmModal'
 
 interface Device {
   id: string
@@ -218,21 +219,26 @@ export default function DevicesPage() {
   }
 
   if (loading) {
-    return <div className="page-wrapper"><PageSkeleton /></div>
+    return <div className="w-full h-full flex flex-col px-8 py-8"><PageSkeleton /></div>
   }
 
   return (
-    <div className="page-wrapper">
-      <div className="page-content space-y-6">
+    <div className="w-full h-full flex flex-col px-8 py-8 overflow-y-auto">
+      <div className="w-full max-w-7xl mx-auto space-y-7">
         {/* Header */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 fade-in">
-          <div>
-            <h1 className="text-2xl font-bold text-foreground tracking-tight">Devices</h1>
-            <p className="text-sm text-muted-foreground mt-1">
-              Manage your {devices.length} device{devices.length !== 1 ? 's' : ''}
-            </p>
+          <div className="flex items-start gap-4">
+            <div className="p-3 rounded-2xl bg-gradient-to-br from-blue-500/10 to-blue-500/5 ring-1 ring-blue-500/10">
+              <Cpu className="w-6 h-6 text-blue-600 dark:text-blue-400" />
+            </div>
+            <div>
+              <h1 className="text-2xl font-bold text-foreground tracking-tight">Devices</h1>
+              <p className="text-sm text-muted-foreground mt-0.5">
+                Manage your {devices.length} device{devices.length !== 1 ? 's' : ''}
+              </p>
+            </div>
           </div>
-          <button onClick={() => setShowAddModal(true)} className="btn-primary gap-2">
+          <button onClick={() => setShowAddModal(true)} className="btn-primary">
             <Plus className="w-4 h-4" />
             Add Device
           </button>
@@ -280,7 +286,7 @@ export default function DevicesPage() {
         )}
 
         {devices.length === 0 ? (
-          <div className="bg-card border border-border rounded-xl p-12 text-center fade-in">
+          <div className="glass-card p-12 text-center fade-in">
             <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-teal-500/15 to-blue-500/10 mx-auto mb-4 flex items-center justify-center">
               <Cpu className="w-7 h-7 text-teal-600" />
             </div>
@@ -305,7 +311,7 @@ export default function DevicesPage() {
 
           if (filteredDevices.length === 0) {
             return (
-              <div className="bg-card border border-border rounded-xl p-12 text-center fade-in">
+              <div className="glass-card p-12 text-center fade-in">
                 <Search className="w-10 h-10 text-muted-foreground/30 mx-auto mb-3" />
                 <p className="text-sm text-muted-foreground">No devices match your filter</p>
                 <button onClick={() => { setSearchQuery(''); setStatusFilter('all') }} className="text-sm text-primary mt-2 hover:text-primary/80">
@@ -320,63 +326,63 @@ export default function DevicesPage() {
               {filteredDevices.map((device, i) => (
                 <div
                   key={device.id}
-                  className="bg-card border border-border rounded-xl overflow-hidden hover:shadow-lg hover:-translate-y-0.5 transition-all duration-300 slide-up"
+                  className="glass-card hover:-translate-y-1 transition-all duration-300 slide-up group overflow-hidden flex flex-col"
                   style={{ animationDelay: `${i * 0.05}s`, animationFillMode: 'backwards' }}
                 >
-                  <div className="p-5">
-                  <div className="flex items-start justify-between mb-4">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
-                        {getDeviceTypeIcon(device.device_type)}
+                  <div className="p-5 flex-1">
+                    <div className="flex items-start justify-between mb-4">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
+                          {getDeviceTypeIcon(device.device_type)}
+                        </div>
+                        <div>
+                          <h3 className="font-semibold text-foreground">{device.device_name}</h3>
+                          <p className="text-xs text-muted-foreground">
+                            {getDeviceTypeLabel(device.device_type)} &bull; {device.id.slice(0, 8)}
+                          </p>
+                        </div>
                       </div>
-                      <div>
-                        <h3 className="font-semibold text-foreground">{device.device_name}</h3>
-                        <p className="text-xs text-muted-foreground">
-                          {getDeviceTypeLabel(device.device_type)} &bull; {device.id.slice(0, 8)}
-                        </p>
+                      <div className="flex items-center gap-2">
+                        <span className={`badge ${device.status === 'online' ? 'badge-success' :
+                          device.status === 'error' ? 'badge-danger' : 'badge-neutral'
+                          }`}>
+                          <span className={`pulse-dot ${device.status}`} style={{ width: '8px', height: '8px' }} />
+                          {device.status}
+                        </span>
+                        <span className={`badge ${getHealthBadge(device).className}`}>
+                          {getHealthBadge(device).label}
+                        </span>
+                        <div className="relative">
+                          <button
+                            onClick={() => setOpenMenuId(openMenuId === device.id ? null : device.id)}
+                            className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+                            aria-label="Open device menu"
+                          >
+                            <MoreVertical className="w-4 h-4" />
+                          </button>
+                          {openMenuId === device.id && (
+                            <div className="absolute right-0 mt-2 w-36 rounded-lg border border-border bg-card shadow-lg z-10">
+                              <Link
+                                href={`/devices/${device.id}`}
+                                className="block px-3 py-2 text-sm text-foreground hover:bg-accent"
+                                onClick={() => setOpenMenuId(null)}
+                              >
+                                View
+                              </Link>
+                              <button
+                                onClick={() => {
+                                  setOpenMenuId(null)
+                                  setShowDeleteConfirm(device.id)
+                                }}
+                                className="w-full text-left px-3 py-2 text-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30"
+                              >
+                                Delete
+                              </button>
+                            </div>
+                          )}
+                        </div>
                       </div>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <span className={`badge ${device.status === 'online' ? 'badge-success' :
-                        device.status === 'error' ? 'badge-danger' : 'badge-neutral'
-                        }`}>
-                        <span className={`pulse-dot ${device.status}`} style={{ width: '8px', height: '8px' }} />
-                        {device.status}
-                      </span>
-                      <span className={`badge ${getHealthBadge(device).className}`}>
-                        {getHealthBadge(device).label}
-                      </span>
-                      <div className="relative">
-                        <button
-                          onClick={() => setOpenMenuId(openMenuId === device.id ? null : device.id)}
-                          className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
-                          aria-label="Open device menu"
-                        >
-                          <MoreVertical className="w-4 h-4" />
-                        </button>
-                        {openMenuId === device.id && (
-                          <div className="absolute right-0 mt-2 w-36 rounded-lg border border-border bg-card shadow-lg z-10">
-                            <Link
-                              href={`/devices/${device.id}`}
-                              className="block px-3 py-2 text-sm text-foreground hover:bg-accent"
-                              onClick={() => setOpenMenuId(null)}
-                            >
-                              View
-                            </Link>
-                            <button
-                              onClick={() => {
-                                setOpenMenuId(null)
-                                setShowDeleteConfirm(device.id)
-                              }}
-                              className="w-full text-left px-3 py-2 text-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30"
-                            >
-                              Delete
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
 
                     <div className="grid grid-cols-2 gap-3 mb-4">
                       <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -425,51 +431,16 @@ export default function DevicesPage() {
         })()}
 
         {/* Delete Confirmation Modal */}
-        {showDeleteConfirm && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={() => setShowDeleteConfirm(null)} />
-            <div
-              ref={deleteModalRef}
-              role="dialog"
-              aria-modal="true"
-              aria-labelledby="delete-device-title"
-              className="relative bg-card border border-border rounded-2xl shadow-2xl max-w-sm w-full p-6 fade-in"
-            >
-              <div className="text-center mb-6">
-                <div className="w-14 h-14 rounded-2xl bg-red-100 dark:bg-red-950/30 flex items-center justify-center mx-auto mb-3">
-                  <AlertCircle className="w-7 h-7 text-red-600 dark:text-red-400" />
-                </div>
-                <h2 id="delete-device-title" className="text-xl font-bold text-foreground">Delete Device?</h2>
-                <p className="text-sm text-muted-foreground mt-2">
-                  This will permanently delete this device and all its associated sessions, telemetry, and predictions. This action cannot be undone.
-                </p>
-              </div>
-
-              {error && (
-                <div className="mb-4 p-3 rounded-lg bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900/50 text-sm text-red-700 dark:text-red-400">
-                  {error}
-                </div>
-              )}
-
-              <div className="flex gap-3">
-                <button
-                  onClick={() => setShowDeleteConfirm(null)}
-                  className="btn-ghost flex-1"
-                >
-                  Cancel
-                </button>
-                <button
-                  ref={deletePrimaryRef}
-                  onClick={() => showDeleteConfirm && deleteDevice(showDeleteConfirm)}
-                  disabled={deleting === showDeleteConfirm}
-                  className="flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold text-white bg-red-600 hover:bg-red-700 disabled:opacity-50 transition-colors"
-                >
-                  {deleting === showDeleteConfirm ? 'Deleting...' : 'Delete Device'}
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
+        <ConfirmModal
+          isOpen={!!showDeleteConfirm}
+          title="Delete Device?"
+          message="This will permanently delete this device and all its associated sessions, telemetry, and predictions. This action cannot be undone."
+          confirmText="Delete Device"
+          isProcessing={deleting === showDeleteConfirm}
+          error={error}
+          onConfirm={() => showDeleteConfirm && deleteDevice(showDeleteConfirm)}
+          onCancel={() => setShowDeleteConfirm(null)}
+        />
 
         {/* Add Device Modal */}
         {showAddModal && (
@@ -479,8 +450,7 @@ export default function DevicesPage() {
               ref={addModalRef}
               role="dialog"
               aria-modal="true"
-              aria-labelledby="add-device-title"
-              className="relative bg-card border border-border rounded-2xl shadow-2xl max-w-lg w-full p-6 fade-in max-h-[90vh] overflow-y-auto"
+              className="relative glass-card max-w-lg w-full p-6 fade-in max-h-[90vh] overflow-y-auto"
             >
               {!credentials ? (
                 <>

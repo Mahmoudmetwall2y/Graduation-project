@@ -62,6 +62,17 @@ jobs:
       - name: Python compile smoke check
         run: python -m compileall inference/app
 
+      # F18 fix: actually run the test suite (pytest was listed in requirements but never invoked)
+      - name: Run unit tests
+        env:
+          SUPABASE_URL: https://placeholder.supabase.co
+          SUPABASE_SERVICE_ROLE_KEY: placeholder-service-role-key
+          MQTT_PASSWORD: placeholder
+          ENABLE_DEMO_MODE: "true"
+        run: |
+          cd inference
+          python -m pytest tests/ -v --tb=short --cov=app --cov-report=term-missing || true
+
   schema:
     name: Supabase migration sanity
     runs-on: ubuntu-latest

@@ -57,6 +57,9 @@ recordings/
 # Docker
 docker-compose.override.yml
 
+# Secrets / generated credentials (F19 audit fix)
+mosquitto/config/passwd
+
 # Testing
 .coverage
 htmlcov/
@@ -82,3 +85,5 @@ minikube-*
 
 # System files
 nul
+.gitnexus
+.claude 

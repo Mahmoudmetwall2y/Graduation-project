@@ -11,9 +11,12 @@ import {
   Hash,
   FileText,
   X,
-  Activity
+  Activity,
+  Trash2,
+  ChevronRight
 } from 'lucide-react'
 import { PageSkeleton } from '../components/Skeleton'
+import { ConfirmModal } from '../components/ConfirmModal'
 
 interface Patient {
   id: string
@@ -41,6 +44,8 @@ export default function PatientsPage() {
   const [dob, setDob] = useState('')
   const [sex, setSex] = useState<'female' | 'male' | 'other' | 'unknown'>('unknown')
   const [notes, setNotes] = useState('')
+  const [isAdmin, setIsAdmin] = useState(false)
+  const [deletingPatientId, setDeletingPatientId] = useState<string | null>(null)
 
   const fetchPatients = useCallback(async () => {
     try {
@@ -52,6 +57,12 @@ export default function PatientsPage() {
       if (fetchError) throw fetchError
       setPatients(data || [])
       setError(null)
+
+      const { data: userResp } = await supabase.auth.getUser()
+      if (userResp?.user) {
+        const { data: profile } = await supabase.from('profiles').select('role').eq('id', userResp.user.id).single()
+        setIsAdmin(profile?.role === 'admin')
+      }
     } catch (err: any) {
       setError(err.message || 'Failed to load patients')
     } finally {
@@ -126,6 +137,37 @@ export default function PatientsPage() {
     }
   }
 
+  const handleDeletePatient = async (patientId: string) => {
+    setDeletingPatientId(patientId)
+    try {
+      // Need to cascade delete predicting/sessions or rely on DB cascades
+      const { error: deleteError } = await supabase.from('patients').delete().eq('id', patientId)
+      if (deleteError) throw deleteError
+
+      const { data: userResp } = await supabase.auth.getUser()
+      if (userResp.user) {
+        await supabase.from('audit_logs').insert({
+          user_id: userResp.user.id,
+          action: 'patient_deleted',
+          entity_type: 'patient',
+          entity_id: patientId,
+        })
+      }
+
+      fetchPatients()
+    } catch (err: any) {
+      setError(`Failed to delete patient: ${err.message}`)
+    } finally {
+      setDeletingPatientId(null)
+    }
+  }
+
+  const promptDeletePatient = (e: React.MouseEvent, patientId: string) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setDeletingPatientId(patientId)
+  }
+
   const filteredPatients = patients.filter((patient) => {
     if (!searchQuery) return true
     const q = searchQuery.toLowerCase()
@@ -137,20 +179,25 @@ export default function PatientsPage() {
   })
 
   if (loading) {
-    return <div className="page-wrapper"><PageSkeleton /></div>
+    return <div className="w-full h-full flex flex-col px-8 py-8"><PageSkeleton /></div>
   }
 
   return (
-    <div className="page-wrapper">
-      <div className="page-content space-y-6">
+    <div className="w-full h-full flex flex-col px-8 py-8 overflow-y-auto">
+      <div className="w-full max-w-7xl mx-auto space-y-7">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 fade-in">
-          <div>
-            <h1 className="text-2xl font-bold text-foreground tracking-tight">Patients</h1>
-            <p className="text-sm text-muted-foreground mt-1">
-              Manage your {patients.length} patient{patients.length !== 1 ? 's' : ''}
-            </p>
+          <div className="flex items-start gap-4">
+            <div className="p-3 rounded-2xl bg-gradient-to-br from-purple-500/10 to-purple-500/5 ring-1 ring-purple-500/10">
+              <UserRound className="w-6 h-6 text-purple-600 dark:text-purple-400" />
+            </div>
+            <div>
+              <h1 className="text-2xl font-bold text-foreground tracking-tight">Patients</h1>
+              <p className="text-sm text-muted-foreground mt-0.5">
+                Manage your {patients.length} patient{patients.length !== 1 ? 's' : ''}
+              </p>
+            </div>
           </div>
-          <button onClick={() => setShowAddModal(true)} className="btn-primary gap-2">
+          <button onClick={() => setShowAddModal(true)} className="btn-primary">
             <Plus className="w-4 h-4" />
             Add Patient
           </button>
@@ -183,7 +230,7 @@ export default function PatientsPage() {
         )}
 
         {patients.length === 0 ? (
-          <div className="bg-card border border-border rounded-xl p-12 text-center fade-in">
+          <div className="glass-card p-12 text-center fade-in">
             <UserRound className="w-14 h-14 text-muted-foreground/30 mx-auto mb-4" />
             <h3 className="text-lg font-semibold text-foreground mb-2">No patients yet</h3>
             <p className="text-sm text-muted-foreground mb-6 max-w-sm mx-auto">
@@ -195,7 +242,7 @@ export default function PatientsPage() {
             </button>
           </div>
         ) : filteredPatients.length === 0 ? (
-          <div className="bg-card border border-border rounded-xl p-12 text-center fade-in">
+          <div className="glass-card p-12 text-center fade-in">
             <Search className="w-10 h-10 text-muted-foreground/30 mx-auto mb-3" />
             <p className="text-sm text-muted-foreground">No patients match your search</p>
             <button onClick={() => setSearchQuery('')} className="text-sm text-primary mt-2 hover:text-primary/80">
@@ -207,10 +254,10 @@ export default function PatientsPage() {
             {filteredPatients.map((patient, i) => (
               <div
                 key={patient.id}
-                className="bg-card border border-border rounded-xl overflow-hidden hover:shadow-lg hover:-translate-y-0.5 transition-all duration-300 slide-up"
+                className="glass-card hover:-translate-y-1 transition-all duration-300 slide-up group overflow-hidden flex flex-col"
                 style={{ animationDelay: `${i * 0.05}s`, animationFillMode: 'backwards' }}
               >
-                <div className="p-5">
+                <Link href={`/patients/${patient.id}`} className="block p-5">
                   <div className="flex items-start justify-between mb-4">
                     <div className="flex items-center gap-3">
                       <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
@@ -250,16 +297,25 @@ export default function PatientsPage() {
                       <p className="line-clamp-3">{patient.notes}</p>
                     </div>
                   )}
-                </div>
+                </Link>
 
-                <div className="border-t border-border">
+                <div className="border-t border-border flex items-center justify-between">
                   <Link
-                    href="/session/new"
-                    className="flex items-center justify-center gap-2 px-4 py-3 text-sm font-medium text-primary hover:bg-accent transition-colors"
+                    href={`/patients/${patient.id}/session/new`}
+                    className="flex items-center justify-center gap-2 px-4 py-3 text-sm font-medium text-primary hover:bg-accent transition-colors flex-1"
                   >
                     <Activity className="w-4 h-4" />
                     Start Session
                   </Link>
+                  {isAdmin && (
+                    <button
+                      onClick={(e) => promptDeletePatient(e, patient.id)}
+                      className="p-2 text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30 rounded-lg transition-colors"
+                      title="Delete Patient"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  )}
                 </div>
               </div>
             ))}
@@ -273,8 +329,7 @@ export default function PatientsPage() {
               ref={addModalRef}
               role="dialog"
               aria-modal="true"
-              aria-labelledby="add-patient-title"
-              className="relative bg-card border border-border rounded-2xl shadow-2xl max-w-lg w-full p-6 fade-in max-h-[90vh] overflow-y-auto"
+              className="relative glass-card max-w-lg w-full fade-in max-h-[90vh] overflow-y-auto"
             >
               <div className="flex items-center justify-between mb-6">
                 <h2 id="add-patient-title" className="text-xl font-bold text-foreground">Add New Patient</h2>
@@ -356,6 +411,19 @@ export default function PatientsPage() {
           </div>
         )}
       </div>
+
+      {/* Delete Patient Modal */}
+      <ConfirmModal
+        isOpen={!!deletingPatientId}
+        title="Delete Patient?"
+        message="Are you sure you want to delete this patient? All associated sessions and data will be permanently removed. This action cannot be undone."
+        confirmText="Delete Patient"
+        error={error}
+        isProcessing={false} // State is managed internally during await
+        onConfirm={() => deletingPatientId && handleDeletePatient(deletingPatientId)}
+        onCancel={() => setDeletingPatientId(null)}
+      />
     </div>
   )
 }
+

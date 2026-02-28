@@ -15,6 +15,7 @@ import {
 } from 'lucide-react'
 import { PageSkeleton } from '../components/Skeleton'
 import { useToast } from '../components/Toast'
+import { ConfirmModal } from '../components/ConfirmModal'
 
 interface SessionRow {
   id: string
@@ -64,17 +65,25 @@ export default function SessionsPage() {
   const [dateTo, setDateTo] = useState('')
   const [predictionLabel, setPredictionLabel] = useState('')
   const [viewName, setViewName] = useState('')
+  const [isAdmin, setIsAdmin] = useState(false)
+  const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null)
 
   const fetchLookups = useCallback(async () => {
-    const [devicesRes, patientsRes, viewsRes] = await Promise.all([
+    const [devicesRes, patientsRes, viewsRes, userRes] = await Promise.all([
       supabase.from('devices').select('id, device_name').order('created_at', { ascending: false }),
       supabase.from('patients').select('id, full_name').order('created_at', { ascending: false }),
       supabase.from('saved_views').select('id, name, filters').eq('view_type', 'sessions').order('created_at', { ascending: false }),
+      supabase.auth.getUser()
     ])
 
     if (!devicesRes.error) setDevices(devicesRes.data || [])
     if (!patientsRes.error) setPatients(patientsRes.data || [])
     if (!viewsRes.error) setSavedViews(viewsRes.data || [])
+
+    if (userRes.data?.user) {
+      const { data: profile } = await supabase.from('profiles').select('role').eq('id', userRes.data.user.id).single()
+      setIsAdmin(profile?.role === 'admin')
+    }
   }, [supabase])
 
   const buildSessionQuery = useCallback(async () => {
@@ -232,19 +241,55 @@ export default function SessionsPage() {
     }
   }
 
+  const handleDeleteSession = async (sessionId: string) => {
+    setDeletingSessionId(sessionId)
+    try {
+      // Related predictions should cascade delete or delete first
+      await supabase.from('predictions').delete().eq('session_id', sessionId)
+      const { error } = await supabase.from('sessions').delete().eq('id', sessionId)
+      if (error) throw error
+
+      const { data: userResp } = await supabase.auth.getUser()
+      if (userResp.user) {
+        await supabase.from('audit_logs').insert({
+          user_id: userResp.user.id,
+          action: 'session_deleted',
+          entity_type: 'session',
+          entity_id: sessionId,
+        })
+      }
+      showToast('Session deleted', 'success')
+      fetchSessions()
+    } catch (err: any) {
+      showToast(`Failed to delete session: ${err.message}`, 'error')
+    } finally {
+      setDeletingSessionId(null)
+    }
+  }
+
+  const promptDeleteSession = (e: React.MouseEvent, sessionId: string) => {
+    e.preventDefault()
+    setDeletingSessionId(sessionId)
+  }
+
   if (loading && sessions.length === 0) {
-    return <div className="page-wrapper"><PageSkeleton /></div>
+    return <div className="w-full h-full flex flex-col px-8 py-8"><PageSkeleton /></div>
   }
 
   return (
-    <div className="page-wrapper">
-      <div className="page-content space-y-6">
+    <div className="w-full h-full flex flex-col px-8 py-8 overflow-y-auto">
+      <div className="w-full max-w-7xl mx-auto space-y-7">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 fade-in">
-          <div>
-            <h1 className="text-2xl font-bold text-foreground tracking-tight">Sessions</h1>
-            <p className="text-sm text-muted-foreground mt-1">
-              Filter and review recorded sessions
-            </p>
+          <div className="flex items-start gap-4">
+            <div className="p-3 rounded-2xl bg-gradient-to-br from-indigo-500/10 to-indigo-500/5 ring-1 ring-indigo-500/10">
+              <Calendar className="w-6 h-6 text-indigo-600 dark:text-indigo-400" />
+            </div>
+            <div>
+              <h1 className="text-2xl font-bold text-foreground tracking-tight">Sessions</h1>
+              <p className="text-sm text-muted-foreground mt-0.5">
+                Filter and review recorded sessions
+              </p>
+            </div>
           </div>
           <Link href="/session/new" className="btn-primary gap-2">
             <Plus className="w-4 h-4" />
@@ -416,10 +461,20 @@ export default function SessionsPage() {
                         </div>
                       </div>
                       <div className="flex items-center gap-3">
-                        <span className={`badge ${statusMeta.badge}`}>
+                        <span className={`badge ${statusMeta.badge} hidden sm:inline-flex`}>
                           <span className={`w-1.5 h-1.5 rounded-full ${statusMeta.dot}`} />
                           {session.status}
                         </span>
+
+                        {isAdmin && (
+                          <button
+                            onClick={(e) => promptDeleteSession(e, session.id)}
+                            className="p-2 text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30 rounded-lg transition-colors"
+                            title="Delete Session"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        )}
                         <ChevronRight className="w-4 h-4 text-muted-foreground group-hover:text-foreground transition-colors" />
                       </div>
                     </Link>
@@ -430,6 +485,17 @@ export default function SessionsPage() {
           )}
         </div>
       </div>
+
+      {/* Delete Session Modal */}
+      <ConfirmModal
+        isOpen={!!deletingSessionId}
+        title="Delete Session?"
+        message="Are you sure you want to delete this session? All associated predictions and data will be permanently removed. This action cannot be undone."
+        confirmText="Delete Session"
+        isProcessing={false} // State is managed internally due to awaits inside try block
+        onConfirm={() => deletingSessionId && handleDeleteSession(deletingSessionId)}
+        onCancel={() => setDeletingSessionId(null)}
+      />
     </div>
   )
 }

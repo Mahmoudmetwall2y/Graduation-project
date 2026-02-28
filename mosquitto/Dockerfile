@@ -2,6 +2,7 @@ FROM eclipse-mosquitto:2.0
 
 # Copy configuration and startup entrypoint
 COPY config/mosquitto.conf /mosquitto/config/mosquitto.conf
+COPY config/acl            /mosquitto/config/acl
 COPY scripts/entrypoint.sh /usr/local/bin/entrypoint.sh
 
 # Normalize line endings + ensure executable bit inside image

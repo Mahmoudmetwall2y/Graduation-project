@@ -64,16 +64,21 @@ export default function AlertsPage() {
   })
 
   if (loading) {
-    return <div className="page-wrapper"><PageSkeleton /></div>
+    return <div className="w-full h-full flex flex-col px-8 py-8"><PageSkeleton /></div>
   }
 
   return (
-    <div className="page-wrapper">
-      <div className="page-content space-y-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold text-foreground tracking-tight">Alerts</h1>
-            <p className="text-sm text-muted-foreground mt-1">Device alerts and anomalies</p>
+    <div className="w-full h-full flex flex-col px-8 py-8 overflow-y-auto">
+      <div className="w-full max-w-7xl mx-auto space-y-7">
+        <div className="flex items-center justify-between fade-in">
+          <div className="flex items-start gap-4">
+            <div className="p-3 rounded-2xl bg-gradient-to-br from-rose-500/10 to-rose-500/5 ring-1 ring-rose-500/10">
+              <Bell className="w-6 h-6 text-rose-600 dark:text-rose-400" />
+            </div>
+            <div>
+              <h1 className="text-2xl font-bold text-foreground tracking-tight">Alerts</h1>
+              <p className="text-sm text-muted-foreground mt-0.5">Device alerts and anomalies</p>
+            </div>
           </div>
         </div>
 
