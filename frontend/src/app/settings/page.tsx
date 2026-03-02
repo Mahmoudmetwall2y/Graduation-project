@@ -7,6 +7,7 @@ import {
     AlertCircle, Eye, EyeOff, Mail, Shield
 } from 'lucide-react'
 import { PageSkeleton } from '../components/Skeleton'
+import { GlassCard } from '../../components/ui/GlassCard'
 
 interface Profile {
     id: string
@@ -215,20 +216,20 @@ export default function SettingsPage() {
 
                 {/* Notifications */}
                 {success && (
-                    <div className="rounded-lg bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-900/50 p-4 fade-in flex items-center gap-2">
-                        <CheckCircle className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
-                        <p className="text-sm text-emerald-700 dark:text-emerald-400">{success}</p>
+                    <div className="rounded-lg bg-emerald-500/10 border border-emerald-500/30 p-4 fade-in flex items-center gap-2 shadow-[0_0_15px_rgba(16,185,129,0.1)]">
+                        <CheckCircle className="w-4 h-4 text-emerald-400 shrink-0" />
+                        <p className="text-sm text-emerald-400">{success}</p>
                     </div>
                 )}
                 {error && (
-                    <div className="rounded-lg bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900/50 p-4 fade-in flex items-center gap-2">
-                        <AlertCircle className="w-4 h-4 text-red-600 dark:text-red-400 shrink-0" />
-                        <p className="text-sm text-red-700 dark:text-red-400">{error}</p>
+                    <div className="rounded-lg bg-hud-red/10 border border-hud-red/30 p-4 fade-in flex items-center gap-2 shadow-[0_0_15px_rgba(255,51,51,0.15)]">
+                        <AlertCircle className="w-4 h-4 text-hud-red shrink-0" />
+                        <p className="text-sm text-hud-red">{error}</p>
                     </div>
                 )}
 
                 {/* Tab Navigation */}
-                <div className="flex gap-1 bg-card border border-border rounded-xl p-1">
+                <div className="flex gap-1 bg-hud-surface-glass border border-hud-border/40 rounded-xl p-1 backdrop-blur-md">
                     {tabs.map(tab => {
                         const Icon = tab.icon
                         return (
@@ -236,8 +237,8 @@ export default function SettingsPage() {
                                 key={tab.key}
                                 onClick={() => { setActiveTab(tab.key); setError(null); setSuccess(null) }}
                                 className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium transition-all ${activeTab === tab.key
-                                        ? 'bg-primary/10 text-primary'
-                                        : 'text-muted-foreground hover:text-foreground hover:bg-accent/50'
+                                    ? 'bg-hud-cyan/10 text-hud-cyan border border-hud-cyan/30 shadow-[inset_0_0_15px_rgba(0,240,255,0.15)]'
+                                    : 'text-white/60 hover:text-white hover:bg-hud-cyan/5 border border-transparent'
                                     }`}
                             >
                                 <Icon className="w-4 h-4" />
@@ -249,7 +250,7 @@ export default function SettingsPage() {
 
                 {/* Profile Tab */}
                 {activeTab === 'profile' && (
-                    <div className="bg-card border border-border rounded-xl p-6 space-y-5 slide-up">
+                    <GlassCard className="space-y-5 slide-up">
                         <h2 className="text-lg font-semibold text-foreground">Profile Information</h2>
 
                         <div>
@@ -361,12 +362,12 @@ export default function SettingsPage() {
                                 )}
                             </div>
                         </div>
-                    </div>
+                    </GlassCard>
                 )}
 
                 {/* Security Tab */}
                 {activeTab === 'security' && (
-                    <div className="bg-card border border-border rounded-xl p-6 space-y-5 slide-up">
+                    <GlassCard className="space-y-5 slide-up">
                         <h2 className="text-lg font-semibold text-foreground">Change Password</h2>
                         <p className="text-sm text-muted-foreground">Update your password to keep your account secure</p>
 
@@ -427,12 +428,12 @@ export default function SettingsPage() {
                                 {changingPassword ? 'Changing...' : 'Change Password'}
                             </button>
                         </div>
-                    </div>
+                    </GlassCard>
                 )}
 
                 {/* Organization Tab */}
                 {activeTab === 'organization' && (
-                    <div className="bg-card border border-border rounded-xl p-6 space-y-5 slide-up">
+                    <GlassCard className="space-y-5 slide-up">
                         <h2 className="text-lg font-semibold text-foreground">Organization</h2>
                         <p className="text-sm text-muted-foreground">Your organization details</p>
 
@@ -474,7 +475,7 @@ export default function SettingsPage() {
                                 />
                             </div>
                         </div>
-                    </div>
+                    </GlassCard>
                 )}
             </div>
         </div>

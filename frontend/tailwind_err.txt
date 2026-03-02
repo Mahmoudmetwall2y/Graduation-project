@@ -1,0 +1,731 @@
+
+Rebuilding...
+CssSyntaxError: tailwindcss: D:\cardiosense-project\cardiosense\frontend\src\app\globals.css:264:5: The `border-hud-border/30` class does not exist. If `border-hud-border/30` is a custom class, make sure it is defined within a `@layer` directive.
+    at Input.error (D:\cardiosense-project\cardiosense\frontend\node_modules\postcss\lib\input.js:135:16)
+    at AtRule.error (D:\cardiosense-project\cardiosense\frontend\node_modules\postcss\lib\node.js:146:32)
+    at processApply (D:\cardiosense-project\cardiosense\frontend\node_modules\tailwindcss\lib\lib\expandApplyAtRules.js:380:29)
+    at D:\cardiosense-project\cardiosense\frontend\node_modules\tailwindcss\lib\lib\expandApplyAtRules.js:551:9
+    at D:\cardiosense-project\cardiosense\frontend\node_modules\tailwindcss\lib\processTailwindFeatures.js:55:50
+    at async Object.Once (D:\cardiosense-project\cardiosense\frontend\node_modules\tailwindcss\lib\cli\build\plugin.js:248:17)
+    at async LazyResult.runAsync (D:\cardiosense-project\cardiosense\frontend\node_modules\postcss\lib\lazy-result.js:293:11)
+    at async build (D:\cardiosense-project\cardiosense\frontend\node_modules\tailwindcss\lib\cli\build\index.js:49:9) {
+  reason: 'The `border-hud-border/30` class does not exist. If `border-hud-border/30` is a custom class, make sure it is defined within a `@layer` directive.',
+  file: 'D:\\cardiosense-project\\cardiosense\\frontend\\src\\app\\globals.css',
+  source: '@tailwind base;\r\n' +
+    '@tailwind components;\r\n' +
+    '@tailwind utilities;\r\n' +
+    '\r\n' +
+    '/* Google Fonts: Sora + Source Sans 3 */\r\n' +
+    "@import url('https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700;800&family=Source+Sans+3:wght@400;500;600;700&display=swap');\r\n" +
+    '\r\n' +
+    '@layer base {\r\n' +
+    '  :root {\r\n' +
+    "    --font-sans: 'Source Sans 3', ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;\r\n" +
+    "    --font-display: 'Sora', 'Source Sans 3', ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;\r\n" +
+    '\r\n' +
+    '    /* NovaHealth HUD Tokens */\r\n' +
+    '    --hud-bg-base: #0a0e17;\r\n' +
+    '    --hud-surface-glass: rgba(16, 24, 39, 0.6);\r\n' +
+    '    --hud-surface-blur: blur(12px);\r\n' +
+    '    --hud-border: rgba(100, 200, 255, 0.15);\r\n' +
+    '\r\n' +
+    '    --hud-accent-cyan: #00f0ff;\r\n' +
+    '    --hud-accent-violet: #8a2be2;\r\n' +
+    '    --hud-accent-amber: #ffb800;\r\n' +
+    '    --hud-accent-red: #ff3333;\r\n' +
+    '\r\n' +
+    '    --hud-radius-lg: 16px;\r\n' +
+    '    --hud-radius-xl: 24px;\r\n' +
+    '\r\n' +
+    '    --background: 210 20% 98%;\r\n' +
+    '    --foreground: 215 25% 10%;\r\n' +
+    '    --card: 0 0% 100%;\r\n' +
+    '    --card-foreground: 215 25% 10%;\r\n' +
+    '    --popover: 0 0% 100%;\r\n' +
+    '    --popover-foreground: 215 25% 10%;\r\n' +
+    '    --primary: 172 66% 26%;\r\n' +
+    '    --primary-foreground: 0 0% 100%;\r\n' +
+    '    --brand-blue: 210 80% 40%;\r\n' +
+    '    --brand-amber: 38 92% 50%;\r\n' +
+    '    --secondary: 210 20% 96%;\r\n' +
+    '    --secondary-foreground: 215 25% 10%;\r\n' +
+    '    --muted: 210 20% 96%;\r\n' +
+    '    --muted-foreground: 215 16% 47%;\r\n' +
+    '    --text-soft: 215 14% 55%;\r\n' +
+    '    --accent: 172 50% 94%;\r\n' +
+    '    --accent-foreground: 172 66% 20%;\r\n' +
+    '    --destructive: 0 72% 51%;\r\n' +
+    '    --destructive-foreground: 0 0% 100%;\r\n' +
+    '    --border: 214 20% 90%;\r\n' +
+    '    --input: 214 20% 90%;\r\n' +
+    '    --ring: 172 66% 26%;\r\n' +
+    '    --radius: 0.75rem;\r\n' +
+    '\r\n' +
+    '    /* Custom medical palette */\r\n' +
+    '    --medical-teal: 172 66% 26%;\r\n' +
+    '    --medical-teal-light: 172 50% 94%;\r\n' +
+    '    --medical-red: 0 72% 51%;\r\n' +
+    '    --medical-red-light: 0 80% 95%;\r\n' +
+    '    --medical-blue: 213 94% 48%;\r\n' +
+    '    --medical-blue-light: 213 80% 95%;\r\n' +
+    '    --medical-green: 142 71% 35%;\r\n' +
+    '    --medical-green-light: 142 60% 94%;\r\n' +
+    '    --medical-amber: 38 92% 50%;\r\n' +
+    '    --medical-amber-light: 38 80% 94%;\r\n' +
+    '    --medical-purple: 262 83% 58%;\r\n' +
+    '    --medical-purple-light: 262 60% 95%;\r\n' +
+    '\r\n' +
+    '    /* Gradient tokens */\r\n' +
+    '    --gradient-primary: linear-gradient(135deg, hsl(172 66% 26%) 0%, hsl(188 70% 35%) 55%, hsl(210 80% 40%) 100%);\r\n' +
+    '    --gradient-hero: linear-gradient(135deg, hsl(215 25% 10%) 0%, hsl(172 40% 18%) 50%, hsl(215 25% 10%) 100%);\r\n' +
+    '    --gradient-card: linear-gradient(135deg, rgba(255, 255, 255, 0.9) 0%, rgba(240, 253, 250, 0.8) 100%);\r\n' +
+    '    --shadow-soft: 0 20px 60px -50px rgba(15, 23, 42, 0.35);\r\n' +
+    '    --shadow-card: 0 30px 80px -60px rgba(15, 23, 42, 0.45);\r\n' +
+    '  }\r\n' +
+    '\r\n' +
+    '  .dark {\r\n' +
+    '    --background: 222 30% 7%;\r\n' +
+    '    --foreground: 210 40% 98%;\r\n' +
+    '    --card: 222 30% 10%;\r\n' +
+    '    --card-foreground: 210 40% 98%;\r\n' +
+    '    --popover: 222 30% 10%;\r\n' +
+    '    --popover-foreground: 210 40% 98%;\r\n' +
+    '    --primary: 172 55% 45%;\r\n' +
+    '    --primary-foreground: 0 0% 100%;\r\n' +
+    '    --brand-blue: 210 85% 55%;\r\n' +
+    '    --brand-amber: 38 92% 55%;\r\n' +
+    '    --secondary: 217 25% 15%;\r\n' +
+    '    --secondary-foreground: 210 40% 98%;\r\n' +
+    '    --muted: 217 25% 15%;\r\n' +
+    '    --muted-foreground: 215 20% 65%;\r\n' +
+    '    --text-soft: 215 18% 70%;\r\n' +
+    '    --accent: 172 30% 15%;\r\n' +
+    '    --accent-foreground: 172 55% 60%;\r\n' +
+    '    --destructive: 0 62% 45%;\r\n' +
+    '    --destructive-foreground: 210 40% 98%;\r\n' +
+    '    --border: 217 25% 18%;\r\n' +
+    '    --input: 217 25% 18%;\r\n' +
+    '    --ring: 172 55% 45%;\r\n' +
+    '\r\n' +
+    '    --gradient-primary: linear-gradient(135deg, hsl(172 55% 35%) 0%, hsl(188 60% 30%) 55%, hsl(210 85% 55%) 100%);\r\n' +
+    '    --gradient-hero: linear-gradient(135deg, hsl(222 30% 5%) 0%, hsl(172 30% 12%) 50%, hsl(222 30% 5%) 100%);\r\n' +
+    '    --gradient-card: linear-gradient(135deg, rgba(20, 30, 40, 0.9) 0%, rgba(15, 40, 35, 0.8) 100%);\r\n' +
+    '    --shadow-soft: 0 20px 60px -50px rgba(2, 6, 23, 0.6);\r\n' +
+    '    --shadow-card: 0 40px 90px -65px rgba(2, 6, 23, 0.7);\r\n' +
+    '  }\r\n' +
+    '}\r\n' +
+    '\r\n' +
+    '@layer base {\r\n' +
+    '  * {\r\n' +
+    '    @apply border-border;\r\n' +
+    '  }\r\n' +
+    '\r\n' +
+    '  body {\r\n' +
+    '    @apply bg-background text-foreground;\r\n' +
+    '    font-family: var(--font-sans);\r\n' +
+    '    -webkit-font-smoothing: antialiased;\r\n' +
+    '    -moz-osx-font-smoothing: grayscale;\r\n' +
+    '  }\r\n' +
+    '\r\n' +
+    '  h1,\r\n' +
+    '  h2,\r\n' +
+    '  h3,\r\n' +
+    '  h4,\r\n' +
+    '  h5,\r\n' +
+    '  h6 {\r\n' +
+    '    font-family: var(--font-display);\r\n' +
+    '    letter-spacing: -0.01em;\r\n' +
+    '  }\r\n' +
+    '\r\n' +
+    '  p {\r\n' +
+    '    color: hsl(var(--text-soft));\r\n' +
+    '  }\r\n' +
+    '}\r\n' +
+    '\r\n' +
+    '@layer components {\r\n' +
+    '\r\n' +
+    '  /* Glass card effect */\r\n' +
+    '  .glass-card {\r\n' +
+    '    @apply rounded-xl border border-white/20 shadow-lg;\r\n' +
+    '    background: var(--gradient-card);\r\n' +
+    '    backdrop-filter: blur(12px);\r\n' +
+    '  }\r\n' +
+    '\r\n' +
+    '  .hud-glass-panel {\r\n' +
+    '    background-color: var(--hud-surface-glass);\r\n' +
+    '    backdrop-filter: var(--hud-surface-blur);\r\n' +
+    '    border: 1px solid var(--hud-border);\r\n' +
+    '    border-radius: var(--hud-radius-lg);\r\n' +
+    '  }\r\n' +
+    '\r\n' +
+    '  .dark .glass-card {\r\n' +
+    '    @apply border-white/10;\r\n' +
+    '    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);\r\n' +
+    '  }\r\n' +
+    '\r\n' +
+    '  /* Stat card */\r\n' +
+    '  .stat-card {\r\n' +
+    '    @apply relative overflow-hidden rounded-xl p-6 transition-all duration-300;\r\n' +
+    '    box-shadow: var(--shadow-soft);\r\n' +
+    '    @apply hover:-translate-y-0.5;\r\n' +
+    '  }\r\n' +
+    '\r\n' +
+    '  .stat-card::before {\r\n' +
+    "    content: '';\r\n" +
+    '    @apply absolute inset-0 opacity-0 transition-opacity duration-300;\r\n' +
+    '    background: linear-gradient(135deg, rgba(255, 255, 255, 0.1) 0%, transparent 100%);\r\n' +
+    '  }\r\n' +
+    '\r\n' +
+    '  .stat-card:hover::before {\r\n' +
+    '    @apply opacity-100;\r\n' +
+    '  }\r\n' +
+    '\r\n' +
+    '  /* Pulse dot for online status */\r\n' +
+    '  .pulse-dot {\r\n' +
+    '    @apply relative inline-flex h-3 w-3;\r\n' +
+    '  }\r\n' +
+    '\r\n' +
+    '  .pulse-dot::before {\r\n' +
+    "    content: '';\r\n" +
+    '    @apply absolute inline-flex h-full w-full rounded-full opacity-75;\r\n' +
+    '    animation: ping-slow 2s cubic-bezier(0, 0, 0.2, 1) infinite;\r\n' +
+    '  }\r\n' +
+    '\r\n' +
+    '  .pulse-dot::after {\r\n' +
+    "    content: '';\r\n" +
+    '    @apply relative inline-flex h-3 w-3 rounded-full;\r\n' +
+    '  }\r\n' +
+    '\r\n' +
+    '  .pulse-dot.online::before {\r\n' +
+    '    @apply bg-emerald-400;\r\n' +
+    '  }\r\n' +
+    '\r\n' +
+    '  .pulse-dot.online::after {\r\n' +
+    '    @apply bg-emerald-500;\r\n' +
+    '  }\r\n' +
+    '\r\n' +
+    '  .pulse-dot.offline::before {\r\n' +
+    '    @apply bg-gray-400;\r\n' +
+    '    animation: none;\r\n' +
+    '  }\r\n' +
+    '\r\n' +
+    '  .pulse-dot.offline::after {\r\n' +
+    '    @apply bg-gray-400;\r\n' +
+    '  }\r\n' +
+    '\r\n' +
+    '  .pulse-dot.error::before {\r\n' +
+    '    @apply bg-red-400;\r\n' +
+    '  }\r\n' +
+    '\r\n' +
+    '  .pulse-dot.error::after {\r\n' +
+    '    @apply bg-red-500;\r\n' +
+    '  }\r\n' +
+    '\r\n' +
+    '  /* Gradient text */\r\n' +
+    '  .gradient-text {\r\n' +
+    '    @apply bg-clip-text text-transparent;\r\n' +
+    '    background-image: var(--gradient-primary);\r\n' +
+    '  }\r\n' +
+    '\r\n' +
+    '  /* Skeleton loader */\r\n' +
+    '  .skeleton {\r\n' +
+    '    @apply relative overflow-hidden rounded-md bg-muted;\r\n' +
+    '  }\r\n' +
+    '\r\n' +
+    '  .skeleton::after {\r\n' +
+    "    content: '';\r\n" +
+    '    @apply absolute inset-0;\r\n' +
+    '    background: linear-gradient(90deg,\r\n' +
+    '        transparent 0%,\r\n' +
+    '        rgba(255, 255, 255, 0.15) 50%,\r\n' +
+    '        transparent 100%);\r\n' +
+    '    animation: shimmer 2s infinite;\r\n' +
+    '  }\r\n' +
+    '\r\n' +
+    '  /* Primary button with gradient */\r\n' +
+    '  .btn-primary {\r\n' +
+    '    @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-bold tracking-widest uppercase transition-all duration-300 text-[#00f0ff] border border-[#00f0ff]/30;\r\n' +
+    '    background-color: rgba(0, 240, 255, 0.1);\r\n' +
+    '    box-shadow: 0 0 15px rgba(0, 240, 255, 0.15);\r\n' +
+    '  }\r\n' +
+    '\r\n' +
+    '  .btn-primary:hover {\r\n' +
+    '    @apply bg-[#00f0ff]/20 border-[#00f0ff]/50;\r\n' +
+    '    box-shadow: 0 0 20px rgba(0, 240, 255, 0.3);\r\n' +
+    '    filter: brightness(1.2) drop-shadow(0 0 8px rgba(0, 240, 255, 0.4));\r\n' +
+    '  }\r\n' +
+    '\r\n' +
+    '  .btn-primary:disabled {\r\n' +
+    '    @apply opacity-50 cursor-not-allowed;\r\n' +
+    '  }\r\n' +
+    '\r\n' +
+    '  .btn-primary:disabled:hover {\r\n' +
+    '    @apply bg-[#00f0ff]/10;\r\n' +
+    '    box-shadow: 0 0 15px rgba(0, 240, 255, 0.15);\r\n' +
+    '  }\r\n' +
+    '\r\n' +
+    '  .btn-primary:focus-visible,\r\n' +
+    '  .btn-secondary:focus-visible,\r\n' +
+    '  .btn-ghost:focus-visible,\r\n' +
+    '  .input-field:focus-visible {\r\n' +
+    '    outline: none;\r\n' +
+    '  }\r\n' +
+    '\r\n' +
+    '  /* Secondary button */\r\n' +
+    '  .btn-secondary {\r\n' +
+    '    @apply inline-flex items-center justify-center rounded-lg px-4 py-2.5 text-sm font-bold uppercase tracking-widest transition-all duration-300;\r\n' +
+    '    @apply bg-black/40 text-white/80 border border-hud-border/30;\r\n' +
+    '  }\r\n' +
+    '\r\n' +
+    '  .btn-secondary:hover {\r\n' +
+    '    @apply bg-white/5 text-white border-hud-border/60;\r\n' +
+    '    box-shadow: 0 0 15px rgba(255, 255, 255, 0.05);\r\n' +
+    '  }\r\n' +
+    '\r\n' +
+    '  /* Ghost button */\r\n' +
+    '  .btn-ghost {\r\n' +
+    '    @apply inline-flex items-center justify-center rounded-lg px-4 py-2.5 text-sm font-bold tracking-widest uppercase transition-all duration-300;\r\n' +
+    '    @apply text-white/50 hover:text-hud-cyan hover:bg-hud-cyan/10;\r\n' +
+    '  }\r\n' +
+    '\r\n' +
+    '  /* Badge styles */\r\n' +
+    '  .badge {\r\n' +
+    '    @apply inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold transition-colors;\r\n' +
+    '  }\r\n' +
+    '\r\n' +
+    '  .badge-success {\r\n' +
+    '    @apply bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400;\r\n' +
+    '  }\r\n' +
+    '\r\n' +
+    '  .badge-warning {\r\n' +
+    '    @apply bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400;\r\n' +
+    '  }\r\n' +
+    '\r\n' +
+    '  .badge-danger {\r\n' +
+    '    @apply bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400;\r\n' +
+    '  }\r\n' +
+    '\r\n' +
+    '  .badge-info {\r\n' +
+    '    @apply bg-sky-100 text-sky-800 dark:bg-sky-900/30 dark:text-sky-400;\r\n' +
+    '  }\r\n' +
+    '\r\n' +
+    '  .badge-neutral {\r\n' +
+    '    @apply bg-gray-100 text-gray-800 dark:bg-gray-800/50 dark:text-gray-400;\r\n' +
+    '  }\r\n' +
+    '\r\n' +
+    '  .badge-purple {\r\n' +
+    '    @apply bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400;\r\n' +
+    '  }\r\n' +
+    '\r\n' +
+    '  .badge-brand {\r\n' +
+    '    @apply bg-teal-100 text-teal-800 dark:bg-teal-900/30 dark:text-teal-300;\r\n' +
+    '  }\r\n' +
+    '\r\n' +
+    '  .logo-mark {\r\n' +
+    '    width: 28px;\r\n' +
+    '    height: 28px;\r\n' +
+    '    display: inline-block;\r\n' +
+    '  }\r\n' +
+    '\r\n' +
+    '  /* Input fields */\r\n' +
+    '  .input-field {\r\n' +
+    '    @apply w-full rounded-lg border px-4 py-2.5 text-sm transition-all duration-300;\r\n' +
+    '    background-color: rgba(10, 14, 23, 0.6);\r\n' +
+    '    border-color: var(--hud-border);\r\n' +
+    '    color: white;\r\n' +
+    '    @apply placeholder:text-white/40;\r\n' +
+    '    box-shadow: inset 0 0 10px rgba(0, 0, 0, 0.5);\r\n' +
+    '  }\r\n' +
+    '\r\n' +
+    '  .input-field:focus {\r\n' +
+    '    @apply outline-none;\r\n' +
+    '    border-color: var(--hud-accent-cyan);\r\n' +
+    '    box-shadow: 0 0 15px rgba(0, 240, 255, 0.2), inset 0 0 10px rgba(0, 0, 0, 0.5);\r\n' +
+    '  }\r\n' +
+    '\r\n' +
+    '  .input-field:disabled {\r\n' +
+    '    @apply opacity-50 cursor-not-allowed;\r\n' +
+    '    background-color: rgba(0, 0, 0, 0.4);\r\n' +
+    '  }\r\n' +
+    '\r\n' +
+    '  .form-group {\r\n' +
+    '    @apply space-y-2;\r\n' +
+    '  }\r\n' +
+    '\r\n' +
+    '  .form-hint {\r\n' +
+    '    @apply text-xs text-muted-foreground;\r\n' +
+    '  }\r\n' +
+    '\r\n' +
+    '  /* Page wrapper for consistent layout */\r\n' +
+    '  .page-wrapper {\r\n' +
+    '    @apply min-h-screen transition-colors duration-300;\r\n' +
+    '    background-color: hsl(var(--background));\r\n' +
+    '    background-image:\r\n' +
+    '      radial-gradient('... 4229 more characters,
+  line: 264,
+  column: 5,
+  endLine: 264,
+  endColumn: 66,
+  input: {
+    column: 5,
+    endColumn: 66,
+    endLine: 264,
+    endOffset: 7647,
+    line: 264,
+    offset: 7586,
+    source: '@tailwind base;\r\n' +
+      '@tailwind components;\r\n' +
+      '@tailwind utilities;\r\n' +
+      '\r\n' +
+      '/* Google Fonts: Sora + Source Sans 3 */\r\n' +
+      "@import url('https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700;800&family=Source+Sans+3:wght@400;500;600;700&display=swap');\r\n" +
+      '\r\n' +
+      '@layer base {\r\n' +
+      '  :root {\r\n' +
+      "    --font-sans: 'Source Sans 3', ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;\r\n" +
+      "    --font-display: 'Sora', 'Source Sans 3', ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;\r\n" +
+      '\r\n' +
+      '    /* NovaHealth HUD Tokens */\r\n' +
+      '    --hud-bg-base: #0a0e17;\r\n' +
+      '    --hud-surface-glass: rgba(16, 24, 39, 0.6);\r\n' +
+      '    --hud-surface-blur: blur(12px);\r\n' +
+      '    --hud-border: rgba(100, 200, 255, 0.15);\r\n' +
+      '\r\n' +
+      '    --hud-accent-cyan: #00f0ff;\r\n' +
+      '    --hud-accent-violet: #8a2be2;\r\n' +
+      '    --hud-accent-amber: #ffb800;\r\n' +
+      '    --hud-accent-red: #ff3333;\r\n' +
+      '\r\n' +
+      '    --hud-radius-lg: 16px;\r\n' +
+      '    --hud-radius-xl: 24px;\r\n' +
+      '\r\n' +
+      '    --background: 210 20% 98%;\r\n' +
+      '    --foreground: 215 25% 10%;\r\n' +
+      '    --card: 0 0% 100%;\r\n' +
+      '    --card-foreground: 215 25% 10%;\r\n' +
+      '    --popover: 0 0% 100%;\r\n' +
+      '    --popover-foreground: 215 25% 10%;\r\n' +
+      '    --primary: 172 66% 26%;\r\n' +
+      '    --primary-foreground: 0 0% 100%;\r\n' +
+      '    --brand-blue: 210 80% 40%;\r\n' +
+      '    --brand-amber: 38 92% 50%;\r\n' +
+      '    --secondary: 210 20% 96%;\r\n' +
+      '    --secondary-foreground: 215 25% 10%;\r\n' +
+      '    --muted: 210 20% 96%;\r\n' +
+      '    --muted-foreground: 215 16% 47%;\r\n' +
+      '    --text-soft: 215 14% 55%;\r\n' +
+      '    --accent: 172 50% 94%;\r\n' +
+      '    --accent-foreground: 172 66% 20%;\r\n' +
+      '    --destructive: 0 72% 51%;\r\n' +
+      '    --destructive-foreground: 0 0% 100%;\r\n' +
+      '    --border: 214 20% 90%;\r\n' +
+      '    --input: 214 20% 90%;\r\n' +
+      '    --ring: 172 66% 26%;\r\n' +
+      '    --radius: 0.75rem;\r\n' +
+      '\r\n' +
+      '    /* Custom medical palette */\r\n' +
+      '    --medical-teal: 172 66% 26%;\r\n' +
+      '    --medical-teal-light: 172 50% 94%;\r\n' +
+      '    --medical-red: 0 72% 51%;\r\n' +
+      '    --medical-red-light: 0 80% 95%;\r\n' +
+      '    --medical-blue: 213 94% 48%;\r\n' +
+      '    --medical-blue-light: 213 80% 95%;\r\n' +
+      '    --medical-green: 142 71% 35%;\r\n' +
+      '    --medical-green-light: 142 60% 94%;\r\n' +
+      '    --medical-amber: 38 92% 50%;\r\n' +
+      '    --medical-amber-light: 38 80% 94%;\r\n' +
+      '    --medical-purple: 262 83% 58%;\r\n' +
+      '    --medical-purple-light: 262 60% 95%;\r\n' +
+      '\r\n' +
+      '    /* Gradient tokens */\r\n' +
+      '    --gradient-primary: linear-gradient(135deg, hsl(172 66% 26%) 0%, hsl(188 70% 35%) 55%, hsl(210 80% 40%) 100%);\r\n' +
+      '    --gradient-hero: linear-gradient(135deg, hsl(215 25% 10%) 0%, hsl(172 40% 18%) 50%, hsl(215 25% 10%) 100%);\r\n' +
+      '    --gradient-card: linear-gradient(135deg, rgba(255, 255, 255, 0.9) 0%, rgba(240, 253, 250, 0.8) 100%);\r\n' +
+      '    --shadow-soft: 0 20px 60px -50px rgba(15, 23, 42, 0.35);\r\n' +
+      '    --shadow-card: 0 30px 80px -60px rgba(15, 23, 42, 0.45);\r\n' +
+      '  }\r\n' +
+      '\r\n' +
+      '  .dark {\r\n' +
+      '    --background: 222 30% 7%;\r\n' +
+      '    --foreground: 210 40% 98%;\r\n' +
+      '    --card: 222 30% 10%;\r\n' +
+      '    --card-foreground: 210 40% 98%;\r\n' +
+      '    --popover: 222 30% 10%;\r\n' +
+      '    --popover-foreground: 210 40% 98%;\r\n' +
+      '    --primary: 172 55% 45%;\r\n' +
+      '    --primary-foreground: 0 0% 100%;\r\n' +
+      '    --brand-blue: 210 85% 55%;\r\n' +
+      '    --brand-amber: 38 92% 55%;\r\n' +
+      '    --secondary: 217 25% 15%;\r\n' +
+      '    --secondary-foreground: 210 40% 98%;\r\n' +
+      '    --muted: 217 25% 15%;\r\n' +
+      '    --muted-foreground: 215 20% 65%;\r\n' +
+      '    --text-soft: 215 18% 70%;\r\n' +
+      '    --accent: 172 30% 15%;\r\n' +
+      '    --accent-foreground: 172 55% 60%;\r\n' +
+      '    --destructive: 0 62% 45%;\r\n' +
+      '    --destructive-foreground: 210 40% 98%;\r\n' +
+      '    --border: 217 25% 18%;\r\n' +
+      '    --input: 217 25% 18%;\r\n' +
+      '    --ring: 172 55% 45%;\r\n' +
+      '\r\n' +
+      '    --gradient-primary: linear-gradient(135deg, hsl(172 55% 35%) 0%, hsl(188 60% 30%) 55%, hsl(210 85% 55%) 100%);\r\n' +
+      '    --gradient-hero: linear-gradient(135deg, hsl(222 30% 5%) 0%, hsl(172 30% 12%) 50%, hsl(222 30% 5%) 100%);\r\n' +
+      '    --gradient-card: linear-gradient(135deg, rgba(20, 30, 40, 0.9) 0%, rgba(15, 40, 35, 0.8) 100%);\r\n' +
+      '    --shadow-soft: 0 20px 60px -50px rgba(2, 6, 23, 0.6);\r\n' +
+      '    --shadow-card: 0 40px 90px -65px rgba(2, 6, 23, 0.7);\r\n' +
+      '  }\r\n' +
+      '}\r\n' +
+      '\r\n' +
+      '@layer base {\r\n' +
+      '  * {\r\n' +
+      '    @apply border-border;\r\n' +
+      '  }\r\n' +
+      '\r\n' +
+      '  body {\r\n' +
+      '    @apply bg-background text-foreground;\r\n' +
+      '    font-family: var(--font-sans);\r\n' +
+      '    -webkit-font-smoothing: antialiased;\r\n' +
+      '    -moz-osx-font-smoothing: grayscale;\r\n' +
+      '  }\r\n' +
+      '\r\n' +
+      '  h1,\r\n' +
+      '  h2,\r\n' +
+      '  h3,\r\n' +
+      '  h4,\r\n' +
+      '  h5,\r\n' +
+      '  h6 {\r\n' +
+      '    font-family: var(--font-display);\r\n' +
+      '    letter-spacing: -0.01em;\r\n' +
+      '  }\r\n' +
+      '\r\n' +
+      '  p {\r\n' +
+      '    color: hsl(var(--text-soft));\r\n' +
+      '  }\r\n' +
+      '}\r\n' +
+      '\r\n' +
+      '@layer components {\r\n' +
+      '\r\n' +
+      '  /* Glass card effect */\r\n' +
+      '  .glass-card {\r\n' +
+      '    @apply rounded-xl border border-white/20 shadow-lg;\r\n' +
+      '    background: var(--gradient-card);\r\n' +
+      '    backdrop-filter: blur(12px);\r\n' +
+      '  }\r\n' +
+      '\r\n' +
+      '  .hud-glass-panel {\r\n' +
+      '    background-color: var(--hud-surface-glass);\r\n' +
+      '    backdrop-filter: var(--hud-surface-blur);\r\n' +
+      '    border: 1px solid var(--hud-border);\r\n' +
+      '    border-radius: var(--hud-radius-lg);\r\n' +
+      '  }\r\n' +
+      '\r\n' +
+      '  .dark .glass-card {\r\n' +
+      '    @apply border-white/10;\r\n' +
+      '    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);\r\n' +
+      '  }\r\n' +
+      '\r\n' +
+      '  /* Stat card */\r\n' +
+      '  .stat-card {\r\n' +
+      '    @apply relative overflow-hidden rounded-xl p-6 transition-all duration-300;\r\n' +
+      '    box-shadow: var(--shadow-soft);\r\n' +
+      '    @apply hover:-translate-y-0.5;\r\n' +
+      '  }\r\n' +
+      '\r\n' +
+      '  .stat-card::before {\r\n' +
+      "    content: '';\r\n" +
+      '    @apply absolute inset-0 opacity-0 transition-opacity duration-300;\r\n' +
+      '    background: linear-gradient(135deg, rgba(255, 255, 255, 0.1) 0%, transparent 100%);\r\n' +
+      '  }\r\n' +
+      '\r\n' +
+      '  .stat-card:hover::before {\r\n' +
+      '    @apply opacity-100;\r\n' +
+      '  }\r\n' +
+      '\r\n' +
+      '  /* Pulse dot for online status */\r\n' +
+      '  .pulse-dot {\r\n' +
+      '    @apply relative inline-flex h-3 w-3;\r\n' +
+      '  }\r\n' +
+      '\r\n' +
+      '  .pulse-dot::before {\r\n' +
+      "    content: '';\r\n" +
+      '    @apply absolute inline-flex h-full w-full rounded-full opacity-75;\r\n' +
+      '    animation: ping-slow 2s cubic-bezier(0, 0, 0.2, 1) infinite;\r\n' +
+      '  }\r\n' +
+      '\r\n' +
+      '  .pulse-dot::after {\r\n' +
+      "    content: '';\r\n" +
+      '    @apply relative inline-flex h-3 w-3 rounded-full;\r\n' +
+      '  }\r\n' +
+      '\r\n' +
+      '  .pulse-dot.online::before {\r\n' +
+      '    @apply bg-emerald-400;\r\n' +
+      '  }\r\n' +
+      '\r\n' +
+      '  .pulse-dot.online::after {\r\n' +
+      '    @apply bg-emerald-500;\r\n' +
+      '  }\r\n' +
+      '\r\n' +
+      '  .pulse-dot.offline::before {\r\n' +
+      '    @apply bg-gray-400;\r\n' +
+      '    animation: none;\r\n' +
+      '  }\r\n' +
+      '\r\n' +
+      '  .pulse-dot.offline::after {\r\n' +
+      '    @apply bg-gray-400;\r\n' +
+      '  }\r\n' +
+      '\r\n' +
+      '  .pulse-dot.error::before {\r\n' +
+      '    @apply bg-red-400;\r\n' +
+      '  }\r\n' +
+      '\r\n' +
+      '  .pulse-dot.error::after {\r\n' +
+      '    @apply bg-red-500;\r\n' +
+      '  }\r\n' +
+      '\r\n' +
+      '  /* Gradient text */\r\n' +
+      '  .gradient-text {\r\n' +
+      '    @apply bg-clip-text text-transparent;\r\n' +
+      '    background-image: var(--gradient-primary);\r\n' +
+      '  }\r\n' +
+      '\r\n' +
+      '  /* Skeleton loader */\r\n' +
+      '  .skeleton {\r\n' +
+      '    @apply relative overflow-hidden rounded-md bg-muted;\r\n' +
+      '  }\r\n' +
+      '\r\n' +
+      '  .skeleton::after {\r\n' +
+      "    content: '';\r\n" +
+      '    @apply absolute inset-0;\r\n' +
+      '    background: linear-gradient(90deg,\r\n' +
+      '        transparent 0%,\r\n' +
+      '        rgba(255, 255, 255, 0.15) 50%,\r\n' +
+      '        transparent 100%);\r\n' +
+      '    animation: shimmer 2s infinite;\r\n' +
+      '  }\r\n' +
+      '\r\n' +
+      '  /* Primary button with gradient */\r\n' +
+      '  .btn-primary {\r\n' +
+      '    @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-bold tracking-widest uppercase transition-all duration-300 text-[#00f0ff] border border-[#00f0ff]/30;\r\n' +
+      '    background-color: rgba(0, 240, 255, 0.1);\r\n' +
+      '    box-shadow: 0 0 15px rgba(0, 240, 255, 0.15);\r\n' +
+      '  }\r\n' +
+      '\r\n' +
+      '  .btn-primary:hover {\r\n' +
+      '    @apply bg-[#00f0ff]/20 border-[#00f0ff]/50;\r\n' +
+      '    box-shadow: 0 0 20px rgba(0, 240, 255, 0.3);\r\n' +
+      '    filter: brightness(1.2) drop-shadow(0 0 8px rgba(0, 240, 255, 0.4));\r\n' +
+      '  }\r\n' +
+      '\r\n' +
+      '  .btn-primary:disabled {\r\n' +
+      '    @apply opacity-50 cursor-not-allowed;\r\n' +
+      '  }\r\n' +
+      '\r\n' +
+      '  .btn-primary:disabled:hover {\r\n' +
+      '    @apply bg-[#00f0ff]/10;\r\n' +
+      '    box-shadow: 0 0 15px rgba(0, 240, 255, 0.15);\r\n' +
+      '  }\r\n' +
+      '\r\n' +
+      '  .btn-primary:focus-visible,\r\n' +
+      '  .btn-secondary:focus-visible,\r\n' +
+      '  .btn-ghost:focus-visible,\r\n' +
+      '  .input-field:focus-visible {\r\n' +
+      '    outline: none;\r\n' +
+      '  }\r\n' +
+      '\r\n' +
+      '  /* Secondary button */\r\n' +
+      '  .btn-secondary {\r\n' +
+      '    @apply inline-flex items-center justify-center rounded-lg px-4 py-2.5 text-sm font-bold uppercase tracking-widest transition-all duration-300;\r\n' +
+      '    @apply bg-black/40 text-white/80 border border-hud-border/30;\r\n' +
+      '  }\r\n' +
+      '\r\n' +
+      '  .btn-secondary:hover {\r\n' +
+      '    @apply bg-white/5 text-white border-hud-border/60;\r\n' +
+      '    box-shadow: 0 0 15px rgba(255, 255, 255, 0.05);\r\n' +
+      '  }\r\n' +
+      '\r\n' +
+      '  /* Ghost button */\r\n' +
+      '  .btn-ghost {\r\n' +
+      '    @apply inline-flex items-center justify-center rounded-lg px-4 py-2.5 text-sm font-bold tracking-widest uppercase transition-all duration-300;\r\n' +
+      '    @apply text-white/50 hover:text-hud-cyan hover:bg-hud-cyan/10;\r\n' +
+      '  }\r\n' +
+      '\r\n' +
+      '  /* Badge styles */\r\n' +
+      '  .badge {\r\n' +
+      '    @apply inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold transition-colors;\r\n' +
+      '  }\r\n' +
+      '\r\n' +
+      '  .badge-success {\r\n' +
+      '    @apply bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400;\r\n' +
+      '  }\r\n' +
+      '\r\n' +
+      '  .badge-warning {\r\n' +
+      '    @apply bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400;\r\n' +
+      '  }\r\n' +
+      '\r\n' +
+      '  .badge-danger {\r\n' +
+      '    @apply bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400;\r\n' +
+      '  }\r\n' +
+      '\r\n' +
+      '  .badge-info {\r\n' +
+      '    @apply bg-sky-100 text-sky-800 dark:bg-sky-900/30 dark:text-sky-400;\r\n' +
+      '  }\r\n' +
+      '\r\n' +
+      '  .badge-neutral {\r\n' +
+      '    @apply bg-gray-100 text-gray-800 dark:bg-gray-800/50 dark:text-gray-400;\r\n' +
+      '  }\r\n' +
+      '\r\n' +
+      '  .badge-purple {\r\n' +
+      '    @apply bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400;\r\n' +
+      '  }\r\n' +
+      '\r\n' +
+      '  .badge-brand {\r\n' +
+      '    @apply bg-teal-100 text-teal-800 dark:bg-teal-900/30 dark:text-teal-300;\r\n' +
+      '  }\r\n' +
+      '\r\n' +
+      '  .logo-mark {\r\n' +
+      '    width: 28px;\r\n' +
+      '    height: 28px;\r\n' +
+      '    display: inline-block;\r\n' +
+      '  }\r\n' +
+      '\r\n' +
+      '  /* Input fields */\r\n' +
+      '  .input-field {\r\n' +
+      '    @apply w-full rounded-lg border px-4 py-2.5 text-sm transition-all duration-300;\r\n' +
+      '    background-color: rgba(10, 14, 23, 0.6);\r\n' +
+      '    border-color: var(--hud-border);\r\n' +
+      '    color: white;\r\n' +
+      '    @apply placeholder:text-white/40;\r\n' +
+      '    box-shadow: inset 0 0 10px rgba(0, 0, 0, 0.5);\r\n' +
+      '  }\r\n' +
+      '\r\n' +
+      '  .input-field:focus {\r\n' +
+      '    @apply outline-none;\r\n' +
+      '    border-color: var(--hud-accent-cyan);\r\n' +
+      '    box-shadow: 0 0 15px rgba(0, 240, 255, 0.2), inset 0 0 10px rgba(0, 0, 0, 0.5);\r\n' +
+      '  }\r\n' +
+      '\r\n' +
+      '  .input-field:disabled {\r\n' +
+      '    @apply opacity-50 cursor-not-allowed;\r\n' +
+      '    background-color: rgba(0, 0, 0, 0.4);\r\n' +
+      '  }\r\n' +
+      '\r\n' +
+      '  .form-group {\r\n' +
+      '    @apply space-y-2;\r\n' +
+      '  }\r\n' +
+      '\r\n' +
+      '  .form-hint {\r\n' +
+      '    @apply text-xs text-muted-foreground;\r\n' +
+      '  }\r\n' +
+      '\r\n' +
+      '  /* Page wrapper for consistent layout */\r\n' +
+      '  .page-wrapper {\r\n' +
+      '    @apply min-h-screen transition-colors duration-300;\r\n' +
+      '    background-color: hsl(var(--background));\r\n' +
+      '    background-image:\r\n' +
+      '      radial-gradient('... 4229 more characters,
+    url: 'file:///D:/cardiosense-project/cardiosense/frontend/src/app/globals.css',
+    file: 'D:\\cardiosense-project\\cardiosense\\frontend\\src\\app\\globals.css'
+  },
+  plugin: 'tailwindcss'
+}

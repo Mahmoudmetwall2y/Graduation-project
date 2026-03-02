@@ -15,6 +15,8 @@ import {
 } from 'lucide-react'
 import { PageSkeleton } from '../components/Skeleton'
 import { useToast } from '../components/Toast'
+import { DataList, DataListRow, DataListCell } from '../../components/ui/DataList'
+import { GlassCard } from '../../components/ui/GlassCard'
 
 interface SessionRow {
   id: string
@@ -258,75 +260,77 @@ export default function SessionsPage() {
           </div>
         )}
 
-        <div className="page-section slide-up">
-          <div className="section-header">
-            <div className="flex items-center gap-2">
-              <Filter className="w-4 h-4 text-muted-foreground" />
-              <h3 className="section-title">Filters</h3>
+        <GlassCard className="slide-up mb-6">
+          <div className="p-6">
+            <div className="section-header">
+              <div className="flex items-center gap-2">
+                <Filter className="w-4 h-4 text-muted-foreground" />
+                <h3 className="section-title">Filters</h3>
+              </div>
+              <button onClick={resetFilters} className="text-sm text-primary hover:text-primary/80">
+                Reset
+              </button>
             </div>
-            <button onClick={resetFilters} className="text-sm text-primary hover:text-primary/80">
-              Reset
-            </button>
-          </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                <input
+                  type="text"
+                  placeholder="Search by ID, device, patient..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="input-field pl-10"
+                />
+              </div>
+
+              <select value={deviceId} onChange={(e) => setDeviceId(e.target.value)} className="input-field">
+                <option value="">All devices</option>
+                {devices.map((device) => (
+                  <option key={device.id} value={device.id}>{device.device_name}</option>
+                ))}
+              </select>
+
+              <select value={patientId} onChange={(e) => setPatientId(e.target.value)} className="input-field">
+                <option value="">All patients</option>
+                {patients.map((patient) => (
+                  <option key={patient.id} value={patient.id}>{patient.full_name}</option>
+                ))}
+              </select>
+
+              <select value={status} onChange={(e) => setStatus(e.target.value)} className="input-field">
+                <option value="">Any status</option>
+                <option value="created">Created</option>
+                <option value="streaming">Streaming</option>
+                <option value="processing">Processing</option>
+                <option value="done">Done</option>
+                <option value="error">Error</option>
+              </select>
+
               <input
-                type="text"
-                placeholder="Search by ID, device, patient..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="input-field pl-10"
+                type="date"
+                value={dateFrom}
+                onChange={(e) => setDateFrom(e.target.value)}
+                className="input-field"
               />
+              <input
+                type="date"
+                value={dateTo}
+                onChange={(e) => setDateTo(e.target.value)}
+                className="input-field"
+              />
+
+              <select value={predictionLabel} onChange={(e) => setPredictionLabel(e.target.value)} className="input-field">
+                <option value="">Any prediction</option>
+                <option value="Normal">Normal</option>
+                <option value="Abnormal">Abnormal</option>
+                <option value="Murmur">Murmur</option>
+                <option value="Extrasystole">Extrasystole</option>
+                <option value="Unknown">Unknown</option>
+              </select>
             </div>
-
-            <select value={deviceId} onChange={(e) => setDeviceId(e.target.value)} className="input-field">
-              <option value="">All devices</option>
-              {devices.map((device) => (
-                <option key={device.id} value={device.id}>{device.device_name}</option>
-              ))}
-            </select>
-
-            <select value={patientId} onChange={(e) => setPatientId(e.target.value)} className="input-field">
-              <option value="">All patients</option>
-              {patients.map((patient) => (
-                <option key={patient.id} value={patient.id}>{patient.full_name}</option>
-              ))}
-            </select>
-
-            <select value={status} onChange={(e) => setStatus(e.target.value)} className="input-field">
-              <option value="">Any status</option>
-              <option value="created">Created</option>
-              <option value="streaming">Streaming</option>
-              <option value="processing">Processing</option>
-              <option value="done">Done</option>
-              <option value="error">Error</option>
-            </select>
-
-            <input
-              type="date"
-              value={dateFrom}
-              onChange={(e) => setDateFrom(e.target.value)}
-              className="input-field"
-            />
-            <input
-              type="date"
-              value={dateTo}
-              onChange={(e) => setDateTo(e.target.value)}
-              className="input-field"
-            />
-
-            <select value={predictionLabel} onChange={(e) => setPredictionLabel(e.target.value)} className="input-field">
-              <option value="">Any prediction</option>
-              <option value="Normal">Normal</option>
-              <option value="Abnormal">Abnormal</option>
-              <option value="Murmur">Murmur</option>
-              <option value="Extrasystole">Extrasystole</option>
-              <option value="Unknown">Unknown</option>
-            </select>
           </div>
-        </div>
+        </GlassCard>
 
         <div className="page-section slide-up" style={{ animationDelay: '0.05s', animationFillMode: 'backwards' }}>
           <div className="section-header">
@@ -376,59 +380,50 @@ export default function SessionsPage() {
             </div>
           )}
         </div>
-
-        <div className="page-section slide-up" style={{ animationDelay: '0.1s', animationFillMode: 'backwards' }}>
-          <div className="section-header">
-            <div>
-              <h3 className="section-title">Results</h3>
-              <p className="text-xs text-muted-foreground">{filteredSessions.length} sessions</p>
-            </div>
+        {filteredSessions.length === 0 ? (
+          <div className="text-sm text-hud-cyan/60 bg-hud-cyan/5 border border-hud-cyan/20 rounded-xl p-8 text-center slide-up mt-6">
+            No sessions match your filters.
           </div>
-
-          {filteredSessions.length === 0 ? (
-            <div className="text-sm text-muted-foreground bg-muted rounded-lg p-4">
-              No sessions match your filters.
-            </div>
-          ) : (
-            <div className="mt-4">
-              <div className="grid grid-cols-2 gap-3 px-6 table-header">
-                <span>Session</span>
-                <span className="text-right">Status</span>
-              </div>
-              <div className="divide-y divide-border mt-2">
-                {filteredSessions.map((session) => {
-                  const statusMeta = getStatusBadge(session.status)
-                  return (
-                    <Link key={session.id} href={`/session/${session.id}`} className="list-row group">
-                      <div className="flex items-center gap-4">
-                        <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
-                          <Heart className="w-5 h-5 text-primary" />
-                        </div>
-                        <div>
-                          <p className="text-sm font-medium text-foreground">
-                            Session {session.id.slice(0, 8)}
-                          </p>
-                          <p className="text-xs text-muted-foreground mt-0.5">
-                            {new Date(session.created_at).toLocaleString()}
-                            {session.patient?.full_name ? ` - ${session.patient.full_name}` : ''}
-                            {session.device?.device_name ? ` - ${session.device.device_name}` : ''}
-                          </p>
-                        </div>
-                      </div>
+        ) : (
+          <div className="slide-up mt-6" style={{ animationDelay: '0.1s', animationFillMode: 'backwards' }}>
+            <DataList
+              title="Results"
+              headers={['Session ID', 'Patient', 'Device', 'Date', 'Duration', 'Status', '']}
+              icon={<Heart className="w-5 h-5" />}
+              action={<span className="text-xs text-hud-cyan font-mono bg-hud-cyan/10 px-3 py-1 rounded-full border border-hud-cyan/30">{filteredSessions.length} MATCHES</span>}
+            >
+              {filteredSessions.map((session) => {
+                const statusMeta = getStatusBadge(session.status)
+                const duration = session.ended_at ? `${Math.round((new Date(session.ended_at).getTime() - new Date(session.created_at).getTime()) / 1000)}s` : '-'
+                return (
+                  <DataListRow key={session.id} href={`/session/${session.id}`}>
+                    <DataListCell>
                       <div className="flex items-center gap-3">
-                        <span className={`badge ${statusMeta.badge}`}>
-                          <span className={`w-1.5 h-1.5 rounded-full ${statusMeta.dot}`} />
-                          {session.status}
-                        </span>
-                        <ChevronRight className="w-4 h-4 text-muted-foreground group-hover:text-foreground transition-colors" />
+                        <div className="w-8 h-8 rounded-lg bg-black/40 flex items-center justify-center border border-hud-cyan/20 shadow-[0_0_10px_rgba(0,240,255,0.1)]">
+                          <Heart className="w-4 h-4 text-hud-cyan" />
+                        </div>
+                        <span className="font-mono tracking-widest text-[#00f0ff]">{session.id.slice(0, 8)}</span>
                       </div>
-                    </Link>
-                  )
-                })}
-              </div>
-            </div>
-          )}
-        </div>
+                    </DataListCell>
+                    <DataListCell>{session.patient?.full_name || 'N/A'}</DataListCell>
+                    <DataListCell>{session.device?.device_name || 'N/A'}</DataListCell>
+                    <DataListCell>{new Date(session.created_at).toLocaleDateString()}</DataListCell>
+                    <DataListCell>{duration}</DataListCell>
+                    <DataListCell>
+                      <span className={`badge ${statusMeta.badge}`}>
+                        <span className={`w-1.5 h-1.5 rounded-full ${statusMeta.dot}`} />
+                        {session.status}
+                      </span>
+                    </DataListCell>
+                    <DataListCell isLast>
+                      <ChevronRight className="w-4 h-4 text-white/30 group-hover:text-hud-cyan transition-colors inline-block" />
+                    </DataListCell>
+                  </DataListRow>
+                )
+              })}
+            </DataList>
+          </div>
+        )}
       </div>
     </div>
   )

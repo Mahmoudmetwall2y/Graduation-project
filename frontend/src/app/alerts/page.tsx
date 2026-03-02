@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs'
 import { PageSkeleton } from '../components/Skeleton'
 import { Bell, CheckCircle, Filter, ShieldAlert } from 'lucide-react'
+import { DataList, DataListRow, DataListCell } from '../../components/ui/DataList'
 
 interface AlertRow {
   id: string
@@ -117,62 +118,66 @@ export default function AlertsPage() {
           </div>
         </div>
 
-        <div className="page-section">
-          <div className="section-header">
-            <div className="flex items-center gap-2">
-              <ShieldAlert className="w-4 h-4 text-muted-foreground" />
-              <h3 className="section-title">Recent Alerts</h3>
-            </div>
+        {filtered.length === 0 ? (
+          <div className="text-sm text-hud-cyan/60 bg-hud-cyan/5 border border-hud-cyan/20 rounded-xl p-8 text-center slide-up mt-6">
+            No alerts match your filters.
           </div>
-
-          {filtered.length === 0 ? (
-            <div className="text-sm text-muted-foreground bg-muted rounded-lg p-4">
-              No alerts match your filters.
-            </div>
-          ) : (
-            <div className="divide-y divide-border">
+        ) : (
+          <div className="slide-up mt-6" style={{ animationDelay: '0.1s', animationFillMode: 'backwards' }}>
+            <DataList
+              title="Recent Alerts"
+              headers={['Alert', 'Severity', 'Time', 'Action']}
+              icon={<ShieldAlert className="w-5 h-5 text-hud-cyan" />}
+              action={<span className="text-xs text-hud-cyan font-mono bg-hud-cyan/10 px-3 py-1 rounded-full border border-hud-cyan/30">{filtered.length} ALERTS</span>}
+            >
               {filtered.map((alert) => (
-                <div key={alert.id} className="list-row">
-                  <div className="flex items-start gap-3">
-                    <div className={`w-9 h-9 rounded-lg flex items-center justify-center ${alert.severity === 'critical'
-                      ? 'bg-red-100 text-red-600 dark:bg-red-950/30 dark:text-red-400'
-                      : alert.severity === 'warning'
-                        ? 'bg-amber-100 text-amber-600 dark:bg-amber-950/30 dark:text-amber-400'
-                        : 'bg-blue-100 text-blue-600 dark:bg-blue-950/30 dark:text-blue-400'
-                      }`}>
-                      <Bell className="w-4 h-4" />
+                <DataListRow key={alert.id}>
+                  <DataListCell>
+                    <div className="flex items-center gap-3">
+                      <div className={`w-9 h-9 rounded-lg flex items-center justify-center border shadow-[inset_0_0_10px_rgba(0,0,0,0.5)] ${alert.severity === 'critical'
+                        ? 'bg-red-500/10 border-red-500/30 text-red-500 shadow-[0_0_15px_rgba(239,68,68,0.15)]'
+                        : alert.severity === 'warning'
+                          ? 'bg-amber-500/10 border-amber-500/30 text-amber-500 shadow-[0_0_15px_rgba(245,158,11,0.15)]'
+                          : 'bg-hud-cyan/10 border-hud-cyan/30 text-hud-cyan shadow-[0_0_15px_rgba(0,240,255,0.15)]'
+                        }`}>
+                        <Bell className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <p className="text-sm font-medium text-white/90">{alert.message}</p>
+                        <p className="text-xs text-hud-cyan/60 font-mono mt-0.5 uppercase tracking-wider">
+                          {alert.alert_type} • DEVICE {alert.device_id.slice(0, 8)}
+                        </p>
+                      </div>
                     </div>
-                    <div>
-                      <p className="text-sm font-medium text-foreground">{alert.message}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {alert.alert_type} • Device {alert.device_id.slice(0, 8)}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <span className={`badge ${alert.severity === 'critical' ? 'badge-danger' : alert.severity === 'warning' ? 'badge-warning' : 'badge-info'}`}>
+                  </DataListCell>
+                  <DataListCell>
+                    <span className={`badge ${alert.severity === 'critical' ? 'badge-danger pulse' : alert.severity === 'warning' ? 'badge-warning' : 'badge-info'}`}>
                       {alert.severity}
                     </span>
-                    <span className="text-xs text-muted-foreground">
+                  </DataListCell>
+                  <DataListCell>
+                    <span className="text-xs text-white/50 font-mono">
                       {new Date(alert.created_at).toLocaleString()}
                     </span>
+                  </DataListCell>
+                  <DataListCell isLast>
                     {!alert.is_resolved ? (
                       <button
                         onClick={() => resolveAlert(alert.id)}
-                        className="inline-flex items-center gap-1 text-xs text-emerald-600 hover:text-emerald-700"
+                        className="inline-flex items-center gap-1.5 text-xs font-mono tracking-widest text-[#00f0ff] hover:text-white transition-all bg-[#00f0ff]/10 hover:bg-[#00f0ff]/20 px-3 py-1.5 rounded-lg border border-[#00f0ff]/30 shadow-[0_0_10px_rgba(0,240,255,0.1)] justify-center min-w-[100px]"
                       >
-                        <CheckCircle className="w-4 h-4" />
-                        Resolve
+                        <CheckCircle className="w-3.5 h-3.5" />
+                        RESOLVE
                       </button>
                     ) : (
-                      <span className="text-xs text-muted-foreground">Resolved</span>
+                      <span className="text-xs text-white/30 font-mono inline-block text-center min-w-[100px] tracking-widest">RESOLVED</span>
                     )}
-                  </div>
-                </div>
+                  </DataListCell>
+                </DataListRow>
               ))}
-            </div>
-          )}
-        </div>
+            </DataList>
+          </div>
+        )}
       </div>
     </div>
   )

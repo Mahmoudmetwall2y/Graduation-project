@@ -120,20 +120,20 @@ export default function NewSessionPage() {
         <div className="max-w-lg mx-auto">
           {/* Header */}
           <div className="text-center mb-8 fade-in">
-            <div className="w-14 h-14 rounded-2xl bg-primary/10 flex items-center justify-center mx-auto mb-4">
-              <Heart className="w-7 h-7 text-primary" />
+            <div className="w-14 h-14 rounded-2xl bg-hud-cyan/10 flex items-center justify-center mx-auto mb-4 border border-hud-cyan/30 shadow-[0_0_20px_rgba(0,240,255,0.2)]">
+              <Heart className="w-7 h-7 text-hud-cyan pulse" />
             </div>
-            <h1 className="text-2xl font-bold text-foreground tracking-tight">New Session</h1>
-            <p className="text-sm text-muted-foreground mt-1">Start a new cardiac monitoring session</p>
+            <h1 className="text-2xl font-bold text-white tracking-widest uppercase">New Session</h1>
+            <p className="text-sm text-hud-cyan/60 mt-1 uppercase tracking-widest">Start a new cardiac monitoring session</p>
           </div>
 
           {error && (
-            <div className="mb-6 rounded-lg bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900/50 p-4 fade-in">
-              <p className="text-sm text-red-700 dark:text-red-400">{error}</p>
+            <div className="mb-6 rounded-lg bg-red-500/10 border border-red-500/30 p-4 fade-in shadow-[0_0_15px_rgba(239,68,68,0.15)]">
+              <p className="text-sm text-red-400">{error}</p>
             </div>
           )}
 
-          <form onSubmit={handleSubmit} className="bg-card border border-border rounded-xl p-6 space-y-5 slide-up">
+          <form onSubmit={handleSubmit} className="bg-hud-surface-glass border border-hud-border/40 rounded-xl p-6 space-y-5 slide-up backdrop-blur-md">
             <div>
               <label htmlFor="device" className="block text-sm font-medium text-foreground mb-1.5">
                 <span className="flex items-center gap-1.5">
@@ -248,23 +248,23 @@ export default function NewSessionPage() {
               />
             </div>
 
-            <div className="flex items-center justify-between pt-2">
+            <div className="flex items-center justify-between pt-4 border-t border-hud-border/30 mt-6">
               <button
                 type="button"
                 onClick={() => router.push('/')}
-                className="btn-ghost"
+                className="px-4 py-2 rounded-lg text-sm font-medium text-white/50 hover:text-white hover:bg-white/5 transition-all"
               >
                 Cancel
               </button>
               <button
                 type="submit"
                 disabled={loading || devices.length === 0}
-                className="btn-primary gap-2"
+                className="flex items-center gap-2 px-6 py-2.5 rounded-lg text-sm font-bold uppercase tracking-widest text-[#00f0ff] bg-[#00f0ff]/10 hover:bg-[#00f0ff]/20 border border-[#00f0ff]/30 shadow-[0_0_15px_rgba(0,240,255,0.15)] transition-all disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {loading ? (
                   <Activity className="w-4 h-4 animate-spin" />
                 ) : null}
-                {loading ? 'Creating...' : 'Start Session'}
+                {loading ? 'INITIALIZING...' : 'START SESSION'}
                 {!loading && <ArrowRight className="w-4 h-4" />}
               </button>
             </div>

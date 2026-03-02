@@ -1,9 +1,9 @@
 import './globals.css'
 import type { Metadata } from 'next'
-import Navbar from './components/Navbar'
 import { ThemeProvider } from './components/ThemeProvider'
 import { ToastProvider } from './components/Toast'
 import { ErrorBoundary } from './components/error-boundary'
+import { TopBar } from '../components/layout/TopBar'
 
 export const metadata: Metadata = {
   title: 'AscultiCor - AI-Powered Cardiac Auscultation',
@@ -21,9 +21,9 @@ export default function RootLayout({
         <ErrorBoundary>
           <ThemeProvider>
             <ToastProvider>
-              <div className="app-shell">
-                <Navbar />
-                <main className="app-main">
+              <div className="flex flex-col h-screen overflow-hidden" style={{ backgroundColor: 'var(--hud-bg-base)' }}>
+                <TopBar />
+                <main className="flex-1 overflow-auto">
                   {children}
                 </main>
               </div>

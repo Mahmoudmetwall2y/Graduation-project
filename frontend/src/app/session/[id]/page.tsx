@@ -823,7 +823,7 @@ export default function SessionDetailPage() {
         {/* Signal Visualizations */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* ECG Waveform */}
-          <div className="bg-card border border-border rounded-xl p-6 slide-up">
+          <div className="bg-[var(--hud-surface-glass)] border border-[var(--hud-border)] backdrop-blur-md rounded-xl p-6 slide-up">
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-2">
                 <Zap className="w-5 h-5 text-teal-600 dark:text-teal-400" />
@@ -879,7 +879,7 @@ export default function SessionDetailPage() {
           </div>
 
           {/* PCG Waveform */}
-          <div className="bg-card border border-border rounded-xl p-6 slide-up" style={{ animationDelay: '0.1s', animationFillMode: 'backwards' }}>
+          <div className="bg-[var(--hud-surface-glass)] border border-[var(--hud-border)] backdrop-blur-md rounded-xl p-6 slide-up" style={{ animationDelay: '0.1s', animationFillMode: 'backwards' }}>
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-2">
                 <Activity className="w-5 h-5 text-rose-600 dark:text-rose-400" />
@@ -935,7 +935,7 @@ export default function SessionDetailPage() {
         </div>
 
         {/* Session Timeline */}
-        <div className="bg-card border border-border rounded-xl slide-up" style={{ animationDelay: '0.15s', animationFillMode: 'backwards' }}>
+        <div className="bg-[var(--hud-surface-glass)] border border-[var(--hud-border)] backdrop-blur-md rounded-xl slide-up" style={{ animationDelay: '0.15s', animationFillMode: 'backwards' }}>
           <div className="p-6 pb-0">
             <h3 className="font-semibold text-foreground text-lg">Session Timeline</h3>
             <p className="text-sm text-muted-foreground mt-1">Key events and updates</p>
@@ -981,7 +981,7 @@ export default function SessionDetailPage() {
         </div>
 
         {/* Predictions */}
-        <div className="bg-card border border-border rounded-xl slide-up" style={{ animationDelay: '0.2s', animationFillMode: 'backwards' }}>
+        <div className="bg-[var(--hud-surface-glass)] border border-[var(--hud-border)] backdrop-blur-md rounded-xl slide-up" style={{ animationDelay: '0.2s', animationFillMode: 'backwards' }}>
           <div className="p-6 pb-0">
             <h3 className="font-semibold text-foreground text-lg">Predictions</h3>
             <p className="text-sm text-muted-foreground mt-1">AI-generated analysis results</p>
@@ -1093,7 +1093,7 @@ export default function SessionDetailPage() {
         </div>
 
         {/* Session Replay */}
-        <div className="bg-card border border-border rounded-xl slide-up" style={{ animationDelay: '0.21s', animationFillMode: 'backwards' }}>
+        <div className="bg-[var(--hud-surface-glass)] border border-[var(--hud-border)] backdrop-blur-md rounded-xl slide-up" style={{ animationDelay: '0.21s', animationFillMode: 'backwards' }}>
           <div className="p-6 pb-0">
             <h3 className="font-semibold text-foreground text-lg">Session Replay</h3>
             <p className="text-sm text-muted-foreground mt-1">Replay recent waveform snapshots</p>
@@ -1149,7 +1149,7 @@ export default function SessionDetailPage() {
         </div>
 
         {/* Model Versions */}
-        <div className="bg-card border border-border rounded-xl slide-up" style={{ animationDelay: '0.22s', animationFillMode: 'backwards' }}>
+        <div className="bg-[var(--hud-surface-glass)] border border-[var(--hud-border)] backdrop-blur-md rounded-xl slide-up" style={{ animationDelay: '0.22s', animationFillMode: 'backwards' }}>
           <div className="p-6 pb-0">
             <h3 className="font-semibold text-foreground text-lg">Model Versions Used</h3>
             <p className="text-sm text-muted-foreground mt-1">Traceability for model name and version</p>
@@ -1182,7 +1182,7 @@ export default function SessionDetailPage() {
         </div>
 
         {/* Clinical Notes */}
-        <div className="bg-card border border-border rounded-xl slide-up" style={{ animationDelay: '0.25s', animationFillMode: 'backwards' }}>
+        <div className="bg-[var(--hud-surface-glass)] border border-[var(--hud-border)] backdrop-blur-md rounded-xl slide-up" style={{ animationDelay: '0.25s', animationFillMode: 'backwards' }}>
           <div className="p-6 pb-0">
             <h3 className="font-semibold text-foreground text-lg">Clinical Notes</h3>
             <p className="text-sm text-muted-foreground mt-1">Add observations or annotations for this session</p>
@@ -1238,7 +1238,7 @@ export default function SessionDetailPage() {
             role="dialog"
             aria-modal="true"
             aria-labelledby="delete-session-title"
-            className="relative bg-card border border-border rounded-2xl p-6 max-w-md w-full mx-4 shadow-2xl fade-in"
+            className="relative bg-[var(--hud-surface-glass)] border border-[var(--hud-border)] backdrop-blur-md rounded-2xl p-6 max-w-md w-full mx-4 shadow-2xl fade-in"
           >
             <div className="flex items-center gap-3 mb-4">
               <div className="p-2.5 rounded-xl bg-red-50 dark:bg-red-950/30">

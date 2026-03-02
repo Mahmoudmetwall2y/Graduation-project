@@ -22,6 +22,15 @@ module.exports = {
         ring: "hsl(var(--ring))",
         background: "hsl(var(--background))",
         foreground: "hsl(var(--foreground))",
+        hud: {
+          base: "var(--hud-bg-base)",
+          surface: "var(--hud-surface-glass)",
+          border: "var(--hud-border)",
+          cyan: "var(--hud-accent-cyan)",
+          violet: "var(--hud-accent-violet)",
+          amber: "var(--hud-accent-amber)",
+          red: "var(--hud-accent-red)",
+        },
         primary: {
           DEFAULT: "hsl(var(--primary))",
           foreground: "hsl(var(--primary-foreground))",
