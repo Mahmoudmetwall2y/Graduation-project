@@ -11,7 +11,7 @@ const navItems = [
     { label: 'Sessions', href: '/sessions', icon: ClipboardList },
     { label: 'Patients', href: '/patients', icon: Users },
     { label: 'Devices', href: '/devices', icon: Cpu },
-    { label: 'Reports', href: '/alerts', icon: FileText },
+    { label: 'Reports', href: '/reports', icon: FileText },
 ];
 
 export function TopBar() {

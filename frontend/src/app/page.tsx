@@ -35,7 +35,8 @@ import { PageSkeleton } from './components/Skeleton'
 import { MetricCard } from '../components/ui/MetricCard'
 import { StatusType } from '../components/ui/StatusBadge'
 import { PatientInfoPanel } from '../components/dashboard/PatientInfoPanel'
-import { VitalSignsPanel } from '../components/dashboard/VitalSignsPanel'
+import { EcgGraphPanel } from '../components/dashboard/EcgGraphPanel'
+import { PcgGraphPanel } from '../components/dashboard/PcgGraphPanel'
 import { RecentActivityPanel } from '../components/dashboard/RecentActivityPanel'
 import { AIAnalyticsPanel } from '../components/dashboard/AIAnalyticsPanel'
 import { GlassCard } from '../components/ui/GlassCard'
@@ -73,6 +74,59 @@ interface DailyActivity {
   predictions: number
 }
 
+// Generate ECG waveform data (demo)
+function generateEcgWaveform(count = 60) {
+  const data = []
+  for (let i = 0; i < count; i++) {
+    const t = i / 15
+    const cycle = t % 1
+    let value = 0
+    if (cycle >= 0.0 && cycle < 0.12) value = 0.15 * Math.sin(Math.PI * cycle / 0.12)
+    else if (cycle >= 0.16 && cycle < 0.20) value = -0.1
+    else if (cycle >= 0.20 && cycle < 0.24) value = 1.0 + (Math.random() - 0.5) * 0.1
+    else if (cycle >= 0.24 && cycle < 0.28) value = -0.15
+    else if (cycle >= 0.35 && cycle < 0.55) value = 0.3 * Math.sin(Math.PI * (cycle - 0.35) / 0.2)
+    else value = 0
+    value += (Math.random() - 0.5) * 0.02
+    data.push({ time: (i * 0.067).toFixed(2), amplitude: parseFloat(value.toFixed(3)) })
+  }
+  return data
+}
+
+// Generate PCG waveform data (demo)
+function generatePcgWaveform(count = 60) {
+  const data = []
+  for (let i = 0; i < count; i++) {
+    const t = i / 15
+    const cycle = t % 1
+    let value = 0
+    if (cycle >= 0.0 && cycle < 0.15) {
+      value = 0.8 * Math.sin(2 * Math.PI * cycle / 0.15) * Math.exp(-cycle * 10)
+    } else if (cycle >= 0.4 && cycle < 0.55) {
+      value = 0.6 * Math.sin(2 * Math.PI * (cycle - 0.4) / 0.15) * Math.exp(-(cycle - 0.4) * 12)
+    } else {
+      value = 0
+    }
+    value += (Math.random() - 0.5) * 0.05
+    data.push({ time: (i * 0.067).toFixed(2), amplitude: parseFloat(value.toFixed(3)) })
+  }
+  return data
+}
+
+function buildWaveformSeries(samples: number[], sampleRate: number, maxPoints = 100) {
+  if (!samples || samples.length === 0 || !sampleRate) return []
+  const step = Math.max(1, Math.ceil(samples.length / maxPoints))
+  const data = []
+  for (let i = 0; i < samples.length; i += step) {
+    const t = i / sampleRate
+    data.push({
+      time: t.toFixed(2),
+      amplitude: parseFloat(samples[i].toFixed(3)),
+    })
+  }
+  return data
+}
+
 export default function Dashboard() {
   const [sessions, setSessions] = useState<Session[]>([])
   const [loading, setLoading] = useState(true)
@@ -88,6 +142,9 @@ export default function Dashboard() {
   const [latestPatient, setLatestPatient] = useState<Session['patient']>(null)
   const [latestConfidence, setLatestConfidence] = useState<number>(0)
   const [latestPredictionLabel, setLatestPredictionLabel] = useState<string>('')
+  const [ecgData, setEcgData] = useState<any[]>([])
+  const [pcgData, setPcgData] = useState<any[]>([])
+  const [deviceTelemetry, setDeviceTelemetry] = useState<any>(null)
 
   const [error, setError] = useState<string | null>(null)
   const router = useRouter()
@@ -128,6 +185,50 @@ export default function Dashboard() {
         } else {
           setLatestConfidence(0)
           setLatestPredictionLabel('')
+        }
+
+        // Fetch latest telemetry for the active device
+        const { data: telemetryData } = await supabase
+          .from('device_telemetry')
+          .select('*')
+          .eq('device_id', sessionsData[0].device_id)
+          .order('recorded_at', { ascending: false })
+          .limit(1)
+
+        if (telemetryData && telemetryData.length > 0) {
+          setDeviceTelemetry(telemetryData[0])
+        } else {
+          setDeviceTelemetry(null)
+        }
+
+        // Fetch latest live metrics for the waveforms
+        const { data: liveData } = await supabase
+          .from('live_metrics')
+          .select('metrics_json, created_at')
+          .eq('session_id', sessionsData[0].id)
+          .order('created_at', { ascending: false })
+          .limit(10)
+
+        const byModality: Record<string, any> = {}
+        if (liveData) {
+          for (const row of liveData) {
+            const waveform = row.metrics_json?.waveform
+            if (waveform && !byModality[waveform.modality]) {
+              byModality[waveform.modality] = waveform
+            }
+          }
+        }
+
+        if (byModality.ecg) {
+          setEcgData(buildWaveformSeries(byModality.ecg.samples, byModality.ecg.sample_rate, 60))
+        } else {
+          setEcgData([])
+        }
+
+        if (byModality.pcg) {
+          setPcgData(buildWaveformSeries(byModality.pcg.samples, byModality.pcg.sample_rate, 60))
+        } else {
+          setPcgData([])
         }
       }
 
@@ -243,7 +344,7 @@ export default function Dashboard() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'predictions' }, () => {
         fetchDashboardData()
       })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'devices' }, () => {
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'device_telemetry' }, () => {
         fetchDashboardData()
       })
       .subscribe()
@@ -437,6 +538,10 @@ export default function Dashboard() {
   const activePatientAge = latestPatient ? getPatientAge(latestPatient.dob) : "—"
   const activePatientSex = latestPatient ? (latestPatient.sex ? latestPatient.sex.charAt(0).toUpperCase() + latestPatient.sex.slice(1) : "Unknown") : "—"
 
+  // Fallbacks for when no active signal
+  const defaultEcg = generateEcgWaveform()
+  const defaultPcg = generatePcgWaveform()
+
   return (
     <div className="relative h-full overflow-hidden" style={{ backgroundColor: 'var(--hud-bg-base)' }}>
       {/* Cosmic background effects */}
@@ -477,39 +582,47 @@ export default function Dashboard() {
               bmi="—"
             />
 
-            <VitalSignsPanel
-              heartRate={activeSessions > 0 ? 72 : null}
-              bloodPressureSys={activeSessions > 0 ? 122 : null}
-              bloodPressureDia={activeSessions > 0 ? 78 : null}
-              temperature={activeSessions > 0 ? 37.2 : null}
-              respiration={activeSessions > 0 ? 18 : null}
-              lastUpdated={lastUpdated ? `Updated ${lastUpdated.toLocaleTimeString()}` : 'Waiting...'}
+            <EcgGraphPanel
+              data={ecgData.length ? ecgData : defaultEcg}
+              liveLabel={ecgData.length ? `Live · ${lastUpdatedLabel.replace('Updated ', '')}` : lastUpdatedLabel}
             />
 
-            {/* Allergies / Quick Stats panel */}
+            <PcgGraphPanel
+              data={pcgData.length ? pcgData : defaultPcg}
+              liveLabel={pcgData.length ? `Live · ${lastUpdatedLabel.replace('Updated ', '')}` : lastUpdatedLabel}
+            />
+
+            {/* System Status panel */}
             <GlassCard className="p-4">
               <div className="flex items-center justify-between mb-2">
                 <h3 className="text-xs font-semibold text-white uppercase tracking-widest">System Status</h3>
-                <button className="text-white/30 hover:text-white transition-colors">
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 17l9.2-9.2M17 17V7H7" /></svg>
-                </button>
+                <span className="text-[9px] text-white/40">{sessions.length > 0 ? `Device ID: ${sessions[0].device_id.slice(0, 8)}` : 'Offline'}</span>
               </div>
+
               <div className="grid grid-cols-2 gap-2">
                 <div className="flex items-center gap-2 bg-black/30 border border-hud-border/20 rounded-lg p-2">
-                  <div className={`w-2 h-2 rounded-full ${onlineDevices > 0 ? 'bg-emerald-400 animate-pulse' : 'bg-gray-500'}`} />
-                  <span className="text-[10px] text-white/60">{onlineDevices} online</span>
+                  <Cpu className="w-3 h-3 text-hud-cyan/60" />
+                  <span className="text-[10px] text-white/60">
+                    {deviceTelemetry?.temperature_celsius ? `${Number(deviceTelemetry.temperature_celsius).toFixed(1)}°C` : '—'}
+                  </span>
                 </div>
                 <div className="flex items-center gap-2 bg-black/30 border border-hud-border/20 rounded-lg p-2">
-                  <WifiOff className="w-3 h-3 text-white/30" />
-                  <span className="text-[10px] text-white/60">{deviceCount - onlineDevices} offline</span>
+                  <Wifi className="w-3 h-3 text-emerald-400" />
+                  <span className="text-[10px] text-white/60">
+                    {deviceTelemetry?.wifi_rssi ? `${deviceTelemetry.wifi_rssi} dBm` : '—'}
+                  </span>
                 </div>
                 <div className="flex items-center gap-2 bg-black/30 border border-hud-border/20 rounded-lg p-2">
-                  <AlertTriangle className="w-3 h-3 text-hud-amber/60" />
-                  <span className="text-[10px] text-white/60">{alertCount} alerts</span>
+                  <Zap className="w-3 h-3 text-amber-400" />
+                  <span className="text-[10px] text-white/60">
+                    {deviceTelemetry?.battery_voltage ? `${Number(deviceTelemetry.battery_voltage).toFixed(2)}V` : '—'}
+                  </span>
                 </div>
                 <div className="flex items-center gap-2 bg-black/30 border border-hud-border/20 rounded-lg p-2">
-                  <Zap className="w-3 h-3 text-hud-cyan/60" />
-                  <span className="text-[10px] text-white/60">{avgLatencyMs ? `${avgLatencyMs}ms` : '—'}</span>
+                  <Activity className="w-3 h-3 text-blue-400" />
+                  <span className="text-[10px] text-white/60">
+                    {deviceTelemetry?.uptime_seconds ? `${Math.floor(deviceTelemetry.uptime_seconds / 3600)}h ${Math.floor((deviceTelemetry.uptime_seconds % 3600) / 60)}m` : '—'}
+                  </span>
                 </div>
               </div>
             </GlassCard>

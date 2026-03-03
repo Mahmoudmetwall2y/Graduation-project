@@ -86,10 +86,7 @@ function LoadingFallback() {
     );
 }
 
-const bodyTabs = ['Anterior', 'Lateral', 'Posterior'] as const;
-
 export function HeartVisualization3D() {
-    const [activeTab, setActiveTab] = useState<typeof bodyTabs[number]>('Anterior');
 
     return (
         <div className="relative flex flex-col items-center justify-center h-full w-full">
@@ -178,25 +175,11 @@ export function HeartVisualization3D() {
                 </Canvas>
             </div>
 
-            {/* View selector tabs */}
-            <div className="relative z-20 flex items-center gap-2 mt-2 mb-1 flex-shrink-0">
-                <div className="flex bg-black/50 backdrop-blur-md border border-hud-border rounded-full p-1">
-                    {bodyTabs.map((tab) => (
-                        <button
-                            key={tab}
-                            onClick={() => setActiveTab(tab)}
-                            className={`px-4 py-1.5 rounded-full text-xs font-medium transition-all duration-300 ${activeTab === tab
-                                ? 'bg-hud-cyan/20 text-hud-cyan border border-hud-cyan/40 shadow-[0_0_10px_rgba(0,240,255,0.2)]'
-                                : 'text-white/50 hover:text-white/80 border border-transparent'
-                                }`}
-                        >
-                            {tab}
-                        </button>
-                    ))}
-                </div>
-                <div className="flex gap-1 ml-3">
-                    <button className="w-7 h-7 flex items-center justify-center rounded-full bg-black/50 border border-hud-border text-white/50 hover:text-white text-xs transition-colors">−</button>
-                    <button className="w-7 h-7 flex items-center justify-center rounded-full bg-black/50 border border-hud-border text-white/50 hover:text-white text-xs transition-colors">+</button>
+            {/* Zoom controls */}
+            <div className="relative z-20 flex justify-center gap-2 mt-2 mb-2 flex-shrink-0">
+                <div className="flex gap-2">
+                    <button className="w-8 h-8 flex items-center justify-center rounded-full bg-black/50 border border-hud-border text-white/50 hover:text-white hover:bg-black/70 font-semibold transition-colors">−</button>
+                    <button className="w-8 h-8 flex items-center justify-center rounded-full bg-black/50 border border-hud-border text-white/50 hover:text-white hover:bg-black/70 font-semibold transition-colors">+</button>
                 </div>
             </div>
         </div>

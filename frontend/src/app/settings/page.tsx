@@ -4,10 +4,11 @@ import { useState, useEffect, useCallback } from 'react'
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs'
 import {
     Settings, User, Lock, Building2, Save, CheckCircle,
-    AlertCircle, Eye, EyeOff, Mail, Shield
+    AlertCircle, Eye, EyeOff, Mail, Shield, Sliders
 } from 'lucide-react'
 import { PageSkeleton } from '../components/Skeleton'
 import { GlassCard } from '../../components/ui/GlassCard'
+import { NeonToggle } from '../../components/ui/NeonToggle'
 
 interface Profile {
     id: string
@@ -44,7 +45,13 @@ export default function SettingsPage() {
     const [showNewPassword, setShowNewPassword] = useState(false)
     const [success, setSuccess] = useState<string | null>(null)
     const [error, setError] = useState<string | null>(null)
-    const [activeTab, setActiveTab] = useState<'profile' | 'security' | 'organization'>('profile')
+    const [activeTab, setActiveTab] = useState<'profile' | 'security' | 'organization' | 'preferences'>('profile')
+
+    // Preferences Mock State
+    const [audioAlerts, setAudioAlerts] = useState(true)
+    const [highContrast, setHighContrast] = useState(false)
+    const [compactView, setCompactView] = useState(false)
+
     const supabase = createClientComponentClient()
 
     const fetchData = useCallback(async () => {
@@ -194,13 +201,20 @@ export default function SettingsPage() {
 
     const tabs = [
         { key: 'profile' as const, label: 'Profile', icon: User },
+        { key: 'preferences' as const, label: 'Preferences', icon: Sliders },
         { key: 'security' as const, label: 'Security', icon: Lock },
         { key: 'organization' as const, label: 'Organization', icon: Building2 },
     ]
 
     return (
-        <div className="page-wrapper">
-            <div className="page-content space-y-6">
+        <div className="relative page-wrapper overflow-hidden" style={{ backgroundColor: 'var(--hud-bg-base)' }}>
+            {/* Cosmic background effects */}
+            <div className="absolute inset-0 pointer-events-none z-0">
+                <div className="absolute top-0 left-1/4 w-[600px] h-[600px] bg-hud-cyan/3 rounded-full blur-[120px]" />
+                <div className="absolute bottom-0 right-1/4 w-[500px] h-[500px] bg-hud-violet/3 rounded-full blur-[100px]" />
+            </div>
+
+            <div className="relative z-10 page-content space-y-6 max-w-4xl mx-auto">
                 {/* Header */}
                 <div className="fade-in">
                     <div className="flex items-center gap-3 mb-1">
@@ -311,56 +325,48 @@ export default function SettingsPage() {
                                 {saving ? 'Saving...' : 'Save Changes'}
                             </button>
                         </div>
+                    </GlassCard>
+                )}
 
-                        <div className="pt-4 border-t border-border">
-                            <h3 className="text-base font-semibold text-foreground mb-2">Data Retention & Privacy</h3>
-                            <p className="text-sm text-muted-foreground mb-4">
-                                Control how long data is retained and whether exports are de-identified.
-                            </p>
+                {/* Preferences Tab (UI Mockup) */}
+                {activeTab === 'preferences' && (
+                    <GlassCard className="space-y-6 slide-up">
+                        <div>
+                            <h2 className="text-lg font-semibold text-foreground">System Preferences</h2>
+                            <p className="text-sm text-muted-foreground mt-1">Customize your local HUD and monitoring experience.</p>
+                        </div>
 
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                <div>
-                                    <label className="block text-sm font-medium text-foreground mb-1.5">Retention Days</label>
-                                    <input
-                                        type="number"
-                                        min={0}
-                                        value={retentionDays}
-                                        onChange={(e) => setRetentionDays(Number(e.target.value))}
-                                        className="input-field"
-                                        disabled={profile?.role !== 'admin'}
-                                    />
-                                    <p className="text-xs text-muted-foreground mt-1">
-                                        Set to 0 for immediate deletion policy (requires backend job).
-                                    </p>
-                                </div>
-                                <div className="flex items-center gap-3">
-                                    <input
-                                        id="deidentify"
-                                        type="checkbox"
-                                        checked={deidentifyExports}
-                                        onChange={(e) => setDeidentifyExports(e.target.checked)}
-                                        className="h-4 w-4"
-                                        disabled={profile?.role !== 'admin'}
-                                    />
-                                    <label htmlFor="deidentify" className="text-sm text-foreground">
-                                        De-identify exports by default
-                                    </label>
-                                </div>
-                            </div>
+                        <div className="space-y-4 pt-2">
+                            <NeonToggle
+                                checked={audioAlerts}
+                                onChange={setAudioAlerts}
+                                label="Critical Audio Alerts"
+                                description="Play warning sounds when AI detects a critical anomaly in PCG/ECG streams."
+                            />
+                            <NeonToggle
+                                checked={highContrast}
+                                onChange={setHighContrast}
+                                label="High Contrast Mode"
+                                description="Increase brightness of medical graphs and telemetry for better visibility."
+                            />
+                            <NeonToggle
+                                checked={compactView}
+                                onChange={setCompactView}
+                                label="Compact HUD View"
+                                description="Reduce padding and typography sizes to fit more data on smaller screens."
+                            />
+                        </div>
 
-                            <div className="pt-4">
-                                <button
-                                    onClick={handleSaveOrgSettings}
-                                    disabled={saving || profile?.role !== 'admin'}
-                                    className="btn-primary gap-2"
-                                >
-                                    {saving ? <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <Save className="w-4 h-4" />}
-                                    {saving ? 'Saving...' : 'Save Organization Settings'}
-                                </button>
-                                {profile?.role !== 'admin' && (
-                                    <p className="text-xs text-muted-foreground mt-2">Only admins can change these settings.</p>
-                                )}
-                            </div>
+                        <div className="pt-4 border-t border-border mt-6">
+                            <button
+                                onClick={() => {
+                                    setSuccess("Preferences saved locally.");
+                                    setTimeout(() => setSuccess(null), 3000);
+                                }}
+                                className="btn-primary gap-2"
+                            >
+                                <Save className="w-4 h-4" /> Save Preferences
+                            </button>
                         </div>
                     </GlassCard>
                 )}
@@ -473,6 +479,55 @@ export default function SettingsPage() {
                                     disabled
                                     className="input-field opacity-60 cursor-not-allowed"
                                 />
+                            </div>
+                        </div>
+
+                        <div className="pt-4 border-t border-border mt-6">
+                            <h3 className="text-base font-semibold text-foreground mb-2">Data Retention & Privacy</h3>
+                            <p className="text-sm text-muted-foreground mb-4">
+                                Control how long data is retained and whether exports are de-identified.
+                            </p>
+
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-8 mb-6">
+                                <div>
+                                    <label className="block text-sm font-medium text-foreground mb-1.5">Retention Days</label>
+                                    <input
+                                        type="number"
+                                        min={0}
+                                        value={retentionDays}
+                                        onChange={(e) => setRetentionDays(Number(e.target.value))}
+                                        className="input-field"
+                                        disabled={profile?.role !== 'admin'}
+                                    />
+                                    <p className="text-xs text-muted-foreground mt-1">
+                                        Set to 0 for immediate deletion policy (requires backend job).
+                                    </p>
+                                </div>
+                                <div className="flex items-center pt-6">
+                                    <div className="w-full">
+                                        <NeonToggle
+                                            checked={deidentifyExports}
+                                            onChange={setDeidentifyExports}
+                                            label="De-identify Exports"
+                                            description="Automatically strip PHI from batch dataset exports"
+                                            disabled={profile?.role !== 'admin'}
+                                        />
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="pt-4">
+                                <button
+                                    onClick={handleSaveOrgSettings}
+                                    disabled={saving || profile?.role !== 'admin'}
+                                    className="btn-primary gap-2"
+                                >
+                                    {saving ? <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <Save className="w-4 h-4" />}
+                                    {saving ? 'Saving...' : 'Save Organization Settings'}
+                                </button>
+                                {profile?.role !== 'admin' && (
+                                    <p className="text-xs text-muted-foreground mt-2">Only admins can change these settings.</p>
+                                )}
                             </div>
                         </div>
                     </GlassCard>
