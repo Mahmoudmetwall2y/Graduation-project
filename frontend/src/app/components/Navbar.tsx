@@ -163,7 +163,7 @@ export default function Navbar({ showBackLink, backHref = '/', backLabel = '<- B
             {/* Desktop sidebar */}
             <aside className={`hidden lg:flex flex-col border-r border-hud-border/50 bg-hud-surface-glass backdrop-blur-[12px] shadow-lg lg:sticky lg:top-0 lg:h-screen transition-all duration-300 z-50 ${isCollapsed ? 'w-20' : 'w-64'}`}>
                 <div className="px-5 py-5">
-                    <Link href="/" className={`flex items-center gap-2.5 group ${isCollapsed ? 'justify-center' : ''}`}>
+                    <Link href="/dashboard" className={`flex items-center gap-2.5 group ${isCollapsed ? 'justify-center' : ''}`}>
                         <div className="relative flex items-center justify-center w-10 h-10 rounded-xl bg-gradient-to-br from-teal-500 to-teal-700 shadow-md ring-1 ring-white/20 group-hover:shadow-lg transition-shadow">
                             <svg viewBox="0 0 32 32" className="logo-mark" aria-hidden="true">
                                 <path d="M3 16h6l2.2-6.2 3.6 12.4 2.8-7.2 1.8 1.8H29" fill="none" stroke="white" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
@@ -290,7 +290,7 @@ export default function Navbar({ showBackLink, backHref = '/', backLabel = '<- B
             {/* Mobile top bar */}
             <div className="lg:hidden sticky top-0 z-50 border-b border-hud-border/50 bg-hud-surface-glass backdrop-blur-[12px] shadow-lg">
                 <div className="flex items-center justify-between h-16 px-4">
-                    <Link href="/" className="flex items-center gap-2.5">
+                    <Link href="/dashboard" className="flex items-center gap-2.5">
                         <div className="relative flex items-center justify-center w-9 h-9 rounded-lg bg-gradient-to-br from-teal-500 to-teal-700 shadow-md ring-1 ring-white/20">
                             <Heart className="w-5 h-5 text-white" strokeWidth={2.5} />
                             <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-card animate-pulse" />
@@ -403,3 +403,4 @@ export default function Navbar({ showBackLink, backHref = '/', backLabel = '<- B
         </>
     )
 }
+

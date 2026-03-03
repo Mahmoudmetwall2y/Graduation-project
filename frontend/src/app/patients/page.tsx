@@ -11,13 +11,17 @@ import {
   Hash,
   FileText,
   X,
-  Activity
+  Activity,
+  Trash2,
+  AlertCircle
 } from 'lucide-react'
 import { PageSkeleton } from '../components/Skeleton'
 import { GlassCard } from '../../components/ui/GlassCard'
+import { useToast } from '../components/Toast'
 
 interface Patient {
   id: string
+  created_by: string | null
   full_name: string
   mrn: string | null
   dob: string | null
@@ -28,13 +32,19 @@ interface Patient {
 
 export default function PatientsPage() {
   const supabase = createClientComponentClient()
+  const { showToast } = useToast()
   const [patients, setPatients] = useState<Patient[]>([])
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null)
+  const [currentUserRole, setCurrentUserRole] = useState<string>('operator')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [showAddModal, setShowAddModal] = useState(false)
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState<Patient | null>(null)
   const [creating, setCreating] = useState(false)
+  const [deletingPatientId, setDeletingPatientId] = useState<string | null>(null)
   const addModalRef = useRef<HTMLDivElement | null>(null)
+  const deleteModalRef = useRef<HTMLDivElement | null>(null)
   const firstFieldRef = useRef<HTMLInputElement | null>(null)
 
   const [fullName, setFullName] = useState('')
@@ -45,10 +55,25 @@ export default function PatientsPage() {
 
   const fetchPatients = useCallback(async () => {
     try {
-      const { data, error: fetchError } = await supabase
-        .from('patients')
-        .select('*')
-        .order('created_at', { ascending: false })
+      const [{ data: userResp, error: userError }, { data, error: fetchError }] = await Promise.all([
+        supabase.auth.getUser(),
+        supabase
+          .from('patients')
+          .select('*')
+          .order('created_at', { ascending: false }),
+      ])
+
+      if (userError) throw userError
+      const user = userResp.user
+      if (user) {
+        setCurrentUserId(user.id)
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('role')
+          .eq('id', user.id)
+          .single()
+        if (profile?.role) setCurrentUserRole(profile.role)
+      }
 
       if (fetchError) throw fetchError
       setPatients(data || [])
@@ -75,6 +100,17 @@ export default function PatientsPage() {
     setTimeout(() => firstFieldRef.current?.focus(), 0)
     return () => window.removeEventListener('keydown', handleKey)
   }, [showAddModal])
+
+  useEffect(() => {
+    if (!showDeleteConfirm) return
+    const handleKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setShowDeleteConfirm(null)
+      }
+    }
+    window.addEventListener('keydown', handleKey)
+    return () => window.removeEventListener('keydown', handleKey)
+  }, [showDeleteConfirm])
 
   const resetForm = () => {
     setFullName('')
@@ -124,6 +160,38 @@ export default function PatientsPage() {
       setError(err.message || 'Failed to create patient')
     } finally {
       setCreating(false)
+    }
+  }
+
+  const canDeletePatient = (patient: Patient) => {
+    return currentUserRole === 'admin' || patient.created_by === currentUserId
+  }
+
+  const deletePatient = async (patient: Patient) => {
+    setDeletingPatientId(patient.id)
+    setError(null)
+    try {
+      const { data: deleted, error: deleteError } = await supabase
+        .from('patients')
+        .delete()
+        .eq('id', patient.id)
+        .select('id')
+        .maybeSingle()
+
+      if (deleteError) throw deleteError
+      if (!deleted) {
+        throw new Error('Delete blocked by database policy. Ensure migration 023_delete_policies_for_sessions_and_patients.sql is applied.')
+      }
+
+      setPatients((prev) => prev.filter((p) => p.id !== patient.id))
+      setShowDeleteConfirm(null)
+      showToast('Patient deleted successfully', 'success')
+    } catch (err: any) {
+      const message = err.message || 'Failed to delete patient'
+      setError(message)
+      showToast(message, 'error')
+    } finally {
+      setDeletingPatientId(null)
     }
   }
 
@@ -255,17 +323,70 @@ export default function PatientsPage() {
                   </div>
 
                   <div className="border-t border-hud-border/30">
-                    <Link
-                      href="/session/new"
-                      className="flex items-center justify-center gap-2 px-4 py-3 text-sm font-medium text-hud-cyan hover:bg-hud-cyan/10 transition-colors"
-                    >
-                      <Activity className="w-4 h-4" />
-                      Start Session
-                    </Link>
+                    <div className="grid grid-cols-2">
+                      <Link
+                        href="/session/new"
+                        className="flex items-center justify-center gap-2 px-4 py-3 text-sm font-medium text-hud-cyan hover:bg-hud-cyan/10 transition-colors border-r border-hud-border/30"
+                      >
+                        <Activity className="w-4 h-4" />
+                        Start Session
+                      </Link>
+                      <button
+                        onClick={() => setShowDeleteConfirm(patient)}
+                        disabled={!canDeletePatient(patient)}
+                        className={`flex items-center justify-center gap-2 px-4 py-3 text-sm font-medium transition-colors ${canDeletePatient(patient)
+                          ? 'text-red-400 hover:bg-red-500/10'
+                          : 'text-white/30 cursor-not-allowed'
+                          }`}
+                        title={canDeletePatient(patient) ? 'Delete patient' : 'Only admins or record creators can delete'}
+                      >
+                        <Trash2 className="w-4 h-4" />
+                        Delete
+                      </button>
+                    </div>
                   </div>
                 </GlassCard>
               </div>
             ))}
+          </div>
+        )}
+
+        {showDeleteConfirm && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={() => setShowDeleteConfirm(null)} />
+            <div
+              ref={deleteModalRef}
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="delete-patient-title"
+              className="relative bg-[#0a0e17]/90 border border-[#ff4d4f]/30 shadow-[0_0_30px_rgba(255,77,79,0.15)] rounded-2xl max-w-sm w-full p-6 fade-in backdrop-blur-xl"
+            >
+              <div className="text-center mb-6">
+                <div className="w-14 h-14 rounded-2xl bg-red-100 dark:bg-red-950/30 flex items-center justify-center mx-auto mb-3">
+                  <AlertCircle className="w-7 h-7 text-red-600 dark:text-red-400" />
+                </div>
+                <h2 id="delete-patient-title" className="text-xl font-bold text-foreground">Delete Patient?</h2>
+                <p className="text-sm text-muted-foreground mt-2">
+                  Delete <strong>{showDeleteConfirm.full_name}</strong>. Existing sessions will remain but become unlinked from this patient.
+                </p>
+              </div>
+
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setShowDeleteConfirm(null)}
+                  className="btn-ghost flex-1"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => deletePatient(showDeleteConfirm)}
+                  disabled={deletingPatientId === showDeleteConfirm.id}
+                  className="flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold text-white bg-red-600 hover:bg-red-700 disabled:opacity-50 transition-colors"
+                >
+                  {deletingPatientId === showDeleteConfirm.id ? 'Deleting...' : 'Delete Patient'}
+                </button>
+              </div>
+            </div>
           </div>
         )}
 

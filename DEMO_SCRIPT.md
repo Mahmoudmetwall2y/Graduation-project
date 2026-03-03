@@ -47,6 +47,5 @@
 - Extensible LLM reporting pipeline (demo mode now).
 
 ## If Something Fails
-- Use `DEBUG_STEP5_NO_SESSION.md` for MQTT/session issues.
-- Use `LIVE_WAVEFORM_ENABLE.md` for live charts.
-
+- Use `./DEBUG_STEP5_NO_SESSION.md` for MQTT/session issues.
+- Use `./LIVE_WAVEFORM_ENABLE.md` for live charts.

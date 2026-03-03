@@ -464,8 +464,14 @@ class MQTTHandler:
         
         try:
             # Update status
-            await loop.run_in_executor(_executor, 
-                self.supabase.update_session_status, session_id, 'processing')
+            processing_ok = await loop.run_in_executor(
+                _executor,
+                self.supabase.update_session_status,
+                session_id,
+                'processing'
+            )
+            if not processing_ok:
+                raise RuntimeError(f"Failed to set session {session_id} to processing")
             
             # Reconstruct signal
             audio = buffer.reconstruct_signal()
@@ -479,24 +485,51 @@ class MQTTHandler:
             
             storage_path = f"{buffer.org_id}/{session_id}/pcg/recording.wav"
             
-            await loop.run_in_executor(_executor,
-                self.supabase.upload_file, 'recordings', storage_path, wav_bytes, 'audio/wav')
+            upload_ok = await loop.run_in_executor(
+                _executor,
+                self.supabase.upload_file,
+                'recordings',
+                storage_path,
+                wav_bytes,
+                'audio/wav'
+            )
+            if not upload_ok:
+                raise RuntimeError(f"Failed to upload PCG recording for session {session_id}")
             
             # Create recording entry
-            await loop.run_in_executor(_executor,
+            recording_id = await loop.run_in_executor(
+                _executor,
                 self.supabase.create_recording,
-                buffer.org_id, session_id, 'pcg', buffer.valve_position,
-                buffer.sample_rate, buffer.get_duration(), storage_path, checksum)
+                buffer.org_id,
+                session_id,
+                'pcg',
+                buffer.valve_position,
+                buffer.sample_rate,
+                buffer.get_duration(),
+                storage_path,
+                checksum
+            )
+            if not recording_id:
+                raise RuntimeError(f"Failed to create PCG recording row for session {session_id}")
             
             # Run PCG inference
             pcg_result = self.inference_engine.predict_pcg(audio, buffer.sample_rate)
             
             # Store PCG prediction
-            await loop.run_in_executor(_executor,
+            prediction_id = await loop.run_in_executor(
+                _executor,
                 self.supabase.create_prediction,
-                buffer.org_id, session_id, 'pcg',
-                pcg_result['model_name'], pcg_result['model_version'],
-                pcg_result['preprocessing_version'], pcg_result, pcg_result['latency_ms'])
+                buffer.org_id,
+                session_id,
+                'pcg',
+                pcg_result['model_name'],
+                pcg_result['model_version'],
+                pcg_result['preprocessing_version'],
+                pcg_result,
+                pcg_result['latency_ms']
+            )
+            if not prediction_id:
+                raise RuntimeError(f"Failed to create PCG prediction row for session {session_id}")
             
             # If Murmur detected, run severity analysis
             if pcg_result['label'] == 'Murmur':
@@ -507,12 +540,19 @@ class MQTTHandler:
                 )
                 
                 if severity_result:
-                    await loop.run_in_executor(_executor,
+                    severity_id = await loop.run_in_executor(
+                        _executor,
                         self.supabase.create_murmur_severity,
-                        buffer.org_id, session_id,
+                        buffer.org_id,
+                        session_id,
                         severity_result['model_version'],
                         severity_result['preprocessing_version'],
-                        severity_result)
+                        severity_result
+                    )
+                    if not severity_id:
+                        raise RuntimeError(
+                            f"Failed to create murmur severity row for session {session_id}"
+                        )
             
             # Audit log
             await loop.run_in_executor(_executor,
@@ -521,6 +561,19 @@ class MQTTHandler:
                 {'result': pcg_result['label'], 'demo_mode': pcg_result['demo_mode']})
             
             logger.info(f"PCG inference completed for session {session_id}")
+
+            # Check if this was the last modality, mark session done
+            ecg_buffer_key = f"{session_id}_ecg"
+            if ecg_buffer_key not in self.buffers:
+                done_ok = await loop.run_in_executor(
+                    _executor,
+                    self.supabase.update_session_status,
+                    session_id,
+                    'done',
+                    datetime.now(timezone.utc).isoformat()
+                )
+                if not done_ok:
+                    raise RuntimeError(f"Failed to mark session {session_id} as done")
             
         except Exception as e:
             logger.error(f"Error processing PCG: {e}")
@@ -549,8 +602,14 @@ class MQTTHandler:
         
         try:
             # Update status
-            await loop.run_in_executor(_executor,
-                self.supabase.update_session_status, session_id, 'processing')
+            processing_ok = await loop.run_in_executor(
+                _executor,
+                self.supabase.update_session_status,
+                session_id,
+                'processing'
+            )
+            if not processing_ok:
+                raise RuntimeError(f"Failed to set session {session_id} to processing")
             
             # Reconstruct signal
             ecg = buffer.reconstruct_signal()
@@ -560,25 +619,51 @@ class MQTTHandler:
             ecg_bytes = (ecg * 32768).astype(np.int16).tobytes()
             checksum = SupabaseClient.compute_checksum(ecg_bytes)
             
-            await loop.run_in_executor(_executor,
-                self.supabase.upload_file, 'recordings', storage_path, ecg_bytes,
-                'application/octet-stream')
+            upload_ok = await loop.run_in_executor(
+                _executor,
+                self.supabase.upload_file,
+                'recordings',
+                storage_path,
+                ecg_bytes,
+                'application/octet-stream'
+            )
+            if not upload_ok:
+                raise RuntimeError(f"Failed to upload ECG recording for session {session_id}")
             
             # Create recording entry
-            await loop.run_in_executor(_executor,
+            recording_id = await loop.run_in_executor(
+                _executor,
                 self.supabase.create_recording,
-                buffer.org_id, session_id, 'ecg', None,
-                buffer.sample_rate, buffer.get_duration(), storage_path, checksum)
+                buffer.org_id,
+                session_id,
+                'ecg',
+                None,
+                buffer.sample_rate,
+                buffer.get_duration(),
+                storage_path,
+                checksum
+            )
+            if not recording_id:
+                raise RuntimeError(f"Failed to create ECG recording row for session {session_id}")
             
             # Run ECG inference
             ecg_result = self.inference_engine.predict_ecg(ecg, buffer.sample_rate)
             
             # Store ECG prediction
-            await loop.run_in_executor(_executor,
+            prediction_id = await loop.run_in_executor(
+                _executor,
                 self.supabase.create_prediction,
-                buffer.org_id, session_id, 'ecg',
-                ecg_result['model_name'], ecg_result['model_version'],
-                ecg_result['preprocessing_version'], ecg_result, ecg_result['latency_ms'])
+                buffer.org_id,
+                session_id,
+                'ecg',
+                ecg_result['model_name'],
+                ecg_result['model_version'],
+                ecg_result['preprocessing_version'],
+                ecg_result,
+                ecg_result['latency_ms']
+            )
+            if not prediction_id:
+                raise RuntimeError(f"Failed to create ECG prediction row for session {session_id}")
             
             # Audit log
             await loop.run_in_executor(_executor,
@@ -592,10 +677,15 @@ class MQTTHandler:
             pcg_buffer_key = f"{session_id}_pcg"
             if pcg_buffer_key not in self.buffers:
                 # PCG already done or not in session
-                await loop.run_in_executor(_executor,
+                done_ok = await loop.run_in_executor(
+                    _executor,
                     self.supabase.update_session_status,
-                    session_id, 'done',
-                    datetime.now(timezone.utc).isoformat())
+                    session_id,
+                    'done',
+                    datetime.now(timezone.utc).isoformat()
+                )
+                if not done_ok:
+                    raise RuntimeError(f"Failed to mark session {session_id} as done")
             
         except Exception as e:
             logger.error(f"Error processing ECG: {e}")
@@ -716,7 +806,7 @@ class MQTTHandler:
                 
                 loop = asyncio.get_running_loop()
                 
-                for buffer_key, buffer in self.buffers.items():
+                for buffer_key, buffer in list(self.buffers.items()):
                     if buffer.ended:
                         continue
                     
@@ -741,9 +831,17 @@ class MQTTHandler:
                         }
                     
                     # Publish to DB via thread pool
-                    await loop.run_in_executor(_executor,
+                    metrics_saved = await loop.run_in_executor(
+                        _executor,
                         self.supabase.create_live_metrics,
-                        buffer.org_id, buffer.session_id, metrics)
+                        buffer.org_id,
+                        buffer.session_id,
+                        metrics
+                    )
+                    if not metrics_saved:
+                        logger.warning(
+                            f"Failed to persist live metrics for session {buffer.session_id}"
+                        )
                     
             except Exception as e:
                 logger.error(f"Error publishing live metrics: {e}")

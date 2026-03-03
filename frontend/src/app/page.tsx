@@ -1,700 +1,298 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
-import { createClientComponentClient } from '@supabase/auth-helpers-nextjs'
-import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import {
-  Activity,
-  Cpu,
-  AlertTriangle,
-  Clock,
-  ChevronRight,
-  TrendingUp,
-  Heart,
-  Zap,
-  Plus,
-  Wifi,
-  WifiOff,
-  ArrowUpRight,
-  BarChart3,
-  Stethoscope
-} from 'lucide-react'
-import {
-  AreaChart,
-  Area,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  BarChart,
-  Bar,
-} from 'recharts'
-import { PageSkeleton } from './components/Skeleton'
-import { MetricCard } from '../components/ui/MetricCard'
-import { StatusType } from '../components/ui/StatusBadge'
-import { PatientInfoPanel } from '../components/dashboard/PatientInfoPanel'
-import { EcgGraphPanel } from '../components/dashboard/EcgGraphPanel'
-import { PcgGraphPanel } from '../components/dashboard/PcgGraphPanel'
-import { RecentActivityPanel } from '../components/dashboard/RecentActivityPanel'
-import { AIAnalyticsPanel } from '../components/dashboard/AIAnalyticsPanel'
-import { GlassCard } from '../components/ui/GlassCard'
 import dynamic from 'next/dynamic'
+import {
+    Activity,
+    Heart,
+    Cpu,
+    Wifi,
+    Database,
+    ArrowRight,
+    Terminal,
+    ShieldAlert,
+    LineChart,
+    Stethoscope
+} from 'lucide-react'
 
-const HeartVisualization3D = dynamic(
-  () => import('../components/ui/HeartVisualization3D').then(mod => mod.HeartVisualization3D),
-  {
-    ssr: false,
-    loading: () => (
-      <div className="flex items-center justify-center h-[500px]">
-        <div className="w-16 h-16 border-2 border-hud-cyan/30 border-t-hud-cyan rounded-full animate-spin" />
-      </div>
-    ),
-  }
-)
-
-interface Session {
-  id: string
-  status: string
-  created_at: string
-  device_id: string
-  ended_at: string | null
-  patient?: {
-    id: string
-    full_name: string
-    dob: string | null
-    sex: string | null
-  } | null
-}
-
-interface DailyActivity {
-  day: string
-  sessions: number
-  predictions: number
-}
-
-// Generate ECG waveform data (demo)
-function generateEcgWaveform(count = 60) {
-  const data = []
-  for (let i = 0; i < count; i++) {
-    const t = i / 15
-    const cycle = t % 1
-    let value = 0
-    if (cycle >= 0.0 && cycle < 0.12) value = 0.15 * Math.sin(Math.PI * cycle / 0.12)
-    else if (cycle >= 0.16 && cycle < 0.20) value = -0.1
-    else if (cycle >= 0.20 && cycle < 0.24) value = 1.0 + (Math.random() - 0.5) * 0.1
-    else if (cycle >= 0.24 && cycle < 0.28) value = -0.15
-    else if (cycle >= 0.35 && cycle < 0.55) value = 0.3 * Math.sin(Math.PI * (cycle - 0.35) / 0.2)
-    else value = 0
-    value += (Math.random() - 0.5) * 0.02
-    data.push({ time: (i * 0.067).toFixed(2), amplitude: parseFloat(value.toFixed(3)) })
-  }
-  return data
-}
-
-// Generate PCG waveform data (demo)
-function generatePcgWaveform(count = 60) {
-  const data = []
-  for (let i = 0; i < count; i++) {
-    const t = i / 15
-    const cycle = t % 1
-    let value = 0
-    if (cycle >= 0.0 && cycle < 0.15) {
-      value = 0.8 * Math.sin(2 * Math.PI * cycle / 0.15) * Math.exp(-cycle * 10)
-    } else if (cycle >= 0.4 && cycle < 0.55) {
-      value = 0.6 * Math.sin(2 * Math.PI * (cycle - 0.4) / 0.15) * Math.exp(-(cycle - 0.4) * 12)
-    } else {
-      value = 0
-    }
-    value += (Math.random() - 0.5) * 0.05
-    data.push({ time: (i * 0.067).toFixed(2), amplitude: parseFloat(value.toFixed(3)) })
-  }
-  return data
-}
-
-function buildWaveformSeries(samples: number[], sampleRate: number, maxPoints = 100) {
-  if (!samples || samples.length === 0 || !sampleRate) return []
-  const step = Math.max(1, Math.ceil(samples.length / maxPoints))
-  const data = []
-  for (let i = 0; i < samples.length; i += step) {
-    const t = i / sampleRate
-    data.push({
-      time: t.toFixed(2),
-      amplitude: parseFloat(samples[i].toFixed(3)),
-    })
-  }
-  return data
-}
-
-export default function Dashboard() {
-  const [sessions, setSessions] = useState<Session[]>([])
-  const [loading, setLoading] = useState(true)
-  const [deviceCount, setDeviceCount] = useState(0)
-  const [onlineDevices, setOnlineDevices] = useState(0)
-  const [weeklyData, setWeeklyData] = useState<DailyActivity[]>([])
-  const [predictionCount, setPredictionCount] = useState(0)
-  const [todaySessionCount, setTodaySessionCount] = useState(0)
-  const [avgLatencyMs, setAvgLatencyMs] = useState<number | null>(null)
-  const [offlineOverHour, setOfflineOverHour] = useState(0)
-  const [lastUpdated, setLastUpdated] = useState<Date | null>(null)
-
-  const [latestPatient, setLatestPatient] = useState<Session['patient']>(null)
-  const [latestConfidence, setLatestConfidence] = useState<number>(0)
-  const [latestPredictionLabel, setLatestPredictionLabel] = useState<string>('')
-  const [ecgData, setEcgData] = useState<any[]>([])
-  const [pcgData, setPcgData] = useState<any[]>([])
-  const [deviceTelemetry, setDeviceTelemetry] = useState<any>(null)
-
-  const [error, setError] = useState<string | null>(null)
-  const router = useRouter()
-  const supabase = createClientComponentClient()
-
-  const fetchDashboardData = useCallback(async () => {
-    try {
-      // Fetch recent sessions with patient data
-      const { data: sessionsData, error: sessionsError } = await supabase
-        .from('sessions')
-        .select('*, patient:patients(id, full_name, dob, sex)')
-        .order('created_at', { ascending: false })
-        .limit(20)
-
-      if (sessionsError) throw sessionsError
-      setSessions(sessionsData || [])
-
-      if (sessionsData && sessionsData.length > 0) {
-        // Find the most recent session that has a linked patient
-        const sessionWithPatient = sessionsData.find(s => s.patient)
-        if (sessionWithPatient) {
-          setLatestPatient(sessionWithPatient.patient)
-        }
-
-        // Fetch latest prediction for AI Analytics
-        const { data: latestPreds } = await supabase
-          .from('predictions')
-          .select('output_json')
-          .eq('session_id', sessionsData[0].id)
-          .order('created_at', { ascending: false })
-          .limit(1)
-
-        if (latestPreds && latestPreds.length > 0) {
-          const out = latestPreds[0].output_json
-          const conf = out?.confidence ?? out?.probabilities?.[out?.label] ?? 0
-          setLatestConfidence(Math.round(conf * 100))
-          setLatestPredictionLabel(out?.label || out?.prediction || 'Analyzing...')
-        } else {
-          setLatestConfidence(0)
-          setLatestPredictionLabel('')
-        }
-
-        // Fetch latest telemetry for the active device
-        const { data: telemetryData } = await supabase
-          .from('device_telemetry')
-          .select('*')
-          .eq('device_id', sessionsData[0].device_id)
-          .order('recorded_at', { ascending: false })
-          .limit(1)
-
-        if (telemetryData && telemetryData.length > 0) {
-          setDeviceTelemetry(telemetryData[0])
-        } else {
-          setDeviceTelemetry(null)
-        }
-
-        // Fetch latest live metrics for the waveforms
-        const { data: liveData } = await supabase
-          .from('live_metrics')
-          .select('metrics_json, created_at')
-          .eq('session_id', sessionsData[0].id)
-          .order('created_at', { ascending: false })
-          .limit(10)
-
-        const byModality: Record<string, any> = {}
-        if (liveData) {
-          for (const row of liveData) {
-            const waveform = row.metrics_json?.waveform
-            if (waveform && !byModality[waveform.modality]) {
-              byModality[waveform.modality] = waveform
-            }
-          }
-        }
-
-        if (byModality.ecg) {
-          setEcgData(buildWaveformSeries(byModality.ecg.samples, byModality.ecg.sample_rate, 60))
-        } else {
-          setEcgData([])
-        }
-
-        if (byModality.pcg) {
-          setPcgData(buildWaveformSeries(byModality.pcg.samples, byModality.pcg.sample_rate, 60))
-        } else {
-          setPcgData([])
-        }
-      }
-
-      // Count today's sessions
-      const today = new Date()
-      today.setHours(0, 0, 0, 0)
-      const todayCount = (sessionsData || []).filter(
-        s => new Date(s.created_at) >= today
-      ).length
-      setTodaySessionCount(todayCount)
-
-      // Fetch prediction count
-      const { count: predCount } = await supabase
-        .from('predictions')
-        .select('*', { count: 'exact', head: true })
-
-      setPredictionCount(predCount || 0)
-
-      // Avg inference latency (last 24h)
-      const dayAgo = new Date()
-      dayAgo.setDate(dayAgo.getDate() - 1)
-      const { data: latencyRows } = await supabase
-        .from('predictions')
-        .select('latency_ms')
-        .gte('created_at', dayAgo.toISOString())
-
-      if (latencyRows && latencyRows.length > 0) {
-        const sum = latencyRows.reduce((acc: number, row: any) => acc + (row.latency_ms || 0), 0)
-        setAvgLatencyMs(Math.round(sum / latencyRows.length))
-      } else {
-        setAvgLatencyMs(null)
-      }
-
-      // Fetch devices
-      const response = await fetch('/api/devices')
-      if (response.ok) {
-        const data = await response.json()
-        const devices = data.devices || []
-        setDeviceCount(devices.length)
-        setOnlineDevices(devices.filter((d: any) => d.status === 'online').length)
-        const oneHourAgo = Date.now() - 60 * 60 * 1000
-        setOfflineOverHour(
-          devices.filter((d: any) => d.status === 'offline' && d.last_seen_at && new Date(d.last_seen_at).getTime() < oneHourAgo).length
-        )
-      }
-
-      // Build real weekly activity from sessions
-      const weekAgo = new Date()
-      weekAgo.setDate(weekAgo.getDate() - 6)
-      weekAgo.setHours(0, 0, 0, 0)
-
-      const { data: weekSessions } = await supabase
-        .from('sessions')
-        .select('created_at')
-        .gte('created_at', weekAgo.toISOString())
-        .order('created_at', { ascending: true })
-
-      const { data: weekPredictions } = await supabase
-        .from('predictions')
-        .select('created_at')
-        .gte('created_at', weekAgo.toISOString())
-
-      // Group by day
-      const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-      const dailyMap: Record<string, { sessions: number; predictions: number }> = {}
-
-      for (let i = 0; i < 7; i++) {
-        const d = new Date()
-        d.setDate(d.getDate() - (6 - i))
-        const key = d.toISOString().split('T')[0]
-        const dayName = dayNames[d.getDay()]
-        dailyMap[key] = { sessions: 0, predictions: 0 }
-      }
-
-      ; (weekSessions || []).forEach(s => {
-        const key = new Date(s.created_at).toISOString().split('T')[0]
-        if (dailyMap[key]) dailyMap[key].sessions++
-      })
-
-        ; (weekPredictions || []).forEach(p => {
-          const key = new Date(p.created_at).toISOString().split('T')[0]
-          if (dailyMap[key]) dailyMap[key].predictions++
-        })
-
-      const weekly = Object.entries(dailyMap).map(([dateStr, counts]) => {
-        const d = new Date(dateStr + 'T12:00:00')
-        return {
-          day: dayNames[d.getDay()],
-          sessions: counts.sessions,
-          predictions: counts.predictions,
-        }
-      })
-
-      setWeeklyData(weekly)
-      setLastUpdated(new Date())
-
-    } catch (error) {
-      console.error('Error fetching dashboard data:', error)
-      setError('Failed to load dashboard data. Please check your connection.')
-    } finally {
-      setLoading(false)
-    }
-  }, [supabase])
-
-  useEffect(() => {
-    fetchDashboardData()
-
-    const channel = supabase
-      .channel('dashboard-realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'sessions' }, () => {
-        fetchDashboardData()
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'predictions' }, () => {
-        fetchDashboardData()
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'device_telemetry' }, () => {
-        fetchDashboardData()
-      })
-      .subscribe()
-
-    const interval = setInterval(fetchDashboardData, 30000)
-
-    return () => {
-      clearInterval(interval)
-      supabase.removeChannel(channel)
-    }
-  }, [fetchDashboardData, supabase])
-
-  const activeSessions = sessions.filter(s => s.status === 'streaming' || s.status === 'processing').length
-  const completedSessions = sessions.filter(s => s.status === 'done').length
-  const alertCount = sessions.filter(s => s.status === 'error').length
-  const lastUpdatedLabel = lastUpdated ? `Updated ${lastUpdated.toLocaleTimeString()}` : 'Updating...'
-
-  const sparklineData = {
-    sessions: [2, 4, 3, 6, 4, 7, 5],
-    devices: [1, 2, 2, 3, 2, 3, 3],
-    predictions: [1, 3, 2, 5, 4, 6, 7],
-    alerts: [0, 1, 0, 2, 1, 0, 1],
-    latency: [120, 110, 130, 100, 95, 105, 98],
-    offline: [3, 2, 3, 2, 1, 2, 1],
-  }
-
-  const Sparkline = ({ values, color }: { values: number[]; color: string }) => {
-    const max = Math.max(...values)
-    const min = Math.min(...values)
-    const range = max - min || 1
-    const points = values.map((v, i) => {
-      const x = (i / (values.length - 1)) * 60
-      const y = 20 - ((v - min) / range) * 18
-      return `${x},${y}`
-    }).join(' ')
+// Hero Abstract Rings implementation replacing HeartVisualization3D
+function HeroRings() {
     return (
-      <svg viewBox="0 0 60 22" className="w-16 h-6">
-        <polyline
-          fill="none"
-          stroke={color}
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          points={points}
-        />
-      </svg>
-    )
-  }
-
-  const getStatusBadge = (status: string) => {
-    const map: Record<string, string> = {
-      created: 'badge-neutral',
-      streaming: 'badge-info',
-      processing: 'badge-warning',
-      done: 'badge-success',
-      error: 'badge-danger',
-    }
-    return map[status] || 'badge-neutral'
-  }
-
-  if (loading) {
-    return (
-      <div className="page-wrapper">
-        <div className="page-content">
-          <PageSkeleton />
-        </div>
-      </div>
-    )
-  }
-
-  if (error) {
-    return (
-      <div className="page-wrapper">
-        <div className="page-content flex flex-col items-center justify-center min-h-[60vh] space-y-4">
-          <div className="p-4 rounded-full bg-red-50 dark:bg-red-950/30">
-            <AlertTriangle className="w-8 h-8 text-red-600 dark:text-red-400" />
-          </div>
-          <h2 className="text-xl font-bold text-foreground">Something went wrong</h2>
-          <p className="text-muted-foreground">{error}</p>
-          <div className="flex flex-wrap gap-3">
-            <button
-              onClick={() => {
-                setLoading(true)
-                setError(null)
-                fetchDashboardData()
-              }}
-              className="btn-primary"
-            >
-              Try Again
-            </button>
-            <Link href="/devices" className="btn-ghost">
-              Check Devices
-            </Link>
-            <Link href="/settings" className="btn-ghost">
-              Open Settings
-            </Link>
-          </div>
-          <p className="text-xs text-muted-foreground">
-            Tip: verify your Supabase connection and MQTT broker status.
-          </p>
-        </div>
-      </div>
-    )
-  }
-
-
-  // Onboarding empty state when user has no devices or sessions
-  const isNewUser = deviceCount === 0 && sessions.length === 0
-
-  if (isNewUser) {
-    return (
-      <div className="page-wrapper">
-        <div className="page-content">
-          <div className="max-w-2xl mx-auto text-center py-16 fade-in">
-            <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-teal-500 to-teal-700 flex items-center justify-center mx-auto mb-6 shadow-xl">
-              <svg viewBox="0 0 32 32" className="logo-mark" aria-hidden="true">
-                <path d="M3 16h6l2.2-6.2 3.6 12.4 2.8-7.2 1.8 1.8H29" fill="none" stroke="white" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-            </div>
-            <h1 className="text-3xl font-bold text-foreground tracking-tight mb-3">
-              Welcome to <span className="gradient-text">AscultiCor</span>
-            </h1>
-            <p className="text-lg text-muted-foreground mb-10 leading-relaxed">
-              AI-Powered Cardiac Auscultation and Prediction using heart sounds.
-              <br />Get started by following the steps below.
-            </p>
-
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-left">
-              {/* Step 1 */}
-              <div className="bg-card border border-border rounded-xl p-6 relative overflow-hidden group hover:border-primary/30 transition-colors">
-                <div className="absolute top-3 right-3 text-5xl font-black text-muted-foreground/10">1</div>
-                <div className="p-2.5 rounded-xl bg-teal-50 dark:bg-teal-950/30 w-fit mb-3">
-                  <Cpu className="w-5 h-5 text-teal-600 dark:text-teal-400" />
-                </div>
-                <h3 className="font-semibold text-foreground mb-1">Register Device</h3>
-                <p className="text-sm text-muted-foreground mb-4">Add your ESP32 + AscultiCor Kit and get credentials</p>
-                <Link href="/devices" className="btn-primary text-sm gap-1 w-full justify-center">
-                  Add Device <ArrowUpRight className="w-3.5 h-3.5" />
-                </Link>
-              </div>
-
-              {/* Step 2 */}
-              <div className="bg-card border border-border rounded-xl p-6 relative overflow-hidden group hover:border-primary/30 transition-colors">
-                <div className="absolute top-3 right-3 text-5xl font-black text-muted-foreground/10">2</div>
-                <div className="p-2.5 rounded-xl bg-blue-50 dark:bg-blue-950/30 w-fit mb-3">
-                  <Wifi className="w-5 h-5 text-blue-600 dark:text-blue-400" />
-                </div>
-                <h3 className="font-semibold text-foreground mb-1">Flash & Provision</h3>
-                <p className="text-sm text-muted-foreground mb-4">Flash firmware and send credentials via Serial Monitor</p>
-                <span className="inline-flex items-center text-sm text-muted-foreground">
-                  <Clock className="w-3.5 h-3.5 mr-1" /> After step 1
-                </span>
-              </div>
-
-              {/* Step 3 */}
-              <div className="bg-card border border-border rounded-xl p-6 relative overflow-hidden group hover:border-primary/30 transition-colors">
-                <div className="absolute top-3 right-3 text-5xl font-black text-muted-foreground/10">3</div>
-                <div className="p-2.5 rounded-xl bg-rose-50 dark:bg-rose-950/30 w-fit mb-3">
-                  <Heart className="w-5 h-5 text-rose-600 dark:text-rose-400" />
-                </div>
-                <h3 className="font-semibold text-foreground mb-1">Start Recording</h3>
-                <p className="text-sm text-muted-foreground mb-4">Create a session and record cardiac signals</p>
-                <span className="inline-flex items-center text-sm text-muted-foreground">
-                  <Clock className="w-3.5 h-3.5 mr-1" /> After step 2
-                </span>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    )
-  }
-
-  // Build recent activity items for the panel
-  const recentActivityItems = sessions.slice(0, 4).map(s => ({
-    id: s.id,
-    label: s.patient?.full_name ? `Session: ${s.patient.full_name}` : `Session ${s.id.slice(0, 8)}`,
-    time: new Date(s.created_at).toLocaleString(),
-    status: s.status as 'done' | 'processing' | 'error' | 'streaming',
-  }));
-
-  // Calculate patient age string
-  const getPatientAge = (dob: string | null) => {
-    if (!dob) return '—'
-    const diff = Date.now() - new Date(dob).getTime()
-    const age = Math.abs(new Date(diff).getUTCFullYear() - 1970)
-    return `${age} yrs`
-  }
-
-  const activePatientName = latestPatient ? latestPatient.full_name : (sessions.length > 0 ? "Anonymous Patient" : "System Offline")
-  const activePatientAge = latestPatient ? getPatientAge(latestPatient.dob) : "—"
-  const activePatientSex = latestPatient ? (latestPatient.sex ? latestPatient.sex.charAt(0).toUpperCase() + latestPatient.sex.slice(1) : "Unknown") : "—"
-
-  // Fallbacks for when no active signal
-  const defaultEcg = generateEcgWaveform()
-  const defaultPcg = generatePcgWaveform()
-
-  return (
-    <div className="relative h-full overflow-hidden" style={{ backgroundColor: 'var(--hud-bg-base)' }}>
-      {/* Cosmic background effects */}
-      <div className="absolute inset-0 pointer-events-none">
-        <div className="absolute top-0 left-1/4 w-[600px] h-[600px] bg-hud-cyan/3 rounded-full blur-[120px]" />
-        <div className="absolute bottom-0 right-1/4 w-[500px] h-[500px] bg-hud-violet/3 rounded-full blur-[100px]" />
-      </div>
-
-      {/* Main HUD Grid */}
-      <div className="relative z-10 h-full max-w-[1600px] mx-auto px-4 py-2 flex flex-col">
-        {/* Dashboard Title (small) */}
-        <div className="flex items-center justify-between mb-1 fade-in">
-          <div>
-            <p className="text-[10px] text-hud-cyan/60 font-mono uppercase tracking-[0.3em]">Cardiac Monitoring System</p>
-            <p className="text-[9px] text-white/30 font-mono mt-0.5">{lastUpdatedLabel}</p>
-          </div>
-          <button
-            onClick={() => router.push('/session/new')}
-            className="btn-primary text-xs gap-1.5"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            New Session
-          </button>
-        </div>
-
-        {/* HUD 3-Column Layout */}
-        <div className="grid grid-cols-1 lg:grid-cols-[280px_1fr_280px] gap-4 items-stretch flex-1 min-h-0">
-
-          {/* ====== LEFT COLUMN ====== */}
-          <div className="space-y-3 overflow-y-auto max-h-full pr-1 slide-up" style={{ animationDelay: '0.1s', animationFillMode: 'backwards' }}>
-            <PatientInfoPanel
-              patientName={activePatientName}
-              patientAge={activePatientAge}
-              patientSex={activePatientSex}
-              bloodType="—"
-              height="—"
-              weight="—"
-              bmi="—"
-            />
-
-            <EcgGraphPanel
-              data={ecgData.length ? ecgData : defaultEcg}
-              liveLabel={ecgData.length ? `Live · ${lastUpdatedLabel.replace('Updated ', '')}` : lastUpdatedLabel}
-            />
-
-            <PcgGraphPanel
-              data={pcgData.length ? pcgData : defaultPcg}
-              liveLabel={pcgData.length ? `Live · ${lastUpdatedLabel.replace('Updated ', '')}` : lastUpdatedLabel}
-            />
-
-            {/* System Status panel */}
-            <GlassCard className="p-4">
-              <div className="flex items-center justify-between mb-2">
-                <h3 className="text-xs font-semibold text-white uppercase tracking-widest">System Status</h3>
-                <span className="text-[9px] text-white/40">{sessions.length > 0 ? `Device ID: ${sessions[0].device_id.slice(0, 8)}` : 'Offline'}</span>
-              </div>
-
-              <div className="grid grid-cols-2 gap-2">
-                <div className="flex items-center gap-2 bg-black/30 border border-hud-border/20 rounded-lg p-2">
-                  <Cpu className="w-3 h-3 text-hud-cyan/60" />
-                  <span className="text-[10px] text-white/60">
-                    {deviceTelemetry?.temperature_celsius ? `${Number(deviceTelemetry.temperature_celsius).toFixed(1)}°C` : '—'}
-                  </span>
-                </div>
-                <div className="flex items-center gap-2 bg-black/30 border border-hud-border/20 rounded-lg p-2">
-                  <Wifi className="w-3 h-3 text-emerald-400" />
-                  <span className="text-[10px] text-white/60">
-                    {deviceTelemetry?.wifi_rssi ? `${deviceTelemetry.wifi_rssi} dBm` : '—'}
-                  </span>
-                </div>
-                <div className="flex items-center gap-2 bg-black/30 border border-hud-border/20 rounded-lg p-2">
-                  <Zap className="w-3 h-3 text-amber-400" />
-                  <span className="text-[10px] text-white/60">
-                    {deviceTelemetry?.battery_voltage ? `${Number(deviceTelemetry.battery_voltage).toFixed(2)}V` : '—'}
-                  </span>
-                </div>
-                <div className="flex items-center gap-2 bg-black/30 border border-hud-border/20 rounded-lg p-2">
-                  <Activity className="w-3 h-3 text-blue-400" />
-                  <span className="text-[10px] text-white/60">
-                    {deviceTelemetry?.uptime_seconds ? `${Math.floor(deviceTelemetry.uptime_seconds / 3600)}h ${Math.floor((deviceTelemetry.uptime_seconds % 3600) / 60)}m` : '—'}
-                  </span>
-                </div>
-              </div>
-            </GlassCard>
-          </div>
-
-          {/* ====== CENTER COLUMN — 3D Heart Visualization ====== */}
-          <div className="fade-in" style={{ animationDelay: '0.15s' }}>
-            <HeartVisualization3D />
-          </div>
-
-          {/* ====== RIGHT COLUMN ====== */}
-          <div className="space-y-3 overflow-y-auto max-h-full pl-1 slide-up" style={{ animationDelay: '0.2s', animationFillMode: 'backwards' }}>
-            <RecentActivityPanel
-              items={recentActivityItems}
-              lastUpdated={lastUpdated ? `Updated ${lastUpdated.toLocaleTimeString()}` : 'Waiting...'}
-            />
-
-            {/* Predictions / Medications stand-in */}
-            <GlassCard className="p-4">
-              <div className="flex items-center justify-between mb-3">
-                <h3 className="text-xs font-semibold text-white uppercase tracking-widest">Predictions</h3>
-                <span className="text-[9px] text-white/30 font-mono">{predictionCount} total</span>
-              </div>
-              <div className="space-y-2">
-                {completedSessions > 0 ? (
-                  <>
-                    <div className="flex items-center gap-3 bg-black/30 border border-hud-border/20 rounded-lg p-3">
-                      <div className="w-8 h-8 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center">
-                        <Heart className="w-4 h-4 text-emerald-400" />
-                      </div>
-                      <div className="flex-1">
-                        <p className="text-xs font-medium text-white/90">Cardiac Analysis</p>
-                        <p className="text-[9px] text-white/40">{completedSessions} completed</p>
-                      </div>
-                      <span className="text-[9px] text-emerald-400 font-mono">Done</span>
+        <div className="flex items-center justify-center h-[500px] w-full max-w-[500px] mx-auto rounded-full overflow-hidden relative">
+            <div className="absolute inset-0 bg-hud-cyan/5 animate-pulse rounded-full blur-3xl opacity-50" />
+            <div className="w-64 h-64 border-[1px] border-hud-cyan/20 rounded-full flex items-center justify-center animate-spin-slow relative shadow-[0_0_50px_rgba(0,240,255,0.15)]">
+                <div className="w-48 h-48 border border-hud-violet/30 rounded-full flex items-center justify-center relative backdrop-blur-sm">
+                    <div className="absolute w-2 h-2 bg-hud-cyan rounded-full top-0 -mt-1 shadow-[0_0_10px_#00f0ff]" />
+                    <div className="w-32 h-32 border-[2px] border-dashed border-hud-cyan/40 rounded-full animate-spin-reverse flex items-center justify-center">
+                        <div className="absolute w-2 h-2 bg-hud-violet rounded-full bottom-0 -mb-1 shadow-[0_0_10px_#8a2be2]" />
+                        <Activity className="w-12 h-12 text-hud-cyan animate-pulse" />
                     </div>
-                    {activeSessions > 0 && (
-                      <div className="flex items-center gap-3 bg-black/30 border border-hud-border/20 rounded-lg p-3">
-                        <div className="w-8 h-8 rounded-lg bg-blue-500/10 border border-blue-500/20 flex items-center justify-center">
-                          <Activity className="w-4 h-4 text-blue-400 animate-pulse" />
-                        </div>
-                        <div className="flex-1">
-                          <p className="text-xs font-medium text-white/90">Live Stream</p>
-                          <p className="text-[9px] text-white/40">{activeSessions} active</p>
-                        </div>
-                        <span className="text-[9px] text-blue-400 font-mono animate-pulse">Live</span>
-                      </div>
-                    )}
-                  </>
-                ) : (
-                  <div className="text-center py-3">
-                    <p className="text-[10px] text-white/30">No predictions yet</p>
-                  </div>
-                )}
-              </div>
-            </GlassCard>
-
-            <AIAnalyticsPanel
-              confidence={latestConfidence > 0 ? latestConfidence : (predictionCount > 0 ? 86 : 0)}
-              anomalyDetected={alertCount > 0}
-              anomalyDescription={
-                alertCount > 0
-                  ? `${alertCount} alert(s) detected. Review recommended.`
-                  : latestPredictionLabel
-                    ? `Latest Analysis: ${latestPredictionLabel}. No acute anomalies.`
-                    : 'All cardiac signals within normal parameters. No anomalies detected in recent analysis.'
-              }
-              predictionCount={predictionCount}
-            />
-          </div>
+                </div>
+            </div>
+            {/* Ambient scanning lines overlay */}
+            <div className="absolute inset-0 scan-line-animation pointer-events-none opacity-30" />
         </div>
-      </div>
-    </div>
-  )
+    )
+}
+
+export default function LandingPage() {
+    return (
+        <div className="page-wrapper overflow-x-hidden" style={{ backgroundColor: 'var(--hud-bg-base)' }}>
+            {/* Background gradients for T013 */}
+            <div className="fixed inset-0 pointer-events-none z-0">
+                <div className="absolute top-0 right-1/4 w-[800px] h-[800px] bg-hud-cyan/10 rounded-full blur-[150px] mix-blend-screen pulse" />
+                <div className="absolute bottom-1/4 left-1/4 w-[600px] h-[600px] bg-hud-violet/10 rounded-full blur-[120px] mix-blend-screen opacity-70" />
+            </div>
+
+            <div className="relative z-10 page-content font-sans flex flex-col pt-12">
+
+                {/* Navbar-ish header for Landing page if needed, or rely on global layout.
+            Assuming `layout.tsx` wrapper doesn't provide Nav for `/` or it provides the generic one.
+            We will assume the design stands alone. */}
+
+                {/* ================= HERO SECTION (T007) ================= */}
+                <section className="min-h-[85vh] flex items-center mb-24">
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 items-center w-full">
+                        {/* Left Content */}
+                        <div className="space-y-8 fade-in">
+                            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full hud-glass-panel border-hud-cyan/30 text-xs font-semibold uppercase tracking-widest text-hud-cyan shadow-[0_0_15px_rgba(0,240,255,0.1)]">
+                                <Activity className="w-3.5 h-3.5" />
+                                <span>Next-Gen Cardiac Monitoring</span>
+                            </div>
+
+                            <h1 className="text-5xl md:text-7xl font-bold tracking-tight text-white leading-tight">
+                                AI-Powered <br />
+                                <span className="gradient-text">Auscultation</span>
+                            </h1>
+
+                            <p className="text-lg md:text-xl text-white/60 max-w-xl font-light leading-relaxed">
+                                AscultiCor combines advanced IoT sensors with deep learning to provide
+                                real-time cardiac diagnostics. Connect your ESP32 stethoscope, stream audio,
+                                and receive instant AI predictions.
+                            </p>
+
+                            <div className="flex flex-wrap items-center gap-4 pt-4">
+                                <Link
+                                    href="/dashboard"
+                                    className="btn-primary px-8 py-3.5 text-sm uppercase tracking-widest flex items-center gap-2 group shadow-[0_0_20px_rgba(0,240,255,0.2)] hover:shadow-[0_0_30px_rgba(0,240,255,0.4)]"
+                                >
+                                    Open Dashboard
+                                    <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+                                </Link>
+                                <a
+                                    href="#architecture"
+                                    className="px-8 py-3.5 text-sm uppercase tracking-widest font-semibold text-white/50 hover:text-white border border-white/10 hover:border-white/30 hover:bg-white/5 rounded-lg transition-all"
+                                >
+                                    View Architecture
+                                </a>
+                            </div>
+                        </div>
+
+                        {/* Right Content: 3D Visualization (T008) */}
+                        <div className="relative slide-up flex justify-center lg:justify-end">
+                            <div className="w-full max-w-[600px] h-[500px] md:h-[600px] relative">
+                                {/* Decorative scanning rings */}
+                                <div className="absolute inset-x-0 bottom-0 top-1/2 border-t-2 border-hud-cyan/0 rounded-full scale-150 transform-gpu rotate-x-65 border-t-hud-cyan/10 animate-spin-slow pointer-events-none" />
+                                <div className="absolute inset-x-12 bottom-12 top-1/2 border-t border-hud-violet/0 rounded-full scale-125 transform-gpu rotate-x-60 border-t-hud-violet/20 animate-spin-reverse pointer-events-none" />
+
+                                <HeroRings />
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+
+                {/* ================= FEATURES SECTION (T009) ================= */}
+                <section className="py-24 space-y-12">
+                    <div className="text-center space-y-4 fade-in" style={{ animationDelay: '0.1s', animationFillMode: 'both' }}>
+                        <h2 className="text-3xl font-bold text-white tracking-widest uppercase">System Capabilities</h2>
+                        <p className="text-white/50 max-w-2xl mx-auto">Full-stack hardware and software integration for modern telecardiology.</p>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                        <FeatureCard
+                            icon={Cpu}
+                            title="IoT Telemetry"
+                            description="ESP32-based hardware reads digital stethoscopes via I2S and transmits via secure MQTT."
+                            delay="0.2s"
+                        />
+                        <FeatureCard
+                            icon={LineChart}
+                            title="Real-time Processing"
+                            description="Low latency live streaming of PCG waveforms with instantaneous visualization on the HUD."
+                            delay="0.3s"
+                        />
+                        <FeatureCard
+                            icon={ShieldAlert}
+                            title="AI Inference"
+                            description="Machine learning models deployed as microservices classify murmurs and anomalies instantly."
+                            delay="0.4s"
+                        />
+                    </div>
+                </section>
+
+
+                {/* ================= ARCHITECTURE SECTION (T010) ================= */}
+                <section id="architecture" className="py-24 space-y-16 border-t border-white/5">
+                    <div className="text-center space-y-4">
+                        <h2 className="text-3xl font-bold text-white tracking-widest uppercase">Pipeline Architecture</h2>
+                        <p className="text-white/50 max-w-2xl mx-auto">From patient chest to clinical dashboard.</p>
+                    </div>
+
+                    <div className="relative max-w-5xl mx-auto hud-glass-panel p-8 md:p-12 overflow-hidden rounded-2xl">
+                        {/* Background grid */}
+                        <div className="absolute inset-0 bg-[url('/grid.svg')] bg-center opacity-[0.03] pointer-events-none" />
+
+                        <div className="flex flex-col md:flex-row items-center justify-between gap-4 md:gap-2 relative z-10">
+
+                            {/* Node 1 */}
+                            <ArchNode icon={Stethoscope} title="ESP32 Kit" color="amber" border="amber" />
+                            <ArchArrow />
+
+                            {/* Node 2 */}
+                            <ArchNode icon={Wifi} title="MQTT Broker" color="cyan" border="cyan" />
+                            <ArchArrow />
+
+                            {/* Node 3 */}
+                            <ArchNode icon={Activity} title="AI Inference" color="violet" border="violet" />
+                            <ArchArrow />
+
+                            {/* Node 4 */}
+                            <ArchNode icon={Database} title="Supabase DB" color="emerald" border="emerald" />
+                            <ArchArrow />
+
+                            {/* Node 5 */}
+                            <ArchNode icon={Terminal} title="Next.js HUD" color="blue" border="blue" />
+
+                        </div>
+                    </div>
+                </section>
+
+
+                {/* ================= HOW TO START SECTION (T011) ================= */}
+                <section className="py-24">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-16 items-center">
+                        <div>
+                            <h2 className="text-3xl font-bold text-white tracking-widest uppercase mb-6">Quick Start Guide</h2>
+                            <p className="text-white/60 mb-8 leading-relaxed">
+                                Deploy the entire stack locally using Docker Compose. Connect your flashed ESP32
+                                apparatus and begin analyzing cardiac rhythms in minutes.
+                            </p>
+
+                            <div className="space-y-6">
+                                <StepItem num="01" title="Configure Environment">
+                                    Set up <code className="text-hud-cyan text-xs bg-hud-cyan/10 px-1 py-0.5 rounded">.env</code> keys for Supabase and MQTT.
+                                </StepItem>
+                                <StepItem num="02" title="Launch Services">
+                                    Run <code className="text-hud-cyan text-xs bg-hud-cyan/10 px-1 py-0.5 rounded">docker-compose up -d</code> to spin up the broker and AI API.
+                                </StepItem>
+                                <StepItem num="03" title="Access Dashboard">
+                                    Navigate to <code className="text-hud-cyan text-xs bg-hud-cyan/10 px-1 py-0.5 rounded">/dashboard</code> and login to view telemetry.
+                                </StepItem>
+                            </div>
+                        </div>
+
+                        <div className="glass-card p-6 md:p-8 relative group">
+                            <div className="flex items-center gap-2 mb-4 border-b border-white/10 pb-4">
+                                <div className="w-3 h-3 rounded-full bg-red-500/80" />
+                                <div className="w-3 h-3 rounded-full bg-yellow-500/80" />
+                                <div className="w-3 h-3 rounded-full bg-green-500/80" />
+                                <span className="ml-4 font-mono text-xs text-white/40">Terminal</span>
+                            </div>
+                            <pre className="font-mono text-sm leading-loose">
+                                <span className="text-hud-cyan">~</span> <span className="text-white/50">$</span> git clone https://github.com/Mahmoudmetwall2y/...
+                                <span className="text-hud-cyan">~/AscultiCor</span> <span className="text-white/50">$</span> cd infra
+                                <span className="text-hud-cyan">~/AscultiCor/infra</span> <span className="text-white/50">$</span> docker-compose up -d
+                                <span className="text-white/80">Creating network &quot;infra_default&quot;
+                                    Creating mqtt_broker ... <span className="text-green-400">done</span>
+                                    Creating ai_worker   ... <span className="text-green-400">done</span></span>
+                                <span className="text-hud-cyan">~/AscultiCor/infra</span> <span className="text-white/50">$</span> cd ../frontend
+                                <span className="text-hud-cyan">~/AscultiCor/frontend</span> <span className="text-white/50">$</span> npm run dev
+                            </pre>
+                        </div>
+                    </div>
+                </section>
+
+
+                {/* ================= FOOTER (T012) ================= */}
+                <footer className="py-8 border-t border-white/10 mt-12 flex flex-col md:flex-row items-center justify-between text-sm text-white/40">
+                    <div className="flex items-center gap-2 mb-4 md:mb-0">
+                        <Heart className="w-4 h-4 text-hud-cyan" />
+                        <span className="font-semibold tracking-wider text-white">Asculti<span className="text-hud-cyan">Cor</span></span>
+                        <span className="ml-2">© 2026</span>
+                    </div>
+                    <div className="flex items-center gap-6">
+                        <Link href="/dashboard" className="hover:text-hud-cyan transition-colors">Dashboard</Link>
+                        <a href="https://github.com/Mahmoudmetwall2y/Graduation-project" target="_blank" rel="noreferrer" className="hover:text-hud-cyan transition-colors">Repository</a>
+                    </div>
+                </footer>
+
+            </div>
+        </div>
+    )
+}
+
+// Helper Components
+function FeatureCard({ icon: Icon, title, description, delay }: { icon: any, title: string, description: string, delay: string }) {
+    return (
+        <div className="glass-card p-6 md:p-8 hover:-translate-y-2 transition-transform duration-300 group slide-up cursor-default" style={{ animationDelay: delay, animationFillMode: 'both' }}>
+            <div className="w-12 h-12 rounded-xl bg-hud-cyan/10 flex items-center justify-center mb-6 group-hover:bg-hud-cyan/20 group-hover:scale-110 transition-all border border-hud-cyan/20 group-hover:border-hud-cyan/50">
+                <Icon className="w-6 h-6 text-hud-cyan" />
+            </div>
+            <h3 className="text-lg font-bold text-white tracking-wide mb-3">{title}</h3>
+            <p className="text-white/50 leading-relaxed text-sm">
+                {description}
+            </p>
+        </div>
+    )
+}
+
+function ArchNode({ icon: Icon, title, color, border }: { icon: any, title: string, color: string, border: string }) {
+    const colorMap: Record<string, string> = {
+        amber: 'text-amber-400',
+        cyan: 'text-hud-cyan',
+        violet: 'text-hud-violet',
+        emerald: 'text-emerald-400',
+        blue: 'text-blue-400'
+    }
+    const bgMap: Record<string, string> = {
+        amber: 'bg-amber-400/10 border-amber-400/30',
+        cyan: 'bg-hud-cyan/10 border-hud-cyan/30',
+        violet: 'bg-hud-violet/10 border-hud-violet/30',
+        emerald: 'bg-emerald-400/10 border-emerald-400/30',
+        blue: 'bg-blue-400/10 border-blue-400/30'
+    }
+
+    return (
+        <div className="flex flex-col items-center gap-3 relative group">
+            <div className={`w-16 h-16 rounded-xl ${bgMap[border]} flex items-center justify-center border shadow-lg group-hover:scale-110 transition-transform`}>
+                <Icon className={`w-7 h-7 ${colorMap[color]}`} />
+            </div>
+            <span className="text-xs font-bold text-white uppercase tracking-widest text-center">{title}</span>
+        </div>
+    )
+}
+
+function ArchArrow() {
+    return (
+        <div className="hidden md:flex flex-1 items-center justify-center min-w-[30px] relative">
+            <div className="h-0.5 w-full bg-white/10 relative overflow-hidden">
+                {/* Animated scanline passing through the pipeline */}
+                <div className="absolute top-0 bottom-0 left-0 w-1/3 bg-gradient-to-r from-transparent via-hud-cyan to-transparent translate-x-[-100%] group-hover:animate-[shimmer_2s_infinite]" />
+            </div>
+            <ArrowRight className="w-4 h-4 text-white/30 absolute right-0 translate-x-1/2 bg-[var(--hud-surface-glass)]" />
+        </div>
+    )
+}
+
+function StepItem({ num, title, children }: { num: string, title: string, children: React.ReactNode }) {
+    return (
+        <div className="flex gap-4 slide-up">
+            <div className="text-3xl font-black text-white/5">{num}</div>
+            <div>
+                <h4 className="text-lg font-bold text-white tracking-widest uppercase mb-1">{title}</h4>
+                <p className="text-sm text-white/50">{children}</p>
+            </div>
+        </div>
+    )
 }

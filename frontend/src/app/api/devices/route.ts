@@ -15,7 +15,7 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    // Get user's org_id
+    // Get user's org_id and role
     const { data: profile } = await supabase
       .from('profiles')
       .select('org_id, role')
@@ -39,7 +39,11 @@ export async function GET(request: Request) {
 
     if (error) throw error
 
-    return NextResponse.json({ devices: devices || [] })
+    return NextResponse.json({
+      devices: devices || [],
+      current_user_role: profile.role,
+      can_create_devices: profile.role === 'admin'
+    })
   } catch (error: any) {
     console.error('Error fetching devices:', error)
     return NextResponse.json(
@@ -70,15 +74,31 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    // Get user's org_id
+    // Get user's org_id and role
     const { data: profile } = await supabase
       .from('profiles')
-      .select('org_id')
+      .select('org_id, role')
       .eq('id', user.id)
       .single()
 
     if (!profile) {
       return NextResponse.json({ error: 'Profile not found' }, { status: 404 })
+    }
+
+    if (profile.role !== 'admin') {
+      return NextResponse.json(
+        { error: 'Forbidden: Only admins can create and provision devices' },
+        { status: 403 }
+      )
+    }
+
+    const mqttUser = process.env.MQTT_USERNAME
+    const mqttPass = process.env.MQTT_PASSWORD
+    if (!mqttUser || !mqttPass) {
+      return NextResponse.json(
+        { error: 'Server misconfiguration: MQTT_USERNAME and MQTT_PASSWORD are required for device provisioning' },
+        { status: 500 }
+      )
     }
 
     // Generate device credentials
@@ -123,7 +143,9 @@ export async function POST(request: Request) {
       credentials: {
         device_id: deviceId,
         device_secret: deviceSecret, // Show only once!
-        org_id: profile.org_id
+        org_id: profile.org_id,
+        mqtt_user: mqttUser,
+        mqtt_pass: mqttPass
       }
     }, { status: 201 })
   } catch (error: any) {

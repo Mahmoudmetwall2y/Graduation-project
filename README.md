@@ -43,7 +43,12 @@ Configuration notes:
 
 ### 2. Apply database migrations
 
-Run the SQL in `supabase/migrations/apply_this_in_supabase.sql` in your Supabase SQL Editor.
+For existing databases, apply numbered migrations in order from
+`supabase/migrations/001_initial_schema.sql` through
+`supabase/migrations/023_delete_policies_for_sessions_and_patients.sql`.
+
+For a fresh one-shot bootstrap database, you can run
+`supabase/migrations/apply_this_in_supabase.sql`.
 
 ### 3. Start all services
 
@@ -102,7 +107,7 @@ cd ../inference && python -m pip install -r requirements.txt && python -m compil
 
 ## Release Checklist
 
-See `RELEASE_CHECKLIST.md` before demos or deployment.
+See `./RELEASE_CHECKLIST.md` before demos or deployment.
 
 ## Development
 

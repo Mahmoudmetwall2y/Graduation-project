@@ -79,7 +79,7 @@ app = FastAPI(
     ## Authentication
     
     This service does not require authentication for internal health/metrics endpoints.
-    MQTT authentication is handled via device credentials.
+    MQTT authentication is handled via broker credentials configured in environment variables.
     """,
     version="1.0.0",
     docs_url="/docs" if os.getenv("ENABLE_DOCS", "true").lower() == "true" else None,
@@ -230,7 +230,7 @@ async def get_metrics(request: Request):
         raise HTTPException(status_code=503, detail="Service not initialized")
     
     buffer_stats = []
-    for buffer_key, buffer in mqtt_handler.buffers.items():
+    for buffer_key, buffer in list(mqtt_handler.buffers.items()):
         buffer_stats.append({
             "session_id": buffer.session_id,
             "modality": buffer.modality,
@@ -248,11 +248,13 @@ async def get_metrics(request: Request):
 
 
 @app.post("/simulate")
-async def simulate_inference():
+async def simulate_inference(request: Request):
     """
     Optional endpoint to test inference pipeline without MQTT.
     For debugging and testing.
     """
+    require_internal_token(request)
+
     global mqtt_handler
     
     if not mqtt_handler:

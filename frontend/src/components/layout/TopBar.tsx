@@ -2,9 +2,9 @@
 import React, { useEffect, useState } from 'react';
 import { useTheme } from '../../app/components/ThemeProvider';
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
-import { Moon, Sun, User, Bell, Search, Settings, LayoutDashboard, FileText, Users, Cpu, ClipboardList } from 'lucide-react';
+import { Moon, Sun, User, Bell, Search, Settings, LayoutDashboard, FileText, Users, Cpu, ClipboardList, LogOut } from 'lucide-react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 
 const navItems = [
     { label: 'Dashboard', href: '/', icon: LayoutDashboard },
@@ -17,8 +17,10 @@ const navItems = [
 export function TopBar() {
     const { theme, toggleTheme } = useTheme();
     const [userEmail, setUserEmail] = useState<string | null>(null);
+    const [signingOut, setSigningOut] = useState(false);
     const supabase = createClientComponentClient();
     const pathname = usePathname();
+    const router = useRouter();
 
     useEffect(() => {
         supabase.auth.getUser().then(({ data }) => {
@@ -26,10 +28,24 @@ export function TopBar() {
         });
     }, [supabase]);
 
+    const handleSignOut = async () => {
+        if (signingOut) return;
+        setSigningOut(true);
+        try {
+            await supabase.auth.signOut();
+            router.push('/auth/login');
+            router.refresh();
+        } finally {
+            setSigningOut(false);
+        }
+    };
+
+    if (pathname === '/' || pathname?.startsWith('/auth')) return null;
+
     return (
         <header className="flex-shrink-0 grid grid-cols-[1fr_auto_1fr] items-center px-6 py-3 border-b border-hud-border/30 bg-[#060a14]/90 backdrop-blur-xl z-50">
             {/* Logo */}
-            <Link href="/" className="flex items-center gap-2.5 group">
+            <Link href="/dashboard" className="flex items-center gap-2.5 group">
                 <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-hud-cyan/30 to-hud-violet/30 flex items-center justify-center border border-hud-cyan/40 shadow-[0_0_15px_rgba(0,240,255,0.2)] group-hover:shadow-[0_0_25px_rgba(0,240,255,0.4)] transition-shadow">
                     <svg viewBox="0 0 24 24" className="w-5 h-5 text-hud-cyan" fill="none" stroke="currentColor" strokeWidth="2">
                         <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
@@ -78,6 +94,14 @@ export function TopBar() {
                 <Link href="/settings" className="w-8 h-8 rounded-full flex items-center justify-center text-white/40 hover:text-hud-cyan hover:bg-hud-cyan/10 transition-all" title="Settings">
                     <Settings className="w-4 h-4" />
                 </Link>
+                <button
+                    onClick={handleSignOut}
+                    disabled={signingOut}
+                    className="w-8 h-8 rounded-full flex items-center justify-center text-white/40 hover:text-red-400 hover:bg-red-500/10 transition-all disabled:opacity-50"
+                    title={signingOut ? 'Signing out...' : 'Change account / Sign out'}
+                >
+                    <LogOut className="w-4 h-4" />
+                </button>
 
                 <div className="w-px h-6 bg-hud-border/50 mx-1"></div>
 
@@ -95,3 +119,4 @@ export function TopBar() {
         </header>
     );
 }
+

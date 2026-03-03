@@ -44,15 +44,18 @@ Open Serial Monitor (115200 baud) and send:
 
 ```
 SET device_id xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
-SET device_secret asc_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 SET org_id xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+SET mqtt_user asculticor
+SET mqtt_pass your_broker_password
 SET mqtt_host 192.168.1.100
 SET wifi_ssid YourNetworkName
 SET wifi_pass YourPassword
+SET device_secret asc_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   # optional (reserved for future auth)
 REBOOT
 ```
 
 Credentials persist in NVS flash across re-flashes.
+`device_secret` is optional in the current local broker setup and reserved for future per-device auth flows.
 
 ## Wiring
 

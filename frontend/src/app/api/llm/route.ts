@@ -58,27 +58,8 @@ interface LLMReportData {
   created_at: string;
 }
 
-// Simple in-memory rate limiter for report generation
-const reportQueue = new Map<string, { count: number; resetTime: number }>();
 const RATE_LIMIT_MAX = 10; // Max 10 pending reports per user
 const RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000; // 1 hour
-
-function checkRateLimit(userId: string): boolean {
-  const now = Date.now();
-  const userLimit = reportQueue.get(userId);
-  
-  if (!userLimit || now > userLimit.resetTime) {
-    reportQueue.set(userId, { count: 1, resetTime: now + RATE_LIMIT_WINDOW_MS });
-    return true;
-  }
-  
-  if (userLimit.count >= RATE_LIMIT_MAX) {
-    return false;
-  }
-  
-  userLimit.count++;
-  return true;
-}
 
 // POST /api/llm
 // default action: queue report generation
@@ -113,14 +94,6 @@ async function queueReport(request: Request) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    // Check rate limit
-    if (!checkRateLimit(user.id)) {
-      return NextResponse.json(
-        { error: 'Rate limit exceeded. Maximum 10 pending reports per hour.' },
-        { status: 429 }
-      )
-    }
-
     // Get user's org_id
     const { data: profile } = await supabase
       .from('profiles')
@@ -130,6 +103,24 @@ async function queueReport(request: Request) {
 
     if (!profile) {
       return NextResponse.json({ error: 'Profile not found' }, { status: 404 })
+    }
+
+    // DB-backed per-user limit (works across multiple app instances)
+    const windowStartIso = new Date(Date.now() - RATE_LIMIT_WINDOW_MS).toISOString()
+    const { count: queuedCount, error: queueCountError } = await supabase
+      .from('llm_reports')
+      .select('id', { count: 'exact', head: true })
+      .eq('org_id', profile.org_id)
+      .eq('requested_by', user.id)
+      .in('status', ['pending', 'generating'])
+      .gte('created_at', windowStartIso)
+
+    if (queueCountError) throw queueCountError
+    if ((queuedCount || 0) >= RATE_LIMIT_MAX) {
+      return NextResponse.json(
+        { error: 'Rate limit exceeded. Maximum 10 queued reports per hour.' },
+        { status: 429 }
+      )
     }
 
     // Fetch session with predictions
@@ -191,6 +182,7 @@ async function queueReport(request: Request) {
         org_id: profile.org_id,
         session_id,
         device_id,
+        requested_by: user.id,
         status: 'pending',
         prompt_text: generatePrompt(session),
         report_text: '',
@@ -265,9 +257,28 @@ async function processPendingReports(request: Request) {
 
     let processed = 0
     let failed = 0
+    let skipped = 0
 
     for (const pending of readyReports) {
+      let activeReport: any = pending
       try {
+        // Atomic claim: only one worker can transition pending -> generating.
+        const { data: claimedReport, error: claimError } = await serviceClient
+          .from('llm_reports')
+          .update({ status: 'generating', error_message: null })
+          .eq('id', pending.id)
+          .eq('status', 'pending')
+          .select('id, session_id, device_id, retry_count, max_retries, next_retry_at')
+          .maybeSingle()
+
+        if (claimError) throw claimError
+        if (!claimedReport) {
+          skipped += 1
+          continue
+        }
+
+        activeReport = claimedReport
+
         const { data: session, error: sessionError } = await serviceClient
           .from('sessions')
           .select(`
@@ -276,19 +287,19 @@ async function processPendingReports(request: Request) {
             murmur_severity(*),
             device:devices(device_name)
           `)
-          .eq('id', pending.session_id)
+          .eq('id', activeReport.session_id)
           .single()
 
         if (sessionError || !session) {
           throw new Error('Session not found while processing queued report')
         }
 
-        await generateLLMReport(session, pending.id, serviceClient)
+        await generateLLMReport(session, activeReport.id, serviceClient)
         processed += 1
       } catch (err: any) {
         failed += 1
-        const retryCount = (pending.retry_count || 0) + 1
-        const maxRetries = pending.max_retries ?? 3
+        const retryCount = (activeReport.retry_count || 0) + 1
+        const maxRetries = activeReport.max_retries ?? 3
         const shouldRetry = retryCount <= maxRetries
         const backoffMinutes = Math.min(60, Math.pow(2, Math.max(0, retryCount - 1)))
         const nextRetryAt = new Date(Date.now() + backoffMinutes * 60 * 1000).toISOString()
@@ -302,13 +313,14 @@ async function processPendingReports(request: Request) {
             last_error_at: new Date().toISOString(),
             error_message: err.message || 'Failed to process report'
           })
-          .eq('id', pending.id)
+          .eq('id', activeReport.id)
       }
     }
 
     return NextResponse.json({
       processed,
       failed,
+      skipped,
       total: readyReports.length,
       message: 'Queued report processing completed'
     })
@@ -464,12 +476,6 @@ async function generateLLMReport(session: any, reportId: string, supabase: any) 
   if (llmProvider !== 'demo') {
     throw new Error(`LLM_PROVIDER=${llmProvider} is not implemented. Switch to demo or add provider integration.`)
   }
-
-  // Update status to generating
-  await supabase
-    .from('llm_reports')
-    .update({ status: 'generating', error_message: null })
-    .eq('id', reportId)
 
   // Generate template-based report from predictions (no artificial delay)
   const predictions = session.predictions || []
