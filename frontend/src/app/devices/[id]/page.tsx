@@ -184,7 +184,7 @@ export default function DeviceDetailPage() {
         </Link>
 
         {/* Device Header Card */}
-        <div className="bg-card border border-border rounded-xl p-6 fade-in">
+        <div className="bg-[var(--hud-surface-glass)] border border-[var(--hud-border)] backdrop-blur-md rounded-xl p-6 fade-in">
           <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
             <div className="flex items-start gap-4">
               <div className="w-12 h-12 rounded-xl bg-primary/10 flex items-center justify-center flex-shrink-0">
@@ -238,7 +238,7 @@ export default function DeviceDetailPage() {
         </div>
 
         {/* Tabs */}
-        <div className="bg-card border border-border rounded-xl overflow-hidden fade-in">
+        <div className="bg-[var(--hud-surface-glass)] border border-[var(--hud-border)] backdrop-blur-md rounded-xl overflow-hidden fade-in">
           <div className="border-b border-border">
             <nav className="flex overflow-x-auto">
               {tabs.map((tab) => (

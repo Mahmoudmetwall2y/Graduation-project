@@ -105,15 +105,15 @@ export default function Navbar({ showBackLink, backHref = '/', backLabel = '<- B
             ? `Updated ${lastUpdate.toLocaleTimeString()}`
             : 'Checking status'
         return (
-            <div className={`rounded-xl border border-border bg-gradient-to-br from-emerald-50/60 via-transparent to-transparent dark:from-emerald-950/30 p-3 ${compact ? '' : ''}`}>
+            <div className={`rounded-xl border border-hud-border/30 bg-black/40 p-3 shadow-inner ${compact ? '' : ''}`}>
                 <div className="flex items-center gap-2">
                     <span className={`pulse-dot ${hasOnline ? 'online' : 'offline'}`} />
-                    <p className="text-xs font-semibold text-foreground">Now Monitoring</p>
+                    <p className="text-xs font-semibold text-hud-cyan/90 uppercase tracking-widest text-[10px]">Telemetry</p>
                 </div>
-                <p className="text-xs text-muted-foreground mt-1">
+                <p className="text-xs text-white/60 mt-1 font-mono">
                     {statusText}
                 </p>
-                <div className="mt-2 flex items-center gap-2 text-[11px] text-emerald-600">
+                <div className="mt-2 flex items-center gap-2 text-[10px] text-hud-cyan/50 font-mono">
                     <Activity className="w-3 h-3" />
                     {updatedText}
                 </div>
@@ -161,7 +161,7 @@ export default function Navbar({ showBackLink, backHref = '/', backLabel = '<- B
     return (
         <>
             {/* Desktop sidebar */}
-            <aside className={`hidden lg:flex flex-col border-r border-border/60 bg-card/85 backdrop-blur-xl shadow-[0_12px_50px_-30px_rgba(15,23,42,0.45)] lg:sticky lg:top-0 lg:h-screen ${isCollapsed ? 'w-20' : 'w-64'}`}>
+            <aside className={`hidden lg:flex flex-col border-r border-hud-border/50 bg-hud-surface-glass backdrop-blur-[12px] shadow-lg lg:sticky lg:top-0 lg:h-screen transition-all duration-300 z-50 ${isCollapsed ? 'w-20' : 'w-64'}`}>
                 <div className="px-5 py-5">
                     <Link href="/" className={`flex items-center gap-2.5 group ${isCollapsed ? 'justify-center' : ''}`}>
                         <div className="relative flex items-center justify-center w-10 h-10 rounded-xl bg-gradient-to-br from-teal-500 to-teal-700 shadow-md ring-1 ring-white/20 group-hover:shadow-lg transition-shadow">
@@ -201,9 +201,9 @@ export default function Navbar({ showBackLink, backHref = '/', backLabel = '<- B
                                             key={link.href}
                                             href={link.href}
                                             title={isCollapsed ? link.label : undefined}
-                                            className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 hover:shadow-[0_0_20px_-12px_rgba(13,148,136,0.7)] ${isActive
-                                                ? 'bg-primary/10 text-primary dark:text-primary'
-                                                : 'text-muted-foreground hover:text-foreground hover:bg-accent'
+                                            className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-300 hover:shadow-[0_0_15px_rgba(0,240,255,0.3)] hover:border-hud-cyan/30 border border-transparent ${isActive
+                                                ? 'bg-hud-cyan/10 text-hud-cyan border-hud-cyan/30 shadow-[0_0_20px_rgba(0,240,255,0.2)]'
+                                                : 'text-white/60 hover:text-white hover:bg-hud-cyan/5'
                                                 } ${isCollapsed ? 'justify-center' : ''}`}
                                         >
                                             {isActive && (
@@ -255,18 +255,14 @@ export default function Navbar({ showBackLink, backHref = '/', backLabel = '<- B
                 </div>
 
                 <div className="mt-auto p-4 space-y-2">
-                    <div className={`flex items-center gap-3 px-3 py-2.5 rounded-lg bg-accent/40 ${isCollapsed ? 'justify-center' : ''}`}>
-                        <div className="w-9 h-9 rounded-full bg-primary/15 text-primary flex items-center justify-center text-xs font-bold">
+                    <div className={`flex items-center gap-3 px-3 py-2.5 rounded-lg bg-black/40 border border-hud-border/30 ${isCollapsed ? 'justify-center' : ''}`}>
+                        <div className="w-9 h-9 rounded-full bg-hud-cyan/15 text-hud-cyan flex items-center justify-center text-xs font-bold border border-hud-cyan/30">
                             {userInitials || <User className="w-4 h-4" />}
                         </div>
                         {!isCollapsed && (
                             <div className="min-w-0">
-                                <p className="text-sm font-semibold text-foreground truncate">{userName || 'Signed In'}</p>
-                                <p className="text-xs text-muted-foreground truncate">{userEmail || 'Connected'}</p>
-                                <div className="flex items-center gap-1 text-[11px] text-emerald-600 mt-1">
-                                    <Activity className="w-3 h-3" />
-                                    Online
-                                </div>
+                                <p className="text-sm font-semibold text-white/90 truncate">{userName || 'Signed In'}</p>
+                                <p className="text-xs text-white/60 truncate">{userEmail || 'Connected'}</p>
                             </div>
                         )}
                     </div>
@@ -282,7 +278,7 @@ export default function Navbar({ showBackLink, backHref = '/', backLabel = '<- B
                     </button>
                     <button
                         onClick={handleSignOut}
-                        className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-muted-foreground hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30 transition-all duration-200 ${isCollapsed ? 'justify-center' : ''}`}
+                        className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-white/50 hover:text-hud-red hover:bg-hud-red/10 hover:shadow-[0_0_15px_rgba(255,51,51,0.2)] transition-all duration-300 ${isCollapsed ? 'justify-center' : ''}`}
                         title={isCollapsed ? 'Sign Out' : undefined}
                     >
                         <LogOut className="w-4 h-4" />
@@ -292,7 +288,7 @@ export default function Navbar({ showBackLink, backHref = '/', backLabel = '<- B
             </aside>
 
             {/* Mobile top bar */}
-            <div className="lg:hidden sticky top-0 z-50 border-b border-border/60 bg-card/80 backdrop-blur-xl shadow-[0_12px_40px_-26px_rgba(15,23,42,0.45)]">
+            <div className="lg:hidden sticky top-0 z-50 border-b border-hud-border/50 bg-hud-surface-glass backdrop-blur-[12px] shadow-lg">
                 <div className="flex items-center justify-between h-16 px-4">
                     <Link href="/" className="flex items-center gap-2.5">
                         <div className="relative flex items-center justify-center w-9 h-9 rounded-lg bg-gradient-to-br from-teal-500 to-teal-700 shadow-md ring-1 ring-white/20">
@@ -316,8 +312,8 @@ export default function Navbar({ showBackLink, backHref = '/', backLabel = '<- B
             {/* Mobile drawer */}
             {mobileOpen && (
                 <div className="lg:hidden fixed inset-0 z-50">
-                    <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setMobileOpen(false)} />
-                    <div className="absolute inset-y-0 left-0 w-72 bg-card border-r border-border shadow-2xl p-4">
+                    <div className="absolute inset-0 bg-[#0a0e17]/80 backdrop-blur-sm" onClick={() => setMobileOpen(false)} />
+                    <div className="absolute inset-y-0 left-0 w-72 bg-hud-surface-glass border-r border-hud-border/30 shadow-2xl p-4 backdrop-blur-[12px]">
                         <nav className="space-y-4">
                             {navSections.map((section) => (
                                 <div key={section.title}>
@@ -329,23 +325,23 @@ export default function Navbar({ showBackLink, backHref = '/', backLabel = '<- B
                                             const isActive = pathname === link.href
                                             const Icon = link.icon
                                             return (
-                                            <Link
-                                                key={link.href}
-                                                href={link.href}
-                                                onClick={() => setMobileOpen(false)}
-                                                className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors hover:shadow-[0_0_18px_-12px_rgba(13,148,136,0.7)] ${isActive
-                                                    ? 'bg-primary/10 text-primary'
-                                                    : 'text-muted-foreground hover:text-foreground hover:bg-accent'
-                                                    }`}
-                                            >
-                                                {isActive && (
-                                                    <span className="w-1.5 h-1.5 rounded-full bg-primary" />
-                                                )}
-                                                <Icon className="w-5 h-5" />
-                                                {link.label}
-                                            </Link>
-                                        )
-                                    })}
+                                                <Link
+                                                    key={link.href}
+                                                    href={link.href}
+                                                    onClick={() => setMobileOpen(false)}
+                                                    className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors hover:shadow-[0_0_18px_-12px_rgba(13,148,136,0.7)] ${isActive
+                                                        ? 'bg-primary/10 text-primary'
+                                                        : 'text-muted-foreground hover:text-foreground hover:bg-accent'
+                                                        }`}
+                                                >
+                                                    {isActive && (
+                                                        <span className="w-1.5 h-1.5 rounded-full bg-primary" />
+                                                    )}
+                                                    <Icon className="w-5 h-5" />
+                                                    {link.label}
+                                                </Link>
+                                            )
+                                        })}
                                     </div>
                                 </div>
                             ))}
@@ -369,25 +365,25 @@ export default function Navbar({ showBackLink, backHref = '/', backLabel = '<- B
                             {renderMonitoringWidget(true)}
                         </div>
                         <div className="mt-6 space-y-2">
-                            <div className="flex items-center gap-3 px-3 py-2.5 rounded-lg bg-accent/40">
-                                <div className="w-9 h-9 rounded-full bg-primary/15 text-primary flex items-center justify-center text-xs font-bold">
+                            <div className="flex items-center gap-3 px-3 py-2.5 rounded-lg bg-black/40 border border-hud-border/30">
+                                <div className="w-9 h-9 rounded-full bg-hud-cyan/15 text-hud-cyan flex items-center justify-center text-xs font-bold border border-hud-cyan/30">
                                     {userInitials || <User className="w-4 h-4" />}
                                 </div>
                                 <div className="min-w-0">
-                                    <p className="text-sm font-semibold text-foreground truncate">{userName || 'Signed In'}</p>
-                                    <p className="text-xs text-muted-foreground truncate">{userEmail || 'Connected'}</p>
+                                    <p className="text-sm font-semibold text-white/90 truncate">{userName || 'Signed In'}</p>
+                                    <p className="text-xs text-white/60 truncate">{userEmail || 'Connected'}</p>
                                 </div>
                             </div>
                             <button
                                 onClick={toggleTheme}
-                                className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+                                className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-white/50 hover:text-white hover:bg-hud-cyan/5 transition-all duration-300 border border-transparent"
                             >
-                                {theme === 'dark' ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
+                                {theme === 'dark' ? <Sun className="w-5 h-5 text-hud-cyan" /> : <Moon className="w-5 h-5 text-hud-cyan" />}
                                 Theme
                             </button>
                             <button
                                 onClick={handleSignOut}
-                                className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors"
+                                className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-white/50 hover:text-hud-red hover:bg-hud-red/10 hover:shadow-[0_0_15px_rgba(255,51,51,0.2)] transition-all duration-300 border border-transparent"
                             >
                                 <LogOut className="w-5 h-5" />
                                 Sign Out

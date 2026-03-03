@@ -11,6 +11,7 @@ import {
 } from 'lucide-react'
 import { PageSkeleton } from '../components/Skeleton'
 import { useToast } from '../components/Toast'
+import { GlassCard } from '../../components/ui/GlassCard'
 
 interface Device {
   id: string
@@ -262,7 +263,7 @@ export default function DevicesPage() {
                 className="input-field pl-10 w-full"
               />
             </div>
-            <div className="flex gap-1 bg-card border border-border rounded-xl p-1">
+            <div className="flex gap-1 bg-[var(--hud-surface-glass)] border border-[var(--hud-border)] backdrop-blur-md rounded-xl p-1">
               {(['all', 'online', 'offline', 'error'] as const).map(status => (
                 <button
                   key={status}
@@ -280,7 +281,7 @@ export default function DevicesPage() {
         )}
 
         {devices.length === 0 ? (
-          <div className="bg-card border border-border rounded-xl p-12 text-center fade-in">
+          <div className="bg-[var(--hud-surface-glass)] border border-[var(--hud-border)] backdrop-blur-md rounded-xl p-12 text-center fade-in">
             <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-teal-500/15 to-blue-500/10 mx-auto mb-4 flex items-center justify-center">
               <Cpu className="w-7 h-7 text-teal-600" />
             </div>
@@ -305,7 +306,7 @@ export default function DevicesPage() {
 
           if (filteredDevices.length === 0) {
             return (
-              <div className="bg-card border border-border rounded-xl p-12 text-center fade-in">
+              <div className="bg-[var(--hud-surface-glass)] border border-[var(--hud-border)] backdrop-blur-md rounded-xl p-12 text-center fade-in">
                 <Search className="w-10 h-10 text-muted-foreground/30 mx-auto mb-3" />
                 <p className="text-sm text-muted-foreground">No devices match your filter</p>
                 <button onClick={() => { setSearchQuery(''); setStatusFilter('all') }} className="text-sm text-primary mt-2 hover:text-primary/80">
@@ -320,104 +321,106 @@ export default function DevicesPage() {
               {filteredDevices.map((device, i) => (
                 <div
                   key={device.id}
-                  className="bg-card border border-border rounded-xl overflow-hidden hover:shadow-lg hover:-translate-y-0.5 transition-all duration-300 slide-up"
+                  className="slide-up"
                   style={{ animationDelay: `${i * 0.05}s`, animationFillMode: 'backwards' }}
                 >
-                  <div className="p-5">
-                  <div className="flex items-start justify-between mb-4">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
-                        {getDeviceTypeIcon(device.device_type)}
-                      </div>
-                      <div>
-                        <h3 className="font-semibold text-foreground">{device.device_name}</h3>
-                        <p className="text-xs text-muted-foreground">
-                          {getDeviceTypeLabel(device.device_type)} &bull; {device.id.slice(0, 8)}
-                        </p>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className={`badge ${device.status === 'online' ? 'badge-success' :
-                        device.status === 'error' ? 'badge-danger' : 'badge-neutral'
-                        }`}>
-                        <span className={`pulse-dot ${device.status}`} style={{ width: '8px', height: '8px' }} />
-                        {device.status}
-                      </span>
-                      <span className={`badge ${getHealthBadge(device).className}`}>
-                        {getHealthBadge(device).label}
-                      </span>
-                      <div className="relative">
-                        <button
-                          onClick={() => setOpenMenuId(openMenuId === device.id ? null : device.id)}
-                          className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
-                          aria-label="Open device menu"
-                        >
-                          <MoreVertical className="w-4 h-4" />
-                        </button>
-                        {openMenuId === device.id && (
-                          <div className="absolute right-0 mt-2 w-36 rounded-lg border border-border bg-card shadow-lg z-10">
-                            <Link
-                              href={`/devices/${device.id}`}
-                              className="block px-3 py-2 text-sm text-foreground hover:bg-accent"
-                              onClick={() => setOpenMenuId(null)}
-                            >
-                              View
-                            </Link>
+                  <GlassCard glowHover className="overflow-hidden flex flex-col h-full">
+                    <div className="p-5">
+                      <div className="flex items-start justify-between mb-4">
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 rounded-xl bg-hud-cyan/10 flex items-center justify-center border border-hud-cyan/20">
+                            {getDeviceTypeIcon(device.device_type)}
+                          </div>
+                          <div>
+                            <h3 className="font-semibold text-white">{device.device_name}</h3>
+                            <p className="text-xs text-white/40 font-mono">
+                              {getDeviceTypeLabel(device.device_type)} &bull; {device.id.slice(0, 8)}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className={`badge ${device.status === 'online' ? 'badge-success' :
+                            device.status === 'error' ? 'badge-danger' : 'badge-neutral'
+                            }`}>
+                            <span className={`pulse-dot ${device.status}`} style={{ width: '8px', height: '8px' }} />
+                            {device.status}
+                          </span>
+                          <span className={`badge ${getHealthBadge(device).className}`}>
+                            {getHealthBadge(device).label}
+                          </span>
+                          <div className="relative">
                             <button
-                              onClick={() => {
-                                setOpenMenuId(null)
-                                setShowDeleteConfirm(device.id)
-                              }}
-                              className="w-full text-left px-3 py-2 text-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30"
+                              onClick={() => setOpenMenuId(openMenuId === device.id ? null : device.id)}
+                              className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+                              aria-label="Open device menu"
                             >
-                              Delete
+                              <MoreVertical className="w-4 h-4" />
                             </button>
+                            {openMenuId === device.id && (
+                              <div className="absolute right-0 mt-2 w-36 rounded-lg border border-border bg-card shadow-lg z-10">
+                                <Link
+                                  href={`/devices/${device.id}`}
+                                  className="block px-3 py-2 text-sm text-foreground hover:bg-accent"
+                                  onClick={() => setOpenMenuId(null)}
+                                >
+                                  View
+                                </Link>
+                                <button
+                                  onClick={() => {
+                                    setOpenMenuId(null)
+                                    setShowDeleteConfirm(device.id)
+                                  }}
+                                  className="w-full text-left px-3 py-2 text-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30"
+                                >
+                                  Delete
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-3 mb-4">
+                        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                          <span className={`w-2 h-2 rounded-full ${device.status === 'online' ? 'bg-emerald-500' : device.status === 'error' ? 'bg-red-500' : 'bg-gray-400'}`} />
+                          <span>Last seen {formatLastSeen(device.last_seen_at)}</span>
+                        </div>
+                        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                          <Activity className="w-3.5 h-3.5" />
+                          <span>{device.sessions?.[0]?.count || 0} sessions</span>
+                        </div>
+                        {device.battery_level > 0 && (
+                          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                            <Battery className="w-3.5 h-3.5" />
+                            <span>{device.battery_level}%</span>
+                          </div>
+                        )}
+                        {device.signal_strength !== 0 && device.signal_strength && (
+                          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                            <Wifi className="w-3.5 h-3.5" />
+                            <span>{device.signal_strength} dBm</span>
                           </div>
                         )}
                       </div>
-                    </div>
-                  </div>
 
-                    <div className="grid grid-cols-2 gap-3 mb-4">
-                      <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                        <span className={`w-2 h-2 rounded-full ${device.status === 'online' ? 'bg-emerald-500' : device.status === 'error' ? 'bg-red-500' : 'bg-gray-400'}`} />
-                        <span>Last seen {formatLastSeen(device.last_seen_at)}</span>
-                      </div>
-                      <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                        <Activity className="w-3.5 h-3.5" />
-                        <span>{device.sessions?.[0]?.count || 0} sessions</span>
-                      </div>
-                      {device.battery_level > 0 && (
-                        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                          <Battery className="w-3.5 h-3.5" />
-                          <span>{device.battery_level}%</span>
-                        </div>
-                      )}
-                      {device.signal_strength !== 0 && device.signal_strength && (
-                        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                          <Wifi className="w-3.5 h-3.5" />
-                          <span>{device.signal_strength} dBm</span>
-                        </div>
+                      {device.device_groups?.name && (
+                        <p className="text-xs text-muted-foreground mb-4 badge badge-neutral w-fit">
+                          {device.device_groups.name}
+                        </p>
                       )}
                     </div>
 
-                    {device.device_groups?.name && (
-                      <p className="text-xs text-muted-foreground mb-4 badge badge-neutral w-fit">
-                        {device.device_groups.name}
-                      </p>
-                    )}
-                  </div>
-
-                  <div className="border-t border-border flex">
-                    <Link
-                      href={`/devices/${device.id}`}
-                      className="flex-1 flex items-center justify-center gap-2 px-4 py-3 text-sm font-medium text-primary hover:bg-accent transition-colors"
-                    >
-                      <Eye className="w-4 h-4" />
-                      View
-                      <ChevronRight className="w-4 h-4" />
-                    </Link>
-                  </div>
+                    <div className="border-t border-hud-border/30">
+                      <Link
+                        href={`/devices/${device.id}`}
+                        className="flex-1 flex items-center justify-center gap-2 px-4 py-3 text-sm font-medium text-hud-cyan hover:bg-hud-cyan/10 transition-colors"
+                      >
+                        <Eye className="w-4 h-4" />
+                        View
+                        <ChevronRight className="w-4 h-4" />
+                      </Link>
+                    </div>
+                  </GlassCard>
                 </div>
               ))}
             </div>
@@ -433,7 +436,7 @@ export default function DevicesPage() {
               role="dialog"
               aria-modal="true"
               aria-labelledby="delete-device-title"
-              className="relative bg-card border border-border rounded-2xl shadow-2xl max-w-sm w-full p-6 fade-in"
+              className="relative bg-[#0a0e17]/90 border border-[#00f0ff]/30 shadow-[0_0_30px_rgba(0,240,255,0.15)] rounded-2xl max-w-sm w-full p-6 fade-in backdrop-blur-xl"
             >
               <div className="text-center mb-6">
                 <div className="w-14 h-14 rounded-2xl bg-red-100 dark:bg-red-950/30 flex items-center justify-center mx-auto mb-3">
@@ -480,7 +483,7 @@ export default function DevicesPage() {
               role="dialog"
               aria-modal="true"
               aria-labelledby="add-device-title"
-              className="relative bg-card border border-border rounded-2xl shadow-2xl max-w-lg w-full p-6 fade-in max-h-[90vh] overflow-y-auto"
+              className="relative bg-[#0a0e17]/90 border border-[#00f0ff]/30 shadow-[0_0_30px_rgba(0,240,255,0.15)] rounded-2xl max-w-lg w-full p-6 fade-in max-h-[90vh] overflow-y-auto backdrop-blur-xl"
             >
               {!credentials ? (
                 <>

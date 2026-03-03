@@ -14,6 +14,7 @@ import {
   Activity
 } from 'lucide-react'
 import { PageSkeleton } from '../components/Skeleton'
+import { GlassCard } from '../../components/ui/GlassCard'
 
 interface Patient {
   id: string
@@ -183,84 +184,86 @@ export default function PatientsPage() {
         )}
 
         {patients.length === 0 ? (
-          <div className="bg-card border border-border rounded-xl p-12 text-center fade-in">
-            <UserRound className="w-14 h-14 text-muted-foreground/30 mx-auto mb-4" />
-            <h3 className="text-lg font-semibold text-foreground mb-2">No patients yet</h3>
-            <p className="text-sm text-muted-foreground mb-6 max-w-sm mx-auto">
+          <GlassCard className="p-12 text-center fade-in">
+            <UserRound className="w-14 h-14 text-hud-cyan/30 mx-auto mb-4" />
+            <h3 className="text-lg font-semibold text-white mb-2">No patients yet</h3>
+            <p className="text-sm text-white/50 mb-6 max-w-sm mx-auto">
               Add your first patient to start linking sessions to clinical profiles.
             </p>
             <button onClick={() => setShowAddModal(true)} className="btn-primary gap-2">
               <Plus className="w-4 h-4" />
               Add Your First Patient
             </button>
-          </div>
+          </GlassCard>
         ) : filteredPatients.length === 0 ? (
-          <div className="bg-card border border-border rounded-xl p-12 text-center fade-in">
-            <Search className="w-10 h-10 text-muted-foreground/30 mx-auto mb-3" />
-            <p className="text-sm text-muted-foreground">No patients match your search</p>
-            <button onClick={() => setSearchQuery('')} className="text-sm text-primary mt-2 hover:text-primary/80">
+          <GlassCard className="p-12 text-center fade-in">
+            <Search className="w-10 h-10 text-hud-cyan/30 mx-auto mb-3" />
+            <p className="text-sm text-white/50">No patients match your search</p>
+            <button onClick={() => setSearchQuery('')} className="text-sm text-hud-cyan mt-2 hover:text-white">
               Clear search
             </button>
-          </div>
+          </GlassCard>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
             {filteredPatients.map((patient, i) => (
               <div
                 key={patient.id}
-                className="bg-card border border-border rounded-xl overflow-hidden hover:shadow-lg hover:-translate-y-0.5 transition-all duration-300 slide-up"
+                className="slide-up"
                 style={{ animationDelay: `${i * 0.05}s`, animationFillMode: 'backwards' }}
               >
-                <div className="p-5">
-                  <div className="flex items-start justify-between mb-4">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
-                        <UserRound className="w-5 h-5 text-primary" />
-                      </div>
-                      <div>
-                        <h3 className="font-semibold text-foreground">{patient.full_name}</h3>
-                        <p className="text-xs text-muted-foreground">
-                          ID: {patient.id.slice(0, 8)}
-                        </p>
+                <GlassCard glowHover className="overflow-hidden flex flex-col h-full">
+                  <div className="p-5 flex-1">
+                    <div className="flex items-start justify-between mb-4">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-xl bg-hud-cyan/10 flex items-center justify-center border border-hud-cyan/20">
+                          <UserRound className="w-5 h-5 text-hud-cyan" />
+                        </div>
+                        <div>
+                          <h3 className="font-semibold text-white">{patient.full_name}</h3>
+                          <p className="text-xs text-white/40 font-mono">
+                            ID: {patient.id.slice(0, 8)}
+                          </p>
+                        </div>
                       </div>
                     </div>
+
+                    <div className="grid grid-cols-2 gap-3 mb-3">
+                      <div className="flex items-center gap-2 text-sm text-white/60">
+                        <Hash className="w-3.5 h-3.5 text-hud-cyan/60" />
+                        <span>{patient.mrn || 'No MRN'}</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-sm text-white/60">
+                        <Calendar className="w-3.5 h-3.5 text-hud-cyan/60" />
+                        <span>{patient.dob ? new Date(patient.dob).toLocaleDateString() : 'No DOB'}</span>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 text-xs text-white/50 mb-3">
+                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-hud-cyan/10 text-hud-cyan border border-hud-cyan/20">{patient.sex || 'unknown'}</span>
+                      <span>Added {new Date(patient.created_at).toLocaleDateString()}</span>
+                    </div>
+
+                    {patient.notes && (
+                      <div className="text-xs text-white/50 bg-black/30 border border-hud-border/20 rounded-lg p-2.5">
+                        <div className="flex items-center gap-1.5 mb-1 text-hud-cyan/70">
+                          <FileText className="w-3 h-3" />
+                          Notes
+                        </div>
+                        <p className="line-clamp-3">{patient.notes}</p>
+                      </div>
+                    )}
                   </div>
 
-                  <div className="grid grid-cols-2 gap-3 mb-3">
-                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                      <Hash className="w-3.5 h-3.5" />
-                      <span>{patient.mrn || 'No MRN'}</span>
-                    </div>
-                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                      <Calendar className="w-3.5 h-3.5" />
-                      <span>{patient.dob ? new Date(patient.dob).toLocaleDateString() : 'No DOB'}</span>
-                    </div>
+                  <div className="border-t border-hud-border/30">
+                    <Link
+                      href="/session/new"
+                      className="flex items-center justify-center gap-2 px-4 py-3 text-sm font-medium text-hud-cyan hover:bg-hud-cyan/10 transition-colors"
+                    >
+                      <Activity className="w-4 h-4" />
+                      Start Session
+                    </Link>
                   </div>
-
-                  <div className="flex items-center gap-2 text-xs text-muted-foreground mb-3">
-                    <span className="badge badge-neutral">{patient.sex || 'unknown'}</span>
-                    <span>Added {new Date(patient.created_at).toLocaleDateString()}</span>
-                  </div>
-
-                  {patient.notes && (
-                    <div className="text-xs text-muted-foreground bg-muted rounded-lg p-2.5">
-                      <div className="flex items-center gap-1.5 mb-1">
-                        <FileText className="w-3 h-3" />
-                        Notes
-                      </div>
-                      <p className="line-clamp-3">{patient.notes}</p>
-                    </div>
-                  )}
-                </div>
-
-                <div className="border-t border-border">
-                  <Link
-                    href="/session/new"
-                    className="flex items-center justify-center gap-2 px-4 py-3 text-sm font-medium text-primary hover:bg-accent transition-colors"
-                  >
-                    <Activity className="w-4 h-4" />
-                    Start Session
-                  </Link>
-                </div>
+                </GlassCard>
               </div>
             ))}
           </div>
@@ -274,7 +277,7 @@ export default function PatientsPage() {
               role="dialog"
               aria-modal="true"
               aria-labelledby="add-patient-title"
-              className="relative bg-card border border-border rounded-2xl shadow-2xl max-w-lg w-full p-6 fade-in max-h-[90vh] overflow-y-auto"
+              className="relative bg-[#0a0e17]/90 border border-[#00f0ff]/30 shadow-[0_0_30px_rgba(0,240,255,0.15)] rounded-2xl max-w-lg w-full p-6 fade-in max-h-[90vh] overflow-y-auto backdrop-blur-xl"
             >
               <div className="flex items-center justify-between mb-6">
                 <h2 id="add-patient-title" className="text-xl font-bold text-foreground">Add New Patient</h2>

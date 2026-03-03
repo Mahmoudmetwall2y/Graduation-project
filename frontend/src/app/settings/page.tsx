@@ -4,9 +4,11 @@ import { useState, useEffect, useCallback } from 'react'
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs'
 import {
     Settings, User, Lock, Building2, Save, CheckCircle,
-    AlertCircle, Eye, EyeOff, Mail, Shield
+    AlertCircle, Eye, EyeOff, Mail, Shield, Sliders
 } from 'lucide-react'
 import { PageSkeleton } from '../components/Skeleton'
+import { GlassCard } from '../../components/ui/GlassCard'
+import { NeonToggle } from '../../components/ui/NeonToggle'
 
 interface Profile {
     id: string
@@ -43,7 +45,13 @@ export default function SettingsPage() {
     const [showNewPassword, setShowNewPassword] = useState(false)
     const [success, setSuccess] = useState<string | null>(null)
     const [error, setError] = useState<string | null>(null)
-    const [activeTab, setActiveTab] = useState<'profile' | 'security' | 'organization'>('profile')
+    const [activeTab, setActiveTab] = useState<'profile' | 'security' | 'organization' | 'preferences'>('profile')
+
+    // Preferences Mock State
+    const [audioAlerts, setAudioAlerts] = useState(true)
+    const [highContrast, setHighContrast] = useState(false)
+    const [compactView, setCompactView] = useState(false)
+
     const supabase = createClientComponentClient()
 
     const fetchData = useCallback(async () => {
@@ -193,13 +201,20 @@ export default function SettingsPage() {
 
     const tabs = [
         { key: 'profile' as const, label: 'Profile', icon: User },
+        { key: 'preferences' as const, label: 'Preferences', icon: Sliders },
         { key: 'security' as const, label: 'Security', icon: Lock },
         { key: 'organization' as const, label: 'Organization', icon: Building2 },
     ]
 
     return (
-        <div className="page-wrapper">
-            <div className="page-content space-y-6">
+        <div className="relative page-wrapper overflow-hidden" style={{ backgroundColor: 'var(--hud-bg-base)' }}>
+            {/* Cosmic background effects */}
+            <div className="absolute inset-0 pointer-events-none z-0">
+                <div className="absolute top-0 left-1/4 w-[600px] h-[600px] bg-hud-cyan/3 rounded-full blur-[120px]" />
+                <div className="absolute bottom-0 right-1/4 w-[500px] h-[500px] bg-hud-violet/3 rounded-full blur-[100px]" />
+            </div>
+
+            <div className="relative z-10 page-content space-y-6 max-w-4xl mx-auto">
                 {/* Header */}
                 <div className="fade-in">
                     <div className="flex items-center gap-3 mb-1">
@@ -215,20 +230,20 @@ export default function SettingsPage() {
 
                 {/* Notifications */}
                 {success && (
-                    <div className="rounded-lg bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-900/50 p-4 fade-in flex items-center gap-2">
-                        <CheckCircle className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
-                        <p className="text-sm text-emerald-700 dark:text-emerald-400">{success}</p>
+                    <div className="rounded-lg bg-emerald-500/10 border border-emerald-500/30 p-4 fade-in flex items-center gap-2 shadow-[0_0_15px_rgba(16,185,129,0.1)]">
+                        <CheckCircle className="w-4 h-4 text-emerald-400 shrink-0" />
+                        <p className="text-sm text-emerald-400">{success}</p>
                     </div>
                 )}
                 {error && (
-                    <div className="rounded-lg bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900/50 p-4 fade-in flex items-center gap-2">
-                        <AlertCircle className="w-4 h-4 text-red-600 dark:text-red-400 shrink-0" />
-                        <p className="text-sm text-red-700 dark:text-red-400">{error}</p>
+                    <div className="rounded-lg bg-hud-red/10 border border-hud-red/30 p-4 fade-in flex items-center gap-2 shadow-[0_0_15px_rgba(255,51,51,0.15)]">
+                        <AlertCircle className="w-4 h-4 text-hud-red shrink-0" />
+                        <p className="text-sm text-hud-red">{error}</p>
                     </div>
                 )}
 
                 {/* Tab Navigation */}
-                <div className="flex gap-1 bg-card border border-border rounded-xl p-1">
+                <div className="flex gap-1 bg-hud-surface-glass border border-hud-border/40 rounded-xl p-1 backdrop-blur-md">
                     {tabs.map(tab => {
                         const Icon = tab.icon
                         return (
@@ -236,8 +251,8 @@ export default function SettingsPage() {
                                 key={tab.key}
                                 onClick={() => { setActiveTab(tab.key); setError(null); setSuccess(null) }}
                                 className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium transition-all ${activeTab === tab.key
-                                        ? 'bg-primary/10 text-primary'
-                                        : 'text-muted-foreground hover:text-foreground hover:bg-accent/50'
+                                    ? 'bg-hud-cyan/10 text-hud-cyan border border-hud-cyan/30 shadow-[inset_0_0_15px_rgba(0,240,255,0.15)]'
+                                    : 'text-white/60 hover:text-white hover:bg-hud-cyan/5 border border-transparent'
                                     }`}
                             >
                                 <Icon className="w-4 h-4" />
@@ -249,7 +264,7 @@ export default function SettingsPage() {
 
                 {/* Profile Tab */}
                 {activeTab === 'profile' && (
-                    <div className="bg-card border border-border rounded-xl p-6 space-y-5 slide-up">
+                    <GlassCard className="space-y-5 slide-up">
                         <h2 className="text-lg font-semibold text-foreground">Profile Information</h2>
 
                         <div>
@@ -310,63 +325,55 @@ export default function SettingsPage() {
                                 {saving ? 'Saving...' : 'Save Changes'}
                             </button>
                         </div>
+                    </GlassCard>
+                )}
 
-                        <div className="pt-4 border-t border-border">
-                            <h3 className="text-base font-semibold text-foreground mb-2">Data Retention & Privacy</h3>
-                            <p className="text-sm text-muted-foreground mb-4">
-                                Control how long data is retained and whether exports are de-identified.
-                            </p>
-
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                <div>
-                                    <label className="block text-sm font-medium text-foreground mb-1.5">Retention Days</label>
-                                    <input
-                                        type="number"
-                                        min={0}
-                                        value={retentionDays}
-                                        onChange={(e) => setRetentionDays(Number(e.target.value))}
-                                        className="input-field"
-                                        disabled={profile?.role !== 'admin'}
-                                    />
-                                    <p className="text-xs text-muted-foreground mt-1">
-                                        Set to 0 for immediate deletion policy (requires backend job).
-                                    </p>
-                                </div>
-                                <div className="flex items-center gap-3">
-                                    <input
-                                        id="deidentify"
-                                        type="checkbox"
-                                        checked={deidentifyExports}
-                                        onChange={(e) => setDeidentifyExports(e.target.checked)}
-                                        className="h-4 w-4"
-                                        disabled={profile?.role !== 'admin'}
-                                    />
-                                    <label htmlFor="deidentify" className="text-sm text-foreground">
-                                        De-identify exports by default
-                                    </label>
-                                </div>
-                            </div>
-
-                            <div className="pt-4">
-                                <button
-                                    onClick={handleSaveOrgSettings}
-                                    disabled={saving || profile?.role !== 'admin'}
-                                    className="btn-primary gap-2"
-                                >
-                                    {saving ? <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <Save className="w-4 h-4" />}
-                                    {saving ? 'Saving...' : 'Save Organization Settings'}
-                                </button>
-                                {profile?.role !== 'admin' && (
-                                    <p className="text-xs text-muted-foreground mt-2">Only admins can change these settings.</p>
-                                )}
-                            </div>
+                {/* Preferences Tab (UI Mockup) */}
+                {activeTab === 'preferences' && (
+                    <GlassCard className="space-y-6 slide-up">
+                        <div>
+                            <h2 className="text-lg font-semibold text-foreground">System Preferences</h2>
+                            <p className="text-sm text-muted-foreground mt-1">Customize your local HUD and monitoring experience.</p>
                         </div>
-                    </div>
+
+                        <div className="space-y-4 pt-2">
+                            <NeonToggle
+                                checked={audioAlerts}
+                                onChange={setAudioAlerts}
+                                label="Critical Audio Alerts"
+                                description="Play warning sounds when AI detects a critical anomaly in PCG/ECG streams."
+                            />
+                            <NeonToggle
+                                checked={highContrast}
+                                onChange={setHighContrast}
+                                label="High Contrast Mode"
+                                description="Increase brightness of medical graphs and telemetry for better visibility."
+                            />
+                            <NeonToggle
+                                checked={compactView}
+                                onChange={setCompactView}
+                                label="Compact HUD View"
+                                description="Reduce padding and typography sizes to fit more data on smaller screens."
+                            />
+                        </div>
+
+                        <div className="pt-4 border-t border-border mt-6">
+                            <button
+                                onClick={() => {
+                                    setSuccess("Preferences saved locally.");
+                                    setTimeout(() => setSuccess(null), 3000);
+                                }}
+                                className="btn-primary gap-2"
+                            >
+                                <Save className="w-4 h-4" /> Save Preferences
+                            </button>
+                        </div>
+                    </GlassCard>
                 )}
 
                 {/* Security Tab */}
                 {activeTab === 'security' && (
-                    <div className="bg-card border border-border rounded-xl p-6 space-y-5 slide-up">
+                    <GlassCard className="space-y-5 slide-up">
                         <h2 className="text-lg font-semibold text-foreground">Change Password</h2>
                         <p className="text-sm text-muted-foreground">Update your password to keep your account secure</p>
 
@@ -427,12 +434,12 @@ export default function SettingsPage() {
                                 {changingPassword ? 'Changing...' : 'Change Password'}
                             </button>
                         </div>
-                    </div>
+                    </GlassCard>
                 )}
 
                 {/* Organization Tab */}
                 {activeTab === 'organization' && (
-                    <div className="bg-card border border-border rounded-xl p-6 space-y-5 slide-up">
+                    <GlassCard className="space-y-5 slide-up">
                         <h2 className="text-lg font-semibold text-foreground">Organization</h2>
                         <p className="text-sm text-muted-foreground">Your organization details</p>
 
@@ -474,7 +481,56 @@ export default function SettingsPage() {
                                 />
                             </div>
                         </div>
-                    </div>
+
+                        <div className="pt-4 border-t border-border mt-6">
+                            <h3 className="text-base font-semibold text-foreground mb-2">Data Retention & Privacy</h3>
+                            <p className="text-sm text-muted-foreground mb-4">
+                                Control how long data is retained and whether exports are de-identified.
+                            </p>
+
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-8 mb-6">
+                                <div>
+                                    <label className="block text-sm font-medium text-foreground mb-1.5">Retention Days</label>
+                                    <input
+                                        type="number"
+                                        min={0}
+                                        value={retentionDays}
+                                        onChange={(e) => setRetentionDays(Number(e.target.value))}
+                                        className="input-field"
+                                        disabled={profile?.role !== 'admin'}
+                                    />
+                                    <p className="text-xs text-muted-foreground mt-1">
+                                        Set to 0 for immediate deletion policy (requires backend job).
+                                    </p>
+                                </div>
+                                <div className="flex items-center pt-6">
+                                    <div className="w-full">
+                                        <NeonToggle
+                                            checked={deidentifyExports}
+                                            onChange={setDeidentifyExports}
+                                            label="De-identify Exports"
+                                            description="Automatically strip PHI from batch dataset exports"
+                                            disabled={profile?.role !== 'admin'}
+                                        />
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="pt-4">
+                                <button
+                                    onClick={handleSaveOrgSettings}
+                                    disabled={saving || profile?.role !== 'admin'}
+                                    className="btn-primary gap-2"
+                                >
+                                    {saving ? <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <Save className="w-4 h-4" />}
+                                    {saving ? 'Saving...' : 'Save Organization Settings'}
+                                </button>
+                                {profile?.role !== 'admin' && (
+                                    <p className="text-xs text-muted-foreground mt-2">Only admins can change these settings.</p>
+                                )}
+                            </div>
+                        </div>
+                    </GlassCard>
                 )}
             </div>
         </div>
