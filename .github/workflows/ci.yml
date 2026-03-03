@@ -76,10 +76,16 @@ jobs:
           test -f supabase/migrations/003_fix_device_delete_policy.sql
           test -f supabase/migrations/004_professional_hardening.sql
           test -f supabase/migrations/005_llm_queue_retries.sql
+          test -f supabase/migrations/020_fix_audit_log_insert_policy_drift.sql
+          test -f supabase/migrations/021_llm_reports_requested_by_rate_limit.sql
+          test -f supabase/migrations/022_admin_only_device_insert.sql
+          test -f supabase/migrations/023_delete_policies_for_sessions_and_patients.sql
           test -f supabase/migrations/apply_this_in_supabase.sql
 
       - name: SQL script non-empty check
         run: |
-          test -s supabase/migrations/004_professional_hardening.sql
-          test -s supabase/migrations/005_llm_queue_retries.sql
+          test -s supabase/migrations/020_fix_audit_log_insert_policy_drift.sql
+          test -s supabase/migrations/021_llm_reports_requested_by_rate_limit.sql
+          test -s supabase/migrations/022_admin_only_device_insert.sql
+          test -s supabase/migrations/023_delete_policies_for_sessions_and_patients.sql
           test -s supabase/migrations/apply_this_in_supabase.sql

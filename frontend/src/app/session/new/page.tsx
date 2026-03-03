@@ -112,7 +112,7 @@ export default function NewSessionPage() {
     <div className="page-wrapper">
       <div className="page-content">
 
-        <Link href="/" className="inline-flex items-center gap-1 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors mb-6">
+        <Link href="/dashboard" className="inline-flex items-center gap-1 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors mb-6">
           <ChevronLeft className="w-4 h-4" />
           Back to Dashboard
         </Link>
@@ -274,3 +274,4 @@ export default function NewSessionPage() {
     </div>
   )
 }
+

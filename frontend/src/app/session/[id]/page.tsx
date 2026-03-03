@@ -120,6 +120,19 @@ function buildWaveformSeries(samples: number[], sampleRate: number, maxPoints = 
   return data
 }
 
+function escapeHtml(value: unknown): string {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
+function escapeHtmlWithBreaks(value: unknown): string {
+  return escapeHtml(value).replace(/\n/g, '<br />')
+}
+
 export default function SessionDetailPage() {
   const params = useParams()
   const router = useRouter()
@@ -429,16 +442,23 @@ export default function SessionDetailPage() {
   const handleDeleteSession = async () => {
     setDeleting(true)
     try {
-      // Delete related predictions first
-      await supabase.from('predictions').delete().eq('session_id', sessionId)
-      // Delete the session
-      const { error } = await supabase.from('sessions').delete().eq('id', sessionId)
+      // Delete the session directly; related rows are handled by DB cascades.
+      const { data: deletedSession, error } = await supabase
+        .from('sessions')
+        .delete()
+        .eq('id', sessionId)
+        .select('id, org_id')
+        .maybeSingle()
+
       if (error) throw error
+      if (!deletedSession) {
+        throw new Error('Delete blocked by database policy. Ensure migration 023_delete_policies_for_sessions_and_patients.sql is applied.')
+      }
 
       const { data: userResp } = await supabase.auth.getUser()
       if (userResp.user) {
         await supabase.from('audit_logs').insert({
-          org_id: session?.org_id,
+          org_id: deletedSession.org_id,
           user_id: userResp.user.id,
           action: 'session_deleted',
           entity_type: 'session',
@@ -446,7 +466,7 @@ export default function SessionDetailPage() {
         })
       }
       showToast('Session deleted successfully', 'success')
-      router.push('/')
+      router.push('/sessions')
     } catch (err: any) {
       showToast(`Failed to delete session: ${err.message}`, 'error')
     } finally {
@@ -473,14 +493,15 @@ export default function SessionDetailPage() {
       const confidence = p.output_json?.confidence
         ? `${(p.output_json.confidence * 100).toFixed(1)}%`
         : 'N/A'
+      const latency = typeof p.latency_ms === 'number' ? `${p.latency_ms}ms` : 'N/A'
       return `
         <tr>
-          <td style="padding:8px;border:1px solid #ddd;">${p.modality.toUpperCase()}</td>
-          <td style="padding:8px;border:1px solid #ddd;">${p.model_name} v${p.model_version}</td>
-          <td style="padding:8px;border:1px solid #ddd;">${label}</td>
-          <td style="padding:8px;border:1px solid #ddd;">${confidence}</td>
-          <td style="padding:8px;border:1px solid #ddd;">${p.latency_ms}ms</td>
-          <td style="padding:8px;border:1px solid #ddd;">${new Date(p.created_at).toLocaleString()}</td>
+          <td style="padding:8px;border:1px solid #ddd;">${escapeHtml(p.modality.toUpperCase())}</td>
+          <td style="padding:8px;border:1px solid #ddd;">${escapeHtml(p.model_name)} v${escapeHtml(p.model_version)}</td>
+          <td style="padding:8px;border:1px solid #ddd;">${escapeHtml(label)}</td>
+          <td style="padding:8px;border:1px solid #ddd;">${escapeHtml(confidence)}</td>
+          <td style="padding:8px;border:1px solid #ddd;">${escapeHtml(latency)}</td>
+          <td style="padding:8px;border:1px solid #ddd;">${escapeHtml(new Date(p.created_at).toLocaleString())}</td>
         </tr>
       `
     }).join('')
@@ -490,10 +511,15 @@ export default function SessionDetailPage() {
       : 'In Progress'
 
     const notesHtml = notes.length
-      ? `<ul>${notes.map(n => `<li style="margin-bottom:6px;">${n.note}</li>`).join('')}</ul>`
+      ? `<ul>${notes.map(n => `<li style="margin-bottom:6px;">${escapeHtmlWithBreaks(n.note)}</li>`).join('')}</ul>`
       : '<p style="color:#999;">No notes.</p>'
 
     const patientLabel = deidentifyExports ? 'De-identified' : (session?.patient?.full_name || 'Not linked')
+    const sessionIdLabel = session?.id ? session.id.slice(0, 8) : 'N/A'
+    const statusLabel = session?.status || 'unknown'
+    const startedLabel = session ? new Date(session.created_at).toLocaleString() : 'N/A'
+    const deviceLabel = session?.device?.device_name || session?.device_id?.slice(0, 8) || 'N/A'
+    const generatedAt = new Date().toLocaleString()
 
     return `
       <!DOCTYPE html>
@@ -520,16 +546,16 @@ export default function SessionDetailPage() {
 
         <div style="background:#f8fafa;border-radius:8px;padding:16px;margin-bottom:20px;">
           <div class="info-row">
-            <div><span class="info-label">Session ID:</span> <strong>${session?.id.slice(0, 8)}</strong></div>
-            <div><span class="info-label">Status:</span> <span class="header-badge">${session?.status}</span></div>
+            <div><span class="info-label">Session ID:</span> <strong>${escapeHtml(sessionIdLabel)}</strong></div>
+            <div><span class="info-label">Status:</span> <span class="header-badge">${escapeHtml(statusLabel)}</span></div>
           </div>
           <div class="info-row">
-            <div><span class="info-label">Started:</span> ${session ? new Date(session.created_at).toLocaleString() : '—'}</div>
-            <div><span class="info-label">Duration:</span> ${duration}</div>
+            <div><span class="info-label">Started:</span> ${escapeHtml(startedLabel)}</div>
+            <div><span class="info-label">Duration:</span> ${escapeHtml(duration)}</div>
           </div>
           <div class="info-row">
-            <div><span class="info-label">Device:</span> ${session?.device?.device_name || session?.device_id.slice(0, 8)}</div>
-            <div><span class="info-label">Patient:</span> ${patientLabel}</div>
+            <div><span class="info-label">Device:</span> ${escapeHtml(deviceLabel)}</div>
+            <div><span class="info-label">Patient:</span> ${escapeHtml(patientLabel)}</div>
           </div>
         </div>
 
@@ -555,7 +581,7 @@ export default function SessionDetailPage() {
         </div>
 
         <div class="footer">
-          Generated by AscultiCor on ${new Date().toLocaleString()} • For educational and research purposes
+          Generated by AscultiCor on ${escapeHtml(generatedAt)} • For educational and research purposes
         </div>
       </body>
       </html>
@@ -689,7 +715,7 @@ export default function SessionDetailPage() {
             >
               Retry
             </button>
-            <Link href="/" className="btn-ghost">
+            <Link href="/dashboard" className="btn-ghost">
               Back to Dashboard
             </Link>
           </div>
@@ -705,7 +731,7 @@ export default function SessionDetailPage() {
           <div className="text-center">
             <AlertTriangle className="w-12 h-12 text-destructive mx-auto mb-4" />
             <h2 className="text-xl font-bold text-foreground mb-2">Session Not Found</h2>
-            <Link href="/" className="text-primary hover:text-primary/80 text-sm font-medium">
+            <Link href="/dashboard" className="text-primary hover:text-primary/80 text-sm font-medium">
               ← Return to Dashboard
             </Link>
           </div>
@@ -725,7 +751,7 @@ export default function SessionDetailPage() {
       <div className="page-content space-y-6">
 
         {/* Back link */}
-        <Link href="/" className="inline-flex items-center gap-1 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">
+        <Link href="/dashboard" className="inline-flex items-center gap-1 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">
           <ChevronLeft className="w-4 h-4" />
           Back to Dashboard
         </Link>

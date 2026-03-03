@@ -120,13 +120,14 @@ export default function DeviceDetailPage() {
   const generateLLMReport = async (sessionId: string) => {
     setGeneratingReport(sessionId)
     try {
-      const response = await fetch('/api/llm/generate-report', {
+      const response = await fetch('/api/llm', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ session_id: sessionId, device_id: deviceId })
       })
-      if (!response.ok) throw new Error('Failed to generate report')
-      alert('LLM Report generated successfully!')
+      const payload = await response.json()
+      if (!response.ok) throw new Error(payload.error || 'Failed to queue report')
+      alert(payload.message || 'LLM Report queued successfully!')
       fetchDeviceData()
     } catch (error) {
       console.error('Error generating report:', error)

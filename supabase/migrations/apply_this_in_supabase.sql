@@ -827,3 +827,93 @@ CREATE POLICY "Admins can manage org settings"
   TO authenticated
   USING (org_id = public.user_org_id() AND public.is_admin())
   WITH CHECK (org_id = public.user_org_id() AND public.is_admin());
+
+-- =============================================================
+-- Step 18: LLM requester tracking for distributed rate limiting
+-- =============================================================
+
+ALTER TABLE llm_reports
+  ADD COLUMN IF NOT EXISTS requested_by UUID REFERENCES profiles(id);
+
+UPDATE llm_reports lr
+SET requested_by = s.created_by
+FROM sessions s
+WHERE lr.session_id = s.id
+  AND lr.requested_by IS NULL;
+
+CREATE INDEX IF NOT EXISTS idx_llm_reports_requested_by_created
+  ON llm_reports (requested_by, created_at DESC);
+
+DROP POLICY IF EXISTS "Users can insert LLM reports in their org" ON llm_reports;
+CREATE POLICY "Users can insert LLM reports in their org"
+  ON llm_reports FOR INSERT
+  TO authenticated
+  WITH CHECK (
+    org_id = public.user_org_id()
+    AND requested_by = auth.uid()
+    AND EXISTS (
+      SELECT 1
+      FROM sessions s
+      WHERE s.id = session_id
+        AND s.org_id = public.user_org_id()
+        AND s.device_id = llm_reports.device_id
+    )
+  );
+
+-- =============================================================
+-- Step 19: Restrict device provisioning to admins only
+-- =============================================================
+
+DROP POLICY IF EXISTS "Users can insert devices in their org" ON devices;
+DROP POLICY IF EXISTS "Operators can insert their own devices" ON devices;
+DROP POLICY IF EXISTS "Admins can insert any device in their org" ON devices;
+DROP POLICY IF EXISTS "Admins can insert devices in their org" ON devices;
+
+CREATE POLICY "Admins can insert devices in their org"
+  ON devices FOR INSERT
+  TO authenticated
+  WITH CHECK (
+    org_id = public.user_org_id()
+    AND public.is_admin()
+  );
+
+-- =============================================================
+-- Step 20: DELETE policies for sessions and patients
+-- =============================================================
+
+DROP POLICY IF EXISTS "Users can delete their own sessions" ON sessions;
+CREATE POLICY "Users can delete their own sessions"
+  ON sessions FOR DELETE
+  TO authenticated
+  USING (
+    created_by = auth.uid()
+    AND public.user_role() <> 'readonly'
+  );
+
+DROP POLICY IF EXISTS "Admins can delete any session in their org" ON sessions;
+CREATE POLICY "Admins can delete any session in their org"
+  ON sessions FOR DELETE
+  TO authenticated
+  USING (
+    org_id = public.user_org_id()
+    AND public.is_admin()
+  );
+
+DROP POLICY IF EXISTS "Users can delete patients they created" ON patients;
+CREATE POLICY "Users can delete patients they created"
+  ON patients FOR DELETE
+  TO authenticated
+  USING (
+    org_id = public.user_org_id()
+    AND created_by = auth.uid()
+    AND public.user_role() <> 'readonly'
+  );
+
+DROP POLICY IF EXISTS "Admins can delete patients in their org" ON patients;
+CREATE POLICY "Admins can delete patients in their org"
+  ON patients FOR DELETE
+  TO authenticated
+  USING (
+    org_id = public.user_org_id()
+    AND public.is_admin()
+  );

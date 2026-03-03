@@ -2,7 +2,6 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs'
-import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import {
   Plus, Activity, Battery, Wifi, AlertCircle, CheckCircle,
@@ -27,6 +26,8 @@ interface Device {
 
 export default function DevicesPage() {
   const [devices, setDevices] = useState<Device[]>([])
+  const [currentUserRole, setCurrentUserRole] = useState<string>('operator')
+  const [canCreateDevices, setCanCreateDevices] = useState(false)
   const [loading, setLoading] = useState(true)
   const [showAddModal, setShowAddModal] = useState(false)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(null)
@@ -45,7 +46,6 @@ export default function DevicesPage() {
   const addFirstFieldRef = useRef<HTMLInputElement | null>(null)
   const deletePrimaryRef = useRef<HTMLButtonElement | null>(null)
 
-  const router = useRouter()
   const supabase = createClientComponentClient()
   const { showToast } = useToast()
   const channelRef = useRef<any>(null)
@@ -56,6 +56,8 @@ export default function DevicesPage() {
       if (!response.ok) throw new Error('Failed to fetch devices')
       const data = await response.json()
       setDevices(data.devices || [])
+      setCurrentUserRole(data.current_user_role || 'operator')
+      setCanCreateDevices(Boolean(data.can_create_devices))
     } catch (error) {
       console.error('Error fetching devices:', error)
       setError('Failed to load devices')
@@ -115,6 +117,10 @@ export default function DevicesPage() {
   const createDevice = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!newDeviceName.trim()) return
+    if (!canCreateDevices) {
+      setError('Device provisioning is restricted to admin users.')
+      return
+    }
     setCreating(true)
     setError(null)
 
@@ -217,6 +223,8 @@ export default function DevicesPage() {
     }
     return labels[type] || type.toUpperCase()
   }
+  const mqttUserProvisionValue = credentials?.mqtt_user || 'asculticor'
+  const mqttPassProvisionValue = credentials?.mqtt_pass || 'YOUR_MQTT_PASSWORD'
 
   if (loading) {
     return <div className="page-wrapper"><PageSkeleton /></div>
@@ -233,11 +241,21 @@ export default function DevicesPage() {
               Manage your {devices.length} device{devices.length !== 1 ? 's' : ''}
             </p>
           </div>
-          <button onClick={() => setShowAddModal(true)} className="btn-primary gap-2">
-            <Plus className="w-4 h-4" />
-            Add Device
-          </button>
+          {canCreateDevices && (
+            <button onClick={() => setShowAddModal(true)} className="btn-primary gap-2">
+              <Plus className="w-4 h-4" />
+              Add Device
+            </button>
+          )}
         </div>
+
+        {!canCreateDevices && (
+          <div className="rounded-lg bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900/40 p-3 fade-in">
+            <p className="text-sm text-amber-800 dark:text-amber-300">
+              Device provisioning is restricted to admin users. Your role: <span className="font-semibold uppercase">{currentUserRole}</span>.
+            </p>
+          </div>
+        )}
 
         {error && (
           <div className="rounded-lg bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900/50 p-4 fade-in">
@@ -289,10 +307,14 @@ export default function DevicesPage() {
             <p className="text-sm text-muted-foreground mb-6 max-w-sm mx-auto">
               Add your first AscultiCor device to capture live signals for clinical review.
             </p>
-            <button onClick={() => setShowAddModal(true)} className="btn-primary gap-2">
-              <Plus className="w-4 h-4" />
-              Add Your First Device
-            </button>
+            {canCreateDevices ? (
+              <button onClick={() => setShowAddModal(true)} className="btn-primary gap-2">
+                <Plus className="w-4 h-4" />
+                Add Your First Device
+              </button>
+            ) : (
+              <p className="text-sm text-muted-foreground">Ask an admin in your organization to provision a device.</p>
+            )}
           </div>
         ) : (() => {
           const filteredDevices = devices.filter(device => {
@@ -584,8 +606,10 @@ export default function DevicesPage() {
                   <div className="bg-muted rounded-xl p-4 space-y-3 mb-6">
                     {[
                       { label: 'Device ID', value: credentials.device_id, key: 'device_id' },
-                      { label: 'Secret Key', value: credentials.device_secret, key: 'secret' },
                       { label: 'Organization ID', value: credentials.org_id, key: 'org_id' },
+                      { label: 'MQTT Username', value: mqttUserProvisionValue, key: 'mqtt_user' },
+                      { label: 'MQTT Password', value: mqttPassProvisionValue, key: 'mqtt_pass' },
+                      { label: 'Device Secret (Optional)', value: credentials.device_secret, key: 'secret' },
                     ].map(item => (
                       <div key={item.label}>
                         <p className="text-xs font-semibold text-muted-foreground uppercase mb-1">{item.label}</p>
@@ -631,22 +655,42 @@ export default function DevicesPage() {
                       </div>
                       <div className="flex items-center gap-2">
                         <span className="text-gray-500 select-none">&gt;</span>
-                        <code className="text-emerald-400">SET device_secret {credentials.device_secret}</code>
-                        <button
-                          onClick={() => copyToClipboard(`SET device_secret ${credentials.device_secret}`, 'cmd_secret')}
-                          className="ml-auto shrink-0 p-1 rounded text-gray-500 hover:text-white transition-colors"
-                        >
-                          {copiedField === 'cmd_secret' ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
-                        </button>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-gray-500 select-none">&gt;</span>
                         <code className="text-emerald-400">SET org_id {credentials.org_id}</code>
                         <button
                           onClick={() => copyToClipboard(`SET org_id ${credentials.org_id}`, 'cmd_org')}
                           className="ml-auto shrink-0 p-1 rounded text-gray-500 hover:text-white transition-colors"
                         >
                           {copiedField === 'cmd_org' ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                        </button>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-gray-500 select-none">&gt;</span>
+                        <code className="text-emerald-400">SET mqtt_user {mqttUserProvisionValue}</code>
+                        <button
+                          onClick={() => copyToClipboard(`SET mqtt_user ${mqttUserProvisionValue}`, 'cmd_mqtt_user')}
+                          className="ml-auto shrink-0 p-1 rounded text-gray-500 hover:text-white transition-colors"
+                        >
+                          {copiedField === 'cmd_mqtt_user' ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                        </button>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-gray-500 select-none">&gt;</span>
+                        <code className="text-emerald-400">SET mqtt_pass {mqttPassProvisionValue}</code>
+                        <button
+                          onClick={() => copyToClipboard(`SET mqtt_pass ${mqttPassProvisionValue}`, 'cmd_mqtt_pass')}
+                          className="ml-auto shrink-0 p-1 rounded text-gray-500 hover:text-white transition-colors"
+                        >
+                          {copiedField === 'cmd_mqtt_pass' ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                        </button>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-gray-500 select-none">&gt;</span>
+                        <code className="text-blue-400">SET device_secret {credentials.device_secret}</code>
+                        <button
+                          onClick={() => copyToClipboard(`SET device_secret ${credentials.device_secret}`, 'cmd_secret_optional')}
+                          className="ml-auto shrink-0 p-1 rounded text-gray-500 hover:text-white transition-colors"
+                        >
+                          {copiedField === 'cmd_secret_optional' ? <Check className="w-3 h-3 text-blue-400" /> : <Copy className="w-3 h-3" />}
                         </button>
                       </div>
                       <div className="flex items-center gap-2">
@@ -668,7 +712,11 @@ export default function DevicesPage() {
                     </div>
                     <p className="text-xs text-gray-500 mt-3">
                       <span className="text-emerald-400">Green</span> = auto-filled from credentials &bull;
-                      <span className="text-yellow-400 ml-1">Yellow</span> = you need to fill in
+                      <span className="text-yellow-400 ml-1">Yellow</span> = you need to fill in &bull;
+                      <span className="text-blue-400 ml-1">Blue</span> = optional
+                    </p>
+                    <p className="text-xs text-gray-500 mt-1">
+                      <code className="text-blue-400">device_secret</code> is reserved for future per-device auth and is not required for the local Mosquitto broker setup.
                     </p>
                   </div>
 

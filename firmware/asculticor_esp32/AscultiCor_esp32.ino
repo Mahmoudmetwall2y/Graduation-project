@@ -108,7 +108,7 @@ char mqtt_user[64];
 char mqtt_pass[64];
 char org_id[40];
 char device_id[40];
-char device_secret[80];  // Secret key from web app (used for MQTT auth)
+char device_secret[80];  // Optional future-use secret (not used by current broker auth)
 char session_id[37];
 
 // State
@@ -186,7 +186,7 @@ void loadCredentials() {
   Serial.printf("  WiFi SSID     : %s\n", wifi_ssid);
   Serial.printf("  MQTT Host     : %s:%d\n", mqtt_host, mqtt_port);
   Serial.printf("  Device ID     : %s\n", device_id);
-  Serial.printf("  Device Secret : %s\n", strlen(device_secret) > 0 ? "***set***" : "(not set)");
+  Serial.printf("  Device Secret : %s (optional)\n", strlen(device_secret) > 0 ? "***set***" : "(not set)");
   Serial.printf("  Org ID        : %s\n", org_id);
 }
 
@@ -236,11 +236,13 @@ void handleSerialProvisioning() {
     Serial.println("Keys: wifi_ssid, wifi_pass, mqtt_host, mqtt_port, mqtt_user, mqtt_pass, org_id, device_id, device_secret");
     Serial.println("\nQuick setup (from web app 'Add Device' modal):");
     Serial.println("  SET device_id    <id from web>");
-    Serial.println("  SET device_secret <secret from web>");
     Serial.println("  SET org_id       <org from web>");
+    Serial.println("  SET mqtt_user    <broker user>");
+    Serial.println("  SET mqtt_pass    <broker password>");
     Serial.println("  SET mqtt_host    <your server IP>");
     Serial.println("  SET wifi_ssid    <your WiFi name>");
     Serial.println("  SET wifi_pass    <your WiFi password>");
+    Serial.println("  SET device_secret <optional: reserved for future auth>");
     Serial.println("  REBOOT");
   }
 }
@@ -468,16 +470,10 @@ bool mqttReconnect() {
   char clientId[48];
   snprintf(clientId, sizeof(clientId), "ESP32-%s", device_id);
 
-  // Use device credentials for MQTT auth when secret is set,
-  // otherwise fall back to generic mqtt_user/mqtt_pass
-  const char *authUser = (strlen(device_secret) > 0) ? device_id     : mqtt_user;
-  const char *authPass = (strlen(device_secret) > 0) ? device_secret : mqtt_pass;
+  Serial.printf("[MQTT] Connecting as %s to %s:%d (auth: mqtt_user/mqtt_pass)...\n",
+                clientId, mqtt_host, mqtt_port);
 
-  Serial.printf("[MQTT] Connecting as %s to %s:%d (auth: %s)...\n",
-                clientId, mqtt_host, mqtt_port,
-                (strlen(device_secret) > 0) ? "device_secret" : "mqtt_pass");
-
-  if (mqtt.connect(clientId, authUser, authPass)) {
+  if (mqtt.connect(clientId, mqtt_user, mqtt_pass)) {
     Serial.println("[MQTT] Connected!");
 
     // Subscribe to control topic

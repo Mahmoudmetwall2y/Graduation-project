@@ -41,7 +41,6 @@ AscultiCor is a real-time cardiac monitoring platform combining IoT (ESP32), MQT
 ### Key Files
 - `README.md` – setup and quick start
 - `MANUAL_STEPS.md` – external steps (keys, secrets, CORS)
-- `RELEASE_CHECKLIST.md` – pre-demo/deploy checklist
-- `LIVE_WAVEFORM_ENABLE.md` – live waveform setup
-- `DEBUG_STEP5_NO_SESSION.md` – troubleshooting guide
-
+- `./RELEASE_CHECKLIST.md` – pre-demo/deploy checklist
+- `./LIVE_WAVEFORM_ENABLE.md` – live waveform setup
+- `./DEBUG_STEP5_NO_SESSION.md` – troubleshooting guide

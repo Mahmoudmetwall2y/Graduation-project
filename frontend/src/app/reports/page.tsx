@@ -36,6 +36,23 @@ interface ReportSession {
     }[] | null
 }
 
+function escapeHtml(value: unknown): string {
+    return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;')
+}
+
+function toSafeFilename(value: string): string {
+    const normalized = value
+        .replace(/[<>:"/\\|?*\x00-\x1F]/g, '')
+        .replace(/\s+/g, '_')
+        .trim()
+    return normalized || 'Unknown_Patient'
+}
+
 export default function ReportsPage() {
     const supabase = createClientComponentClient()
     const { showToast } = useToast()
@@ -133,6 +150,12 @@ export default function ReportsPage() {
                 aiFinding = `${pred.label} (Confidence: ${(pred.confidence * 100).toFixed(1)}%)`
             }
 
+            const safePatientName = escapeHtml(patientName)
+            const safePatientMrn = escapeHtml(patientMrn)
+            const safeDateStr = escapeHtml(dateStr)
+            const safeStatus = escapeHtml(session.status)
+            const safeAiFinding = escapeHtml(aiFinding)
+
             reportContainer.innerHTML = `
                 <div style="font-family: sans-serif; max-width: 800px; margin: 0 auto;">
                     <div style="border-bottom: 2px solid #00f0ff; padding-bottom: 20px; mb-6">
@@ -143,21 +166,21 @@ export default function ReportsPage() {
                     <div style="display: flex; justify-content: space-between; margin-top: 30px; margin-bottom: 30px;">
                         <div>
                             <h3 style="color: #666; font-size: 14px; text-transform: uppercase;">Patient Information</h3>
-                            <p style="margin: 5px 0;"><strong>Name:</strong> ${patientName}</p>
-                            <p style="margin: 5px 0;"><strong>MRN:</strong> ${patientMrn}</p>
+                            <p style="margin: 5px 0;"><strong>Name:</strong> ${safePatientName}</p>
+                            <p style="margin: 5px 0;"><strong>MRN:</strong> ${safePatientMrn}</p>
                         </div>
                         <div style="text-align: right;">
                             <h3 style="color: #666; font-size: 14px; text-transform: uppercase;">Session Details</h3>
-                            <p style="margin: 5px 0;"><strong>Session ID:</strong> ${session.id.substring(0, 8)}...</p>
-                            <p style="margin: 5px 0;"><strong>Date:</strong> ${dateStr}</p>
-                            <p style="margin: 5px 0;"><strong>Status:</strong> ${session.status}</p>
+                            <p style="margin: 5px 0;"><strong>Session ID:</strong> ${escapeHtml(session.id.substring(0, 8))}...</p>
+                            <p style="margin: 5px 0;"><strong>Date:</strong> ${safeDateStr}</p>
+                            <p style="margin: 5px 0;"><strong>Status:</strong> ${safeStatus}</p>
                         </div>
                     </div>
 
                     <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; padding: 20px; border-radius: 8px; margin-bottom: 30px;">
                         <h3 style="color: #0f172a; margin-top: 0;">AI Diagnostic Finding</h3>
                         <p style="font-size: 18px; color: ${aiFinding.includes('Normal') ? '#10b981' : '#ef4444'}; font-weight: bold; margin: 10px 0;">
-                            ${aiFinding}
+                            ${safeAiFinding}
                         </p>
                     </div>
 
@@ -180,7 +203,8 @@ export default function ReportsPage() {
             })
 
             pdf.addImage(imgData, 'PNG', 0, 0, canvas.width, canvas.height)
-            pdf.save(`AscultiCor_Report_${patientName.replace(/\s+/g, '_')}_${session.id.substring(0, 6)}.pdf`)
+            const safeFilePatientName = toSafeFilename(patientName)
+            pdf.save(`AscultiCor_Report_${safeFilePatientName}_${session.id.substring(0, 6)}.pdf`)
 
             document.body.removeChild(reportContainer)
             showToast('Report generated successfully', 'success')

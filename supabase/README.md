@@ -27,20 +27,41 @@ This directory contains all Supabase-related configuration for AscultiCor.
    # Link to your project
    supabase link --project-ref YOUR_PROJECT_REF
 
-   # Push migrations
+   # Preferred for existing databases: push numbered migrations
    supabase db push
    ```
 
-   Or manually via SQL Editor:
-   ```bash
-   # Copy/apply migrations in order:
-   # 1) migrations/001_initial_schema.sql
-   # 2) migrations/002_device_management_enhancement.sql
-   # 3) migrations/003_fix_device_delete_policy.sql
-   # 4) migrations/004_professional_hardening.sql
-   # 5) migrations/005_llm_queue_retries.sql
-   # (or run migrations/apply_this_in_supabase.sql for one-shot setup)
-   ```
+   Manual SQL Editor path for existing databases (apply in order):
+   - `migrations/001_initial_schema.sql`
+   - `migrations/002_device_management_enhancement.sql`
+   - `migrations/003_fix_device_delete_policy.sql`
+   - `migrations/004_professional_hardening.sql`
+   - `migrations/005_llm_queue_retries.sql`
+   - `migrations/006_patient_management.sql`
+   - `migrations/007_session_notes.sql`
+   - `migrations/008_saved_views.sql`
+   - `migrations/009_audit_log_policies.sql`
+   - `migrations/010_roles_permissions.sql`
+   - `migrations/011_org_settings.sql`
+   - `migrations/012_disable_realtime_publication.sql`
+   - `migrations/013_disable_realtime_publication_safe.sql`
+   - `migrations/014_drop_realtime_triggers.sql`
+   - `migrations/015_realtime_broadcast_search.sql`
+   - `migrations/016_realtime_broadcast_search_simple.sql`
+   - `migrations/017_drop_broadcast_table_changes.sql`
+   - `migrations/018_fix_service_role_sessions_insert.sql`
+   - `migrations/019_add_composite_indexes.sql`
+   - `migrations/020_fix_audit_log_insert_policy_drift.sql`
+   - `migrations/021_llm_reports_requested_by_rate_limit.sql`
+   - `migrations/022_admin_only_device_insert.sql`
+   - `migrations/023_delete_policies_for_sessions_and_patients.sql`
+
+   Fresh bootstrap alternative:
+   - Run `migrations/apply_this_in_supabase.sql` for one-shot setup on a new database.
+
+   Optional scheduled cleanup migration:
+   - `migrations/20240101000002_live_metrics_cleanup.sql` uses `pg_cron`.
+   - If `pg_cron` is not available, skip this file and run cleanup manually/on an external scheduler.
 
 4. **Create users** (via Dashboard):
    - Go to Authentication > Users > Add User
@@ -123,7 +144,7 @@ supabase db reset
 ### Core Tables
 
 - **organizations**: Multi-tenant root
-- **profiles**: User profiles with roles (operator/admin)
+- **profiles**: User profiles with roles (operator/admin/clinician/readonly)
 - **devices**: Registered ESP32 devices
 - **sessions**: Recording sessions with status tracking
 - **recordings**: Raw signal storage metadata
