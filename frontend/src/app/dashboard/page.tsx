@@ -614,7 +614,7 @@ export default function Dashboard() {
         <div className="grid grid-cols-1 lg:grid-cols-[280px_1fr_280px] gap-4 items-stretch flex-1 min-h-0">
 
           {/* ====== LEFT COLUMN ====== */}
-          <div className="space-y-3 overflow-y-auto max-h-full pr-1 slide-up" style={{ animationDelay: '0.1s', animationFillMode: 'backwards' }}>
+          <div className="space-y-3 overflow-y-auto max-h-full pr-1 slide-up" style={{ animationDelay: '0.1s', animationFillMode: 'both' }}>
             <PatientInfoPanel
               patientName={activePatientName}
               patientAge={activePatientAge}
@@ -677,7 +677,7 @@ export default function Dashboard() {
           </div>
 
           {/* ====== RIGHT COLUMN ====== */}
-          <div className="space-y-3 overflow-y-auto max-h-full pl-1 slide-up" style={{ animationDelay: '0.2s', animationFillMode: 'backwards' }}>
+          <div className="space-y-3 overflow-y-auto max-h-full pl-1 slide-up" style={{ animationDelay: '0.2s', animationFillMode: 'both' }}>
             <RecentActivityPanel
               items={recentActivityItems}
               lastUpdated={lastUpdated ? `Updated ${lastUpdated.toLocaleTimeString()}` : 'Waiting...'}

@@ -905,7 +905,7 @@ export default function SessionDetailPage() {
           </div>
 
           {/* PCG Waveform */}
-          <div className="bg-[var(--hud-surface-glass)] border border-[var(--hud-border)] backdrop-blur-md rounded-xl p-6 slide-up" style={{ animationDelay: '0.1s', animationFillMode: 'backwards' }}>
+          <div className="bg-[var(--hud-surface-glass)] border border-[var(--hud-border)] backdrop-blur-md rounded-xl p-6 slide-up" style={{ animationDelay: '0.1s', animationFillMode: 'both' }}>
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-2">
                 <Activity className="w-5 h-5 text-rose-600 dark:text-rose-400" />
@@ -961,7 +961,7 @@ export default function SessionDetailPage() {
         </div>
 
         {/* Session Timeline */}
-        <div className="bg-[var(--hud-surface-glass)] border border-[var(--hud-border)] backdrop-blur-md rounded-xl slide-up" style={{ animationDelay: '0.15s', animationFillMode: 'backwards' }}>
+        <div className="bg-[var(--hud-surface-glass)] border border-[var(--hud-border)] backdrop-blur-md rounded-xl slide-up" style={{ animationDelay: '0.15s', animationFillMode: 'both' }}>
           <div className="p-6 pb-0">
             <h3 className="font-semibold text-foreground text-lg">Session Timeline</h3>
             <p className="text-sm text-muted-foreground mt-1">Key events and updates</p>
@@ -1007,7 +1007,7 @@ export default function SessionDetailPage() {
         </div>
 
         {/* Predictions */}
-        <div className="bg-[var(--hud-surface-glass)] border border-[var(--hud-border)] backdrop-blur-md rounded-xl slide-up" style={{ animationDelay: '0.2s', animationFillMode: 'backwards' }}>
+        <div className="bg-[var(--hud-surface-glass)] border border-[var(--hud-border)] backdrop-blur-md rounded-xl slide-up" style={{ animationDelay: '0.2s', animationFillMode: 'both' }}>
           <div className="p-6 pb-0">
             <h3 className="font-semibold text-foreground text-lg">Predictions</h3>
             <p className="text-sm text-muted-foreground mt-1">AI-generated analysis results</p>
@@ -1119,7 +1119,7 @@ export default function SessionDetailPage() {
         </div>
 
         {/* Session Replay */}
-        <div className="bg-[var(--hud-surface-glass)] border border-[var(--hud-border)] backdrop-blur-md rounded-xl slide-up" style={{ animationDelay: '0.21s', animationFillMode: 'backwards' }}>
+        <div className="bg-[var(--hud-surface-glass)] border border-[var(--hud-border)] backdrop-blur-md rounded-xl slide-up" style={{ animationDelay: '0.21s', animationFillMode: 'both' }}>
           <div className="p-6 pb-0">
             <h3 className="font-semibold text-foreground text-lg">Session Replay</h3>
             <p className="text-sm text-muted-foreground mt-1">Replay recent waveform snapshots</p>
@@ -1175,7 +1175,7 @@ export default function SessionDetailPage() {
         </div>
 
         {/* Model Versions */}
-        <div className="bg-[var(--hud-surface-glass)] border border-[var(--hud-border)] backdrop-blur-md rounded-xl slide-up" style={{ animationDelay: '0.22s', animationFillMode: 'backwards' }}>
+        <div className="bg-[var(--hud-surface-glass)] border border-[var(--hud-border)] backdrop-blur-md rounded-xl slide-up" style={{ animationDelay: '0.22s', animationFillMode: 'both' }}>
           <div className="p-6 pb-0">
             <h3 className="font-semibold text-foreground text-lg">Model Versions Used</h3>
             <p className="text-sm text-muted-foreground mt-1">Traceability for model name and version</p>
@@ -1208,7 +1208,7 @@ export default function SessionDetailPage() {
         </div>
 
         {/* Clinical Notes */}
-        <div className="bg-[var(--hud-surface-glass)] border border-[var(--hud-border)] backdrop-blur-md rounded-xl slide-up" style={{ animationDelay: '0.25s', animationFillMode: 'backwards' }}>
+        <div className="bg-[var(--hud-surface-glass)] border border-[var(--hud-border)] backdrop-blur-md rounded-xl slide-up" style={{ animationDelay: '0.25s', animationFillMode: 'both' }}>
           <div className="p-6 pb-0">
             <h3 className="font-semibold text-foreground text-lg">Clinical Notes</h3>
             <p className="text-sm text-muted-foreground mt-1">Add observations or annotations for this session</p>
