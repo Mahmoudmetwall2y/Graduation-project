@@ -332,7 +332,7 @@ export default function SessionsPage() {
           </div>
         </GlassCard>
 
-        <div className="page-section slide-up" style={{ animationDelay: '0.05s', animationFillMode: 'backwards' }}>
+        <div className="page-section slide-up" style={{ animationDelay: '0.05s', animationFillMode: 'both' }}>
           <div className="section-header">
             <div>
               <h3 className="section-title">Saved Views</h3>
@@ -385,7 +385,7 @@ export default function SessionsPage() {
             No sessions match your filters.
           </div>
         ) : (
-          <div className="slide-up mt-6" style={{ animationDelay: '0.1s', animationFillMode: 'backwards' }}>
+          <div className="slide-up mt-6" style={{ animationDelay: '0.1s', animationFillMode: 'both' }}>
             <DataList
               title="Results"
               headers={['Session ID', 'Patient', 'Device', 'Date', 'Duration', 'Status', '']}

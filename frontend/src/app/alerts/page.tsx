@@ -123,7 +123,7 @@ export default function AlertsPage() {
             No alerts match your filters.
           </div>
         ) : (
-          <div className="slide-up mt-6" style={{ animationDelay: '0.1s', animationFillMode: 'backwards' }}>
+          <div className="slide-up mt-6" style={{ animationDelay: '0.1s', animationFillMode: 'both' }}>
             <DataList
               title="Recent Alerts"
               headers={['Alert', 'Severity', 'Time', 'Action']}

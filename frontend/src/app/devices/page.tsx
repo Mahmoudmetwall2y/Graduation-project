@@ -344,7 +344,7 @@ export default function DevicesPage() {
                 <div
                   key={device.id}
                   className="slide-up"
-                  style={{ animationDelay: `${i * 0.05}s`, animationFillMode: 'backwards' }}
+                  style={{ animationDelay: `${i * 0.05}s`, animationFillMode: 'both' }}
                 >
                   <GlassCard glowHover className="overflow-hidden flex flex-col h-full">
                     <div className="p-5">
