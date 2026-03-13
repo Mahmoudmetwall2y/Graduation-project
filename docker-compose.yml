@@ -6,8 +6,8 @@ services:
       dockerfile: Dockerfile
     container_name: asculticor-mosquitto
     ports:
-      - "1883:1883"      # MQTT
-      - "9001:9001"      # MQTT over WebSocket
+      - "127.0.0.1:1883:1883"      # MQTT — localhost only, not publicly accessible
+      - "9001:9001"      # MQTT over WebSocket (needed by browser clients)
     environment:
       - MQTT_USERNAME=${MQTT_USERNAME}
       - MQTT_PASSWORD=${MQTT_PASSWORD}
@@ -31,7 +31,7 @@ services:
       dockerfile: Dockerfile
     container_name: asculticor-inference
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"  # Internal only — not publicly accessible
     environment:
       # Supabase
       - SUPABASE_URL=${SUPABASE_URL:?SUPABASE_URL is required}
@@ -77,6 +77,7 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+      start_period: 15s
 
   # Frontend (Next.js)
   frontend:
@@ -98,7 +99,8 @@ services:
     networks:
       - asculticor-network
     depends_on:
-      - inference
+      mosquitto:
+        condition: service_healthy
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]

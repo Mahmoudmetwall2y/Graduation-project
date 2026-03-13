@@ -1,0 +1,26 @@
+# Mosquitto ACL — Access Control List
+# Docs: https://mosquitto.org/man/mosquitto-conf-5.html
+
+# ───────────────────────────────────
+# Inference service (admin account)
+# ───────────────────────────────────
+# The inference service user can subscribe to all asculticor topics
+user asculticor
+topic readwrite asculticor/#
+
+# ───────────────────────────────────
+# Per-device rules (pattern-based)
+# ───────────────────────────────────
+# When per-device MQTT users are provisioned (e.g., "device_<uuid>"),
+# uncomment the pattern lines below to restrict each device to its
+# own org-scoped topic tree.
+#
+# pattern readwrite asculticor/%u/#
+#
+# Until per-device users are configured, the shared "asculticor" user
+# above covers all devices.
+
+# ───────────────────────────────────
+# Deny everything else by default
+# ───────────────────────────────────
+# Mosquitto denies any topic not explicitly allowed above.

@@ -75,58 +75,8 @@ interface DailyActivity {
   predictions: number
 }
 
-// Generate ECG waveform data (demo)
-function generateEcgWaveform(count = 60) {
-  const data = []
-  for (let i = 0; i < count; i++) {
-    const t = i / 15
-    const cycle = t % 1
-    let value = 0
-    if (cycle >= 0.0 && cycle < 0.12) value = 0.15 * Math.sin(Math.PI * cycle / 0.12)
-    else if (cycle >= 0.16 && cycle < 0.20) value = -0.1
-    else if (cycle >= 0.20 && cycle < 0.24) value = 1.0 + (Math.random() - 0.5) * 0.1
-    else if (cycle >= 0.24 && cycle < 0.28) value = -0.15
-    else if (cycle >= 0.35 && cycle < 0.55) value = 0.3 * Math.sin(Math.PI * (cycle - 0.35) / 0.2)
-    else value = 0
-    value += (Math.random() - 0.5) * 0.02
-    data.push({ time: (i * 0.067).toFixed(2), amplitude: parseFloat(value.toFixed(3)) })
-  }
-  return data
-}
-
-// Generate PCG waveform data (demo)
-function generatePcgWaveform(count = 60) {
-  const data = []
-  for (let i = 0; i < count; i++) {
-    const t = i / 15
-    const cycle = t % 1
-    let value = 0
-    if (cycle >= 0.0 && cycle < 0.15) {
-      value = 0.8 * Math.sin(2 * Math.PI * cycle / 0.15) * Math.exp(-cycle * 10)
-    } else if (cycle >= 0.4 && cycle < 0.55) {
-      value = 0.6 * Math.sin(2 * Math.PI * (cycle - 0.4) / 0.15) * Math.exp(-(cycle - 0.4) * 12)
-    } else {
-      value = 0
-    }
-    value += (Math.random() - 0.5) * 0.05
-    data.push({ time: (i * 0.067).toFixed(2), amplitude: parseFloat(value.toFixed(3)) })
-  }
-  return data
-}
-
-function buildWaveformSeries(samples: number[], sampleRate: number, maxPoints = 100) {
-  if (!samples || samples.length === 0 || !sampleRate) return []
-  const step = Math.max(1, Math.ceil(samples.length / maxPoints))
-  const data = []
-  for (let i = 0; i < samples.length; i += step) {
-    const t = i / sampleRate
-    data.push({
-      time: t.toFixed(2),
-      amplitude: parseFloat(samples[i].toFixed(3)),
-    })
-  }
-  return data
-}
+// Waveform utilities — shared with session detail page
+import { generateEcgWaveform, generatePcgWaveform, buildWaveformSeries } from '../../lib/waveform'
 
 export default function Dashboard() {
   const [sessions, setSessions] = useState<Session[]>([])
@@ -581,9 +531,11 @@ export default function Dashboard() {
   const activePatientAge = latestPatient ? getPatientAge(latestPatient.dob) : "—"
   const activePatientSex = latestPatient ? (latestPatient.sex ? latestPatient.sex.charAt(0).toUpperCase() + latestPatient.sex.slice(1) : "Unknown") : "—"
 
-  // Fallbacks for when no active signal
-  const defaultEcg = generateEcgWaveform()
-  const defaultPcg = generatePcgWaveform()
+  // Fallbacks for when no active signal — track whether we're using demo data
+  const defaultEcg = generateEcgWaveform(60)
+  const defaultPcg = generatePcgWaveform(60)
+  const isEcgDemo = ecgData.length === 0
+  const isPcgDemo = pcgData.length === 0
 
   return (
     <div className="relative h-full overflow-hidden" style={{ backgroundColor: 'var(--hud-bg-base)' }}>
@@ -626,14 +578,24 @@ export default function Dashboard() {
             />
 
             <EcgGraphPanel
-              data={ecgData.length ? ecgData : defaultEcg}
-              liveLabel={ecgData.length ? `Live · ${lastUpdatedLabel.replace('Updated ', '')}` : lastUpdatedLabel}
+              data={isEcgDemo ? defaultEcg : ecgData}
+              liveLabel={isEcgDemo ? 'Simulated' : `Live · ${lastUpdatedLabel.replace('Updated ', '')}`}
             />
+            {isEcgDemo && (
+              <div className="-mt-2 ml-1 mb-1">
+                <span className="inline-flex items-center gap-1 text-[9px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 font-mono">⚠ Demo Data</span>
+              </div>
+            )}
 
             <PcgGraphPanel
-              data={pcgData.length ? pcgData : defaultPcg}
-              liveLabel={pcgData.length ? `Live · ${lastUpdatedLabel.replace('Updated ', '')}` : lastUpdatedLabel}
+              data={isPcgDemo ? defaultPcg : pcgData}
+              liveLabel={isPcgDemo ? 'Simulated' : `Live · ${lastUpdatedLabel.replace('Updated ', '')}`}
             />
+            {isPcgDemo && (
+              <div className="-mt-2 ml-1 mb-1">
+                <span className="inline-flex items-center gap-1 text-[9px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 font-mono">⚠ Demo Data</span>
+              </div>
+            )}
 
             {/* System Status panel */}
             <GlassCard className="p-4">

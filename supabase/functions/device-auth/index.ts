@@ -74,8 +74,10 @@ serve(async (req) => {
       .update({ last_seen_at: new Date().toISOString() })
       .eq('id', device_id)
 
-    // Generate short-lived token (simplified - in production use JWT)
-    const token = `device_${device_id}_${Date.now()}`
+    // Generate cryptographically secure short-lived token
+    const rawBytes = new Uint8Array(32)
+    crypto.getRandomValues(rawBytes)
+    const token = Array.from(rawBytes).map(b => b.toString(16).padStart(2, '0')).join('')
     const expiresIn = 3600 // 1 hour
 
     // Insert audit log
@@ -108,7 +110,7 @@ serve(async (req) => {
   } catch (error) {
     console.error('Error:', error)
     return new Response(
-      JSON.stringify({ error: 'Internal server error', details: error.message }),
+      JSON.stringify({ error: 'Internal server error' }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
   }

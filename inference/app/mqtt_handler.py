@@ -73,8 +73,11 @@ class SessionBuffer:
         
         logger.info(f"Created buffer for {modality} session {session_id}")
     
+    # Maximum buffer size: 50 MB (prevents unbounded memory growth)
+    MAX_BUFFER_BYTES = 50 * 1024 * 1024
+
     def add_chunk(self, data: bytes):
-        """Add binary chunk to buffer."""
+        """Add binary chunk to buffer, dropping oldest chunks if max size exceeded."""
         self.chunks.append(data)
         self.total_bytes += len(data)
         self.last_chunk_at = datetime.now(timezone.utc)
@@ -83,6 +86,17 @@ class SessionBuffer:
         bytes_per_sample = 2 if 'int16' in self.format or 's16' in self.format else 1
         new_samples = len(data) // bytes_per_sample
         self.total_samples += new_samples
+        
+        # Enforce max buffer size — drop oldest chunks (FIFO)
+        while self.total_bytes > self.MAX_BUFFER_BYTES and len(self.chunks) > 1:
+            dropped = self.chunks.pop(0)
+            self.total_bytes -= len(dropped)
+            dropped_samples = len(dropped) // bytes_per_sample
+            self.total_samples = max(0, self.total_samples - dropped_samples)
+            logger.warning(
+                f"Buffer {self.session_id}/{self.modality} exceeded {self.MAX_BUFFER_BYTES // (1024*1024)}MB, "
+                f"dropped oldest chunk ({len(dropped)} bytes)"
+            )
         
         # Invalidate cached metrics when significant new data arrives
         if self.total_samples - self._last_metrics_samples > self.sample_rate:
@@ -286,9 +300,40 @@ class MQTTHandler:
             logger.error(f"MQTT connection failed with code {rc}")
     
     def _on_disconnect(self, client, userdata, rc):
-        """Callback for MQTT disconnection."""
+        """Callback for MQTT disconnection — auto-reconnect with exponential backoff."""
         if rc != 0:
-            logger.warning(f"Unexpected MQTT disconnection (code {rc})")
+            logger.warning(f"Unexpected MQTT disconnection (code {rc}), attempting reconnect...")
+            self._reconnect_with_backoff()
+        else:
+            logger.info("MQTT disconnected cleanly")
+
+    def _reconnect_with_backoff(self):
+        """Attempt to reconnect to the MQTT broker with exponential backoff."""
+        import time
+        max_retries = 10
+        base_delay = 1  # seconds
+        max_delay = 60  # seconds
+
+        for attempt in range(1, max_retries + 1):
+            if not self.running:
+                logger.info("MQTT handler stopped, aborting reconnect")
+                return
+
+            delay = min(base_delay * (2 ** (attempt - 1)), max_delay)
+            logger.info(f"MQTT reconnect attempt {attempt}/{max_retries} in {delay}s...")
+            time.sleep(delay)
+
+            try:
+                self.client.reconnect()
+                logger.info(f"MQTT reconnected successfully on attempt {attempt}")
+                return
+            except Exception as e:
+                logger.error(f"MQTT reconnect attempt {attempt} failed: {e}")
+
+        logger.critical(
+            f"MQTT reconnect failed after {max_retries} attempts. "
+            "Service is running but not receiving data. Manual restart required."
+        )
     
     def _on_message(self, client, userdata, msg):
         """Callback for MQTT message — runs in the paho-mqtt thread."""
@@ -562,18 +607,22 @@ class MQTTHandler:
             
             logger.info(f"PCG inference completed for session {session_id}")
 
-            # Check if this was the last modality, mark session done
+            # Mark session done atomically — only if no other modality is still buffered.
+            # Use conditional update: only set 'done' if current status is 'processing'.
+            # This prevents a race where both PCG and ECG handlers try to mark done simultaneously.
             ecg_buffer_key = f"{session_id}_ecg"
             if ecg_buffer_key not in self.buffers:
-                done_ok = await loop.run_in_executor(
+                # Atomic conditional update: only transitions from 'processing' → 'done'
+                done_result = await loop.run_in_executor(
                     _executor,
-                    self.supabase.update_session_status,
+                    self.supabase.conditional_update_session_status,
                     session_id,
+                    'processing',  # only if current status is this
                     'done',
                     datetime.now(timezone.utc).isoformat()
                 )
-                if not done_ok:
-                    raise RuntimeError(f"Failed to mark session {session_id} as done")
+                if done_result:
+                    logger.info(f"Session {session_id} marked as done (PCG was last modality)")
             
         except Exception as e:
             logger.error(f"Error processing PCG: {e}")
@@ -673,19 +722,20 @@ class MQTTHandler:
             
             logger.info(f"ECG inference completed for session {session_id}")
             
-            # Check if this was the last modality, mark session done
+            # Mark session done atomically — only if no other modality is still buffered.
             pcg_buffer_key = f"{session_id}_pcg"
             if pcg_buffer_key not in self.buffers:
-                # PCG already done or not in session
-                done_ok = await loop.run_in_executor(
+                # Atomic conditional update: only transitions from 'processing' → 'done'
+                done_result = await loop.run_in_executor(
                     _executor,
-                    self.supabase.update_session_status,
+                    self.supabase.conditional_update_session_status,
                     session_id,
+                    'processing',  # only if current status is this
                     'done',
                     datetime.now(timezone.utc).isoformat()
                 )
-                if not done_ok:
-                    raise RuntimeError(f"Failed to mark session {session_id} as done")
+                if done_result:
+                    logger.info(f"Session {session_id} marked as done (ECG was last modality)")
             
         except Exception as e:
             logger.error(f"Error processing ECG: {e}")

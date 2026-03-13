@@ -82,8 +82,8 @@ app = FastAPI(
     MQTT authentication is handled via broker credentials configured in environment variables.
     """,
     version="1.0.0",
-    docs_url="/docs" if os.getenv("ENABLE_DOCS", "true").lower() == "true" else None,
-    redoc_url="/redoc" if os.getenv("ENABLE_DOCS", "true").lower() == "true" else None,
+    docs_url="/docs" if os.getenv("ENABLE_DOCS", "false").lower() == "true" else None,
+    redoc_url="/redoc" if os.getenv("ENABLE_DOCS", "false").lower() == "true" else None,
     lifespan=lifespan
 )
 
