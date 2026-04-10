@@ -98,41 +98,82 @@ class PCGPreprocessor:
     
     def _extract_features(self, audio: np.ndarray) -> Dict[str, np.ndarray]:
         """
-        Extract acoustic features:
-        - MFCC (13 coefficients)
-        - Spectral centroid
-        - Spectral rolloff
-        - Spectral bandwidth
-        - Zero crossing rate
+        Extract acoustic features matching training pipeline (558 features):
+        - MFCC (40)
+        - Chroma (12)
+        - Mel Spectrogram (128)
+        - Spectral Centroid, Bandwidth, Rolloff, ZCR, RMS
         """
         features = {}
+        target_len = self.target_samples
+        n_fft = 2048
+        hop_length = 512
         
-        # MFCCs
-        mfccs = librosa.feature.mfcc(
-            y=audio, 
-            sr=self.sample_rate, 
-            n_mfcc=self.n_mfcc
-        )
-        features['mfcc_mean'] = np.mean(mfccs, axis=1)
-        features['mfcc_std'] = np.std(mfccs, axis=1)
+        # 1. MFCCs (40)
+        mfcc = librosa.feature.mfcc(y=audio, sr=self.sample_rate, n_mfcc=40, n_fft=n_fft, hop_length=hop_length)
+        features['mfcc_mean'] = np.mean(mfcc, axis=1)
+        features['mfcc_std'] = np.std(mfcc, axis=1)
         
-        # Spectral features
-        spectral_centroids = librosa.feature.spectral_centroid(y=audio, sr=self.sample_rate)[0]
-        features['spectral_centroid_mean'] = np.mean(spectral_centroids)
-        features['spectral_centroid_std'] = np.std(spectral_centroids)
+        # 2. Delta MFCCs
+        delta_mfcc = librosa.feature.delta(mfcc)
+        features['delta_mfcc_mean'] = np.mean(delta_mfcc, axis=1)
+        features['delta_mfcc_std'] = np.std(delta_mfcc, axis=1)
         
-        spectral_rolloff = librosa.feature.spectral_rolloff(y=audio, sr=self.sample_rate)[0]
-        features['spectral_rolloff_mean'] = np.mean(spectral_rolloff)
-        features['spectral_rolloff_std'] = np.std(spectral_rolloff)
+        # 3. Delta-Delta MFCCs
+        delta2_mfcc = librosa.feature.delta(mfcc, order=2)
+        features['delta2_mfcc_mean'] = np.mean(delta2_mfcc, axis=1)
+        features['delta2_mfcc_std'] = np.std(delta2_mfcc, axis=1)
         
-        spectral_bandwidth = librosa.feature.spectral_bandwidth(y=audio, sr=self.sample_rate)[0]
-        features['spectral_bandwidth_mean'] = np.mean(spectral_bandwidth)
-        features['spectral_bandwidth_std'] = np.std(spectral_bandwidth)
+        # 4. Spectral Centroid
+        sc = librosa.feature.spectral_centroid(y=audio, sr=self.sample_rate)
+        features['sc_mean'] = np.array([np.mean(sc)])
+        features['sc_std'] = np.array([np.std(sc)])
         
-        # Zero crossing rate
-        zcr = librosa.feature.zero_crossing_rate(audio)[0]
-        features['zcr_mean'] = np.mean(zcr)
-        features['zcr_std'] = np.std(zcr)
+        # 5. Spectral Rolloff
+        sr_ = librosa.feature.spectral_rolloff(y=audio, sr=self.sample_rate)
+        features['sr_mean'] = np.array([np.mean(sr_)])
+        features['sr_std'] = np.array([np.std(sr_)])
+        
+        # 6. Spectral Bandwidth
+        sb = librosa.feature.spectral_bandwidth(y=audio, sr=self.sample_rate)
+        features['sb_mean'] = np.array([np.mean(sb)])
+        features['sb_std'] = np.array([np.std(sb)])
+        
+        # 7. Zero-Crossing Rate
+        zcr = librosa.feature.zero_crossing_rate(audio)
+        features['zcr_mean'] = np.array([np.mean(zcr)])
+        features['zcr_std'] = np.array([np.std(zcr)])
+        
+        # 8. Chroma Features (12)
+        chroma = librosa.feature.chroma_stft(y=audio, sr=self.sample_rate, n_fft=n_fft, hop_length=hop_length)
+        features['chroma_mean'] = np.mean(chroma, axis=1)
+        features['chroma_std'] = np.std(chroma, axis=1)
+        
+        # 9. Mel Spectrogram statistics (128)
+        mel = librosa.feature.melspectrogram(y=audio, sr=self.sample_rate, n_fft=n_fft, hop_length=hop_length, n_mels=128)
+        mel_db = librosa.power_to_db(mel, ref=np.max)
+        features['mel_mean'] = np.mean(mel_db, axis=1)
+        features['mel_std'] = np.std(mel_db, axis=1)
+        
+        # 10. RMS Energy
+        rms = librosa.feature.rms(y=audio)
+        features['rms_mean'] = np.array([np.mean(rms)])
+        features['rms_std'] = np.array([np.std(rms)])
+        
+        # 11. Spectral Contrast
+        contrast = librosa.feature.spectral_contrast(y=audio, sr=self.sample_rate, n_fft=n_fft, hop_length=hop_length)
+        features['contrast_mean'] = np.mean(contrast, axis=1)
+        features['contrast_std'] = np.std(contrast, axis=1)
+
+        # 12. Spectral Flatness
+        flatness = librosa.feature.spectral_flatness(y=audio)
+        features['flatness_mean'] = np.array([np.mean(flatness)])
+        features['flatness_std'] = np.array([np.std(flatness)])
+
+        # 13. Tonnetz
+        tonnetz = librosa.feature.tonnetz(y=librosa.effects.harmonic(audio), sr=self.sample_rate)
+        features['tonnetz_mean'] = np.mean(tonnetz, axis=1)
+        features['tonnetz_std'] = np.std(tonnetz, axis=1)
         
         return features
     
@@ -140,21 +181,33 @@ class PCGPreprocessor:
         """Convert feature dictionary to flat array for model input."""
         flat = []
         
-        # MFCCs (26 features: 13 means + 13 stds)
+        # Ensure order matches validate_models.py exactly
         flat.extend(features['mfcc_mean'])
         flat.extend(features['mfcc_std'])
-        
-        # Spectral features (6 features)
-        flat.append(features['spectral_centroid_mean'])
-        flat.append(features['spectral_centroid_std'])
-        flat.append(features['spectral_rolloff_mean'])
-        flat.append(features['spectral_rolloff_std'])
-        flat.append(features['spectral_bandwidth_mean'])
-        flat.append(features['spectral_bandwidth_std'])
-        
-        # ZCR (2 features)
-        flat.append(features['zcr_mean'])
-        flat.append(features['zcr_std'])
+        flat.extend(features['delta_mfcc_mean'])
+        flat.extend(features['delta_mfcc_std'])
+        flat.extend(features['delta2_mfcc_mean'])
+        flat.extend(features['delta2_mfcc_std'])
+        flat.extend(features['sc_mean'])
+        flat.extend(features['sc_std'])
+        flat.extend(features['sr_mean'])
+        flat.extend(features['sr_std'])
+        flat.extend(features['sb_mean'])
+        flat.extend(features['sb_std'])
+        flat.extend(features['zcr_mean'])
+        flat.extend(features['zcr_std'])
+        flat.extend(features['chroma_mean'])
+        flat.extend(features['chroma_std'])
+        flat.extend(features['mel_mean'])
+        flat.extend(features['mel_std'])
+        flat.extend(features['rms_mean'])
+        flat.extend(features['rms_std'])
+        flat.extend(features['contrast_mean'])
+        flat.extend(features['contrast_std'])
+        flat.extend(features['flatness_mean'])
+        flat.extend(features['flatness_std'])
+        flat.extend(features['tonnetz_mean'])
+        flat.extend(features['tonnetz_std'])
         
         return np.array(flat)
 
@@ -163,6 +216,8 @@ class PCGSeverityPreprocessor:
     """
     Preprocessing for CNN-based murmur severity model.
     Generates mel-spectrogram or MFCC matrix.
+    The output time axis is fixed to `target_time_frames` (default 216)
+    to match the trained CNN's expected input shape (128, 216, 1).
     """
     
     def __init__(
@@ -171,22 +226,24 @@ class PCGSeverityPreprocessor:
         n_mels: int = 128,
         n_fft: int = 2048,
         hop_length: int = 512,
+        target_time_frames: int = 216,
         use_mel: bool = True
     ):
         self.sample_rate = sample_rate
         self.n_mels = n_mels
         self.n_fft = n_fft
         self.hop_length = hop_length
+        self.target_time_frames = target_time_frames
         self.use_mel = use_mel
         
-        logger.info(f"PCGSeverityPreprocessor initialized: mel={use_mel}, n_mels={n_mels}")
+        logger.info(f"PCGSeverityPreprocessor initialized: mel={use_mel}, n_mels={n_mels}, target_frames={target_time_frames}")
     
     def process(self, audio: np.ndarray, original_sr: Optional[int] = None) -> np.ndarray:
         """
         Process PCG audio to spectrogram for CNN.
         
         Returns:
-            2D array (time x frequency)
+            2D array of shape (n_mels, target_time_frames)
         """
         try:
             # Resample if needed
@@ -217,6 +274,14 @@ class PCGSeverityPreprocessor:
                     hop_length=self.hop_length
                 )
             
+            # Pad or truncate time axis to match trained CNN input shape
+            n_time = spectrogram.shape[1]
+            if n_time < self.target_time_frames:
+                pad_width = self.target_time_frames - n_time
+                spectrogram = np.pad(spectrogram, ((0, 0), (0, pad_width)), mode='constant', constant_values=spectrogram.min())
+            elif n_time > self.target_time_frames:
+                spectrogram = spectrogram[:, :self.target_time_frames]
+            
             logger.info(f"Severity preprocessing complete: shape={spectrogram.shape}")
             return spectrogram
             
@@ -236,12 +301,13 @@ class PCGSeverityPreprocessor:
 class ECGPreprocessor:
     """
     Deterministic ECG preprocessing for BiLSTM.
+    Sample rate and window size match the MIT-BIH training configuration.
     """
     
     def __init__(
         self,
-        sample_rate: int = 500,
-        window_size: int = 500,
+        sample_rate: int = 360,   # MIT-BIH native rate (matches training)
+        window_size: int = 300,   # matches WINDOW_SIZE in training script
         bandpass_low: float = 0.5,
         bandpass_high: float = 50.0
     ):

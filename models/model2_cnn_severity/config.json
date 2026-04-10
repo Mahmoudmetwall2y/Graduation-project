@@ -1,0 +1,1 @@
+{"n_classes": {"systolic_timing": 5, "systolic_shape": 5, "systolic_grading": 4, "systolic_pitch": 4, "systolic_quality": 4, "murmur_locations": 18, "murmur_present": 3}, "label_keys": ["systolic_timing", "systolic_shape", "systolic_grading", "systolic_pitch", "systolic_quality", "murmur_locations", "murmur_present"]}

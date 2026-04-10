@@ -6,8 +6,8 @@ services:
       dockerfile: Dockerfile
     container_name: asculticor-mosquitto
     ports:
-      - "1883:1883"      # MQTT
-      - "9001:9001"      # MQTT over WebSocket
+      - "127.0.0.1:1883:1883"      # MQTT — localhost only, not publicly accessible
+      - "9001:9001"      # MQTT over WebSocket (needed by browser clients)
     environment:
       - MQTT_USERNAME=${MQTT_USERNAME}
       - MQTT_PASSWORD=${MQTT_PASSWORD}
@@ -24,6 +24,26 @@ services:
       retries: 3
       start_period: 10s
 
+  # NGINX Secure Reverse Proxy
+  nginx:
+    build:
+      context: ./nginx
+      dockerfile: Dockerfile
+    container_name: asculticor-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    networks:
+      - asculticor-network
+    depends_on:
+      mosquitto:
+        condition: service_healthy
+      frontend:
+        condition: service_started
+      inference:
+        condition: service_started
+    restart: unless-stopped
+
   # Inference/Ingress Service (Python FastAPI)
   inference:
     build:
@@ -31,7 +51,7 @@ services:
       dockerfile: Dockerfile
     container_name: asculticor-inference
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"  # Internal only — not publicly accessible
     environment:
       # Supabase
       - SUPABASE_URL=${SUPABASE_URL:?SUPABASE_URL is required}
@@ -63,8 +83,9 @@ services:
       # Logging
       - LOG_LEVEL=INFO
       - INFERENCE_INTERNAL_TOKEN=${INFERENCE_INTERNAL_TOKEN:?INFERENCE_INTERNAL_TOKEN is required}
+      - MODELS_DIR=/app/models
     volumes:
-      - ./inference/models:/app/models:ro
+      - ./models:/app/models:ro
       - inference_cache:/app/cache
     networks:
       - asculticor-network
@@ -77,6 +98,7 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+      start_period: 15s
 
   # Frontend (Next.js)
   frontend:
@@ -86,19 +108,20 @@ services:
       args:
         - NEXT_PUBLIC_SUPABASE_URL=${SUPABASE_URL:?SUPABASE_URL is required}
         - NEXT_PUBLIC_SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY:?SUPABASE_ANON_KEY is required}
-        - NEXT_PUBLIC_MQTT_WS_URL=ws://localhost:9001
+        - NEXT_PUBLIC_MQTT_WS_URL=${NEXT_PUBLIC_MQTT_WS_URL:-wss://localhost/mqtt}
     container_name: asculticor-frontend
     ports:
       - "3000:3000"
     environment:
       - NEXT_PUBLIC_SUPABASE_URL=${SUPABASE_URL:?SUPABASE_URL is required}
       - NEXT_PUBLIC_SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY:?SUPABASE_ANON_KEY is required}
-      - NEXT_PUBLIC_MQTT_WS_URL=ws://localhost:9001
+      - NEXT_PUBLIC_MQTT_WS_URL=${NEXT_PUBLIC_MQTT_WS_URL:-wss://localhost/mqtt}
       - NODE_ENV=production
     networks:
       - asculticor-network
     depends_on:
-      - inference
+      mosquitto:
+        condition: service_healthy
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]

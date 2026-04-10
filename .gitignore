@@ -82,3 +82,4 @@ minikube-*
 
 # System files
 nul
+datasets/

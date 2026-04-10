@@ -1,0 +1,15 @@
+{
+  "n_classes": 7,
+  "classes": [
+    "/",
+    "A",
+    "F",
+    "L",
+    "N",
+    "R",
+    "V"
+  ],
+  "window_size": 300,
+  "sample_rate": 360,
+  "model_type": "BiLSTM"
+}

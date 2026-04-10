@@ -82,8 +82,8 @@ app = FastAPI(
     MQTT authentication is handled via broker credentials configured in environment variables.
     """,
     version="1.0.0",
-    docs_url="/docs" if os.getenv("ENABLE_DOCS", "true").lower() == "true" else None,
-    redoc_url="/redoc" if os.getenv("ENABLE_DOCS", "true").lower() == "true" else None,
+    docs_url="/docs" if os.getenv("ENABLE_DOCS", "false").lower() == "true" else None,
+    redoc_url="/redoc" if os.getenv("ENABLE_DOCS", "false").lower() == "true" else None,
     lifespan=lifespan
 )
 
@@ -112,11 +112,18 @@ app.add_middleware(
 # MODELS
 # ==========================================================================
 
+class ModelDetail(BaseModel):
+    loaded: bool
+    error: Optional[str] = None
+
 class HealthResponse(BaseModel):
     status: str
     mqtt_connected: bool
     demo_mode: bool
     active_sessions: int
+    models_loaded: int
+    models_total: int
+    models: Dict[str, ModelDetail]
 
 
 class ConfigResponse(BaseModel):
@@ -165,7 +172,7 @@ async def root():
 async def health_check(request: Request):
     """
     Health check endpoint.
-    Returns service status and MQTT connection state.
+    Returns service status, MQTT connection state, and per-model availability.
     Rate limited: 60 requests per minute per IP.
     """
     global mqtt_handler
@@ -175,13 +182,29 @@ async def health_check(request: Request):
     
     mqtt_connected = mqtt_handler.client.is_connected()
     active_sessions = len(mqtt_handler.buffers)
-    demo_mode = mqtt_handler.inference_engine.demo_mode_active
+    engine = mqtt_handler.inference_engine
+    model_info = engine.get_model_status()
+    
+    # Determine overall status
+    all_loaded = model_info['models_loaded'] == model_info['models_total']
+    if mqtt_connected and all_loaded:
+        status = "healthy"
+    elif mqtt_connected or model_info['models_loaded'] > 0:
+        status = "degraded"
+    else:
+        status = "unhealthy"
     
     return HealthResponse(
-        status="healthy" if mqtt_connected else "degraded",
+        status=status,
         mqtt_connected=mqtt_connected,
-        demo_mode=demo_mode,
-        active_sessions=active_sessions
+        demo_mode=engine.demo_mode_active,
+        active_sessions=active_sessions,
+        models_loaded=model_info['models_loaded'],
+        models_total=model_info['models_total'],
+        models={
+            name: ModelDetail(loaded=detail['loaded'], error=detail['error'])
+            for name, detail in model_info['details'].items()
+        },
     )
 
 
@@ -205,7 +228,7 @@ async def get_config(request: Request):
         pcg_sample_rate=int(os.getenv("PCG_SAMPLE_RATE", 22050)),
         pcg_target_duration=float(os.getenv("PCG_TARGET_DURATION", 10)),
         pcg_max_duration=float(os.getenv("PCG_MAX_DURATION", 15)),
-        ecg_sample_rate=int(os.getenv("ECG_SAMPLE_RATE", 500)),
+        ecg_sample_rate=int(os.getenv("ECG_SAMPLE_RATE", 360)),
         ecg_window_size=int(os.getenv("ECG_WINDOW_SIZE", 500)),
         ecg_max_duration=float(os.getenv("ECG_MAX_DURATION", 60)),
         stream_timeout_sec=int(os.getenv("STREAM_TIMEOUT_SEC", 10)),

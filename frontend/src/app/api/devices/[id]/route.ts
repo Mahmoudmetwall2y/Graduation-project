@@ -95,7 +95,7 @@ export async function GET(
   } catch (error: any) {
     console.error('Error fetching device:', error)
     return NextResponse.json(
-      { error: error.message || 'Failed to fetch device' },
+      { error: 'Failed to fetch device' },
       { status: 500 }
     )
   }
@@ -167,7 +167,7 @@ export async function PATCH(
     if (error) throw error
 
     // Create audit log
-    await supabase
+    const { error: auditError } = await supabase
       .from('audit_logs')
       .insert({
         org_id: profile.org_id,
@@ -177,12 +177,13 @@ export async function PATCH(
         entity_id: deviceId,
         metadata: updates
       })
+    if (auditError) console.error('Audit log failed (device_updated):', auditError)
 
     return NextResponse.json({ device })
   } catch (error: any) {
     console.error('Error updating device:', error)
     return NextResponse.json(
-      { error: error.message || 'Failed to update device' },
+      { error: 'Failed to update device' },
       { status: 500 }
     )
   }
@@ -250,7 +251,7 @@ export async function DELETE(
     }
 
     // Create audit log
-    await supabase
+    const { error: auditError } = await supabase
       .from('audit_logs')
       .insert({
         org_id: profile.org_id,
@@ -259,12 +260,13 @@ export async function DELETE(
         entity_type: 'device',
         entity_id: deviceId
       })
+    if (auditError) console.error('Audit log failed (device_deleted):', auditError)
 
     return NextResponse.json({ success: true })
   } catch (error: any) {
     console.error('Error deleting device:', error)
     return NextResponse.json(
-      { error: error.message || 'Failed to delete device' },
+      { error: 'Failed to delete device' },
       { status: 500 }
     )
   }

@@ -57,6 +57,47 @@ class SupabaseClient:
         except Exception as e:
             logger.error(f"Error updating session status: {e}")
             return False
+
+    def conditional_update_session_status(
+        self,
+        session_id: str,
+        expected_status: str,
+        new_status: str,
+        ended_at: Optional[str] = None
+    ) -> bool:
+        """Atomically update session status only if current status matches expected_status.
+        
+        This prevents race conditions where multiple handlers try to transition
+        the same session simultaneously. Returns True if the update was applied.
+        """
+        try:
+            update_data = {"status": new_status}
+            if ended_at:
+                update_data["ended_at"] = ended_at
+
+            result = (
+                self.client.table("sessions")
+                .update(update_data)
+                .eq("id", session_id)
+                .eq("status", expected_status)  # Only update if status matches
+                .execute()
+            )
+            
+            # Check if any rows were actually updated
+            if result.data and len(result.data) > 0:
+                logger.info(
+                    f"Session {session_id} status: {expected_status} → {new_status}"
+                )
+                return True
+            else:
+                logger.debug(
+                    f"Session {session_id} status was not '{expected_status}', "
+                    f"skipping transition to '{new_status}'"
+                )
+                return False
+        except Exception as e:
+            logger.error(f"Error in conditional status update: {e}")
+            return False
     
     def get_stale_sessions(self, max_duration_minutes: int) -> List[Dict[str, Any]]:
         """Get sessions that have been in streaming/processing state for too long."""
@@ -160,19 +201,24 @@ class SupabaseClient:
         preprocessing_version: str,
         severity_data: Dict[str, Any]
     ) -> Optional[str]:
-        """Create murmur severity entry."""
+        """Create murmur severity entry.
+        
+        The severity CNN outputs keys like systolic_timing, systolic_shape, etc.
+        Map them to the DB columns (location_json, timing_json, shape_json, etc.).
+        Missing keys are stored as empty dicts.
+        """
         try:
             response = self.client.table("murmur_severity").insert({
                 "org_id": org_id,
                 "session_id": session_id,
                 "model_version": model_version,
                 "preprocessing_version": preprocessing_version,
-                "location_json": severity_data['location'],
-                "timing_json": severity_data['timing'],
-                "shape_json": severity_data['shape'],
-                "grading_json": severity_data['grading'],
-                "pitch_json": severity_data['pitch'],
-                "quality_json": severity_data['quality']
+                "location_json": severity_data.get('murmur_locations', severity_data.get('location', {})),
+                "timing_json": severity_data.get('systolic_timing', severity_data.get('timing', {})),
+                "shape_json": severity_data.get('systolic_shape', severity_data.get('shape', {})),
+                "grading_json": severity_data.get('systolic_grading', severity_data.get('grading', {})),
+                "pitch_json": severity_data.get('systolic_pitch', severity_data.get('pitch', {})),
+                "quality_json": severity_data.get('systolic_quality', severity_data.get('quality', {}))
             }).execute()
             
             severity_id = response.data[0]["id"]

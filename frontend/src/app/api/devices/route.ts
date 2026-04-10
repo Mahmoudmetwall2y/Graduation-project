@@ -47,7 +47,7 @@ export async function GET(request: Request) {
   } catch (error: any) {
     console.error('Error fetching devices:', error)
     return NextResponse.json(
-      { error: error.message || 'Failed to fetch devices' },
+      { error: 'Failed to fetch devices' },
       { status: 500 }
     )
   }
@@ -127,7 +127,7 @@ export async function POST(request: Request) {
     if (deviceError) throw deviceError
 
     // Create audit log
-    await supabase
+    const { error: auditError } = await supabase
       .from('audit_logs')
       .insert({
         org_id: profile.org_id,
@@ -137,6 +137,7 @@ export async function POST(request: Request) {
         entity_id: deviceId,
         metadata: { device_name, device_type }
       })
+    if (auditError) console.error('Audit log failed (device_created):', auditError)
 
     return NextResponse.json({
       device,
@@ -151,7 +152,7 @@ export async function POST(request: Request) {
   } catch (error: any) {
     console.error('Error creating device:', error)
     return NextResponse.json(
-      { error: error.message || 'Failed to create device' },
+      { error: 'Failed to create device' },
       { status: 500 }
     )
   }

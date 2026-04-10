@@ -88,6 +88,15 @@ async function queueReport(request: Request) {
       )
     }
 
+    // Validate UUID format
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+    if (!uuidRegex.test(session_id) || !uuidRegex.test(device_id)) {
+      return NextResponse.json(
+        { error: 'Invalid session_id or device_id format' },
+        { status: 400 }
+      )
+    }
+
     // Get current user
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) {
@@ -206,7 +215,7 @@ async function queueReport(request: Request) {
   } catch (error: any) {
     console.error('Error queueing LLM report:', error)
     return NextResponse.json(
-      { error: error.message || 'Failed to queue report' },
+      { error: 'Failed to queue report' },
       { status: 500 }
     )
   }
@@ -224,7 +233,7 @@ async function processPendingReports(request: Request) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const supabaseUrl = process.env.SUPABASE_URL
+    const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL
     const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY
     if (!supabaseUrl || !serviceRoleKey) {
       return NextResponse.json({ error: 'Supabase service credentials are missing' }, { status: 500 })
@@ -237,7 +246,7 @@ async function processPendingReports(request: Request) {
       .select('id, session_id, device_id, retry_count, max_retries, next_retry_at')
       .eq('status', 'pending')
       .order('created_at', { ascending: true })
-      .limit(20)
+      .limit(3)
 
     if (pendingError) throw pendingError
 
@@ -327,7 +336,7 @@ async function processPendingReports(request: Request) {
   } catch (error: any) {
     console.error('Error processing pending reports:', error)
     return NextResponse.json(
-      { error: error.message || 'Failed to process pending reports' },
+      { error: 'Failed to process pending reports' },
       { status: 500 }
     )
   }
@@ -391,7 +400,7 @@ export async function GET(request: Request) {
   } catch (error: any) {
     console.error('Error fetching LLM reports:', error)
     return NextResponse.json(
-      { error: error.message || 'Failed to fetch reports' },
+      { error: 'Failed to fetch reports' },
       { status: 500 }
     )
   }
@@ -622,7 +631,7 @@ async function getQueueStats(request: Request) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  const supabaseUrl = process.env.SUPABASE_URL
+  const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY
   if (!supabaseUrl || !serviceRoleKey) {
     return NextResponse.json({ error: 'Supabase service credentials are missing' }, { status: 500 })
