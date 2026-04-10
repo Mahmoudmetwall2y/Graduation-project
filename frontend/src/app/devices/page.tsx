@@ -1,7 +1,6 @@
 'use client'
 
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { useMQTT } from '../hooks/useMQTT'
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs'
 import Link from 'next/link'
 import {
@@ -25,6 +24,31 @@ interface Device {
   sessions: { count: number }[]
 }
 
+interface DeviceCredentials {
+  device_id: string
+  device_secret: string
+  org_id: string
+  bootstrap_url: string
+  bootstrap_requires_host_override: boolean
+  provisioning_mode: 'bootstrap_recommended' | 'legacy_manual'
+  mqtt_host: string
+  mqtt_port: number
+  mqtt_tls: boolean
+  mqtt_lan_exposure_enabled: boolean
+  mqtt_user: string
+  mqtt_pass: string
+}
+
+function replaceLoopbackHost(url: string) {
+  try {
+    const parsed = new URL(url)
+    parsed.hostname = 'YOUR_SERVER_IP'
+    return parsed.toString()
+  } catch {
+    return 'http://YOUR_SERVER_IP/api/device/bootstrap'
+  }
+}
+
 export default function DevicesPage() {
   const [devices, setDevices] = useState<Device[]>([])
   const [currentUserRole, setCurrentUserRole] = useState<string>('operator')
@@ -37,7 +61,7 @@ export default function DevicesPage() {
   const [newDeviceType, setNewDeviceType] = useState('sonocardia-kit')
   const [creating, setCreating] = useState(false)
   const [deleting, setDeleting] = useState<string | null>(null)
-  const [credentials, setCredentials] = useState<any>(null)
+  const [credentials, setCredentials] = useState<DeviceCredentials | null>(null)
   const [copiedField, setCopiedField] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
@@ -50,9 +74,6 @@ export default function DevicesPage() {
   const supabase = createClientComponentClient()
   const { showToast } = useToast()
   const channelRef = useRef<any>(null)
-
-  // ── Real-time MQTT WebSocket ───────────────────────────────────────
-  const { connected: mqttConnected, predictions: mqttDevices } = useMQTT()
 
   const fetchDevices = useCallback(async () => {
     try {
@@ -81,17 +102,17 @@ export default function DevicesPage() {
       })
       .subscribe()
 
-    // Poll fallback — only when MQTT WebSocket is disconnected
-    const interval = mqttConnected ? null : setInterval(fetchDevices, 30000)
+    // Polling remains the supported fallback for device freshness.
+    const interval = setInterval(fetchDevices, 30000)
 
     return () => {
-      if (interval) clearInterval(interval)
+      clearInterval(interval)
       if (channelRef.current) {
         supabase.removeChannel(channelRef.current)
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fetchDevices, supabase, mqttConnected])
+  }, [fetchDevices, supabase])
 
   useEffect(() => {
     if (!showAddModal) return
@@ -229,6 +250,11 @@ export default function DevicesPage() {
   }
   const mqttUserProvisionValue = credentials?.mqtt_user || 'asculticor'
   const mqttPassProvisionValue = credentials?.mqtt_pass || 'YOUR_MQTT_PASSWORD'
+  const bootstrapProvisionValue = credentials?.bootstrap_url
+    ? credentials.bootstrap_requires_host_override
+      ? replaceLoopbackHost(credentials.bootstrap_url)
+      : credentials.bootstrap_url
+    : 'http://YOUR_SERVER_IP/api/device/bootstrap'
 
   if (loading) {
     return <div className="page-wrapper"><PageSkeleton /></div>
@@ -611,9 +637,8 @@ export default function DevicesPage() {
                     {[
                       { label: 'Device ID', value: credentials.device_id, key: 'device_id' },
                       { label: 'Organization ID', value: credentials.org_id, key: 'org_id' },
-                      { label: 'MQTT Username', value: mqttUserProvisionValue, key: 'mqtt_user' },
-                      { label: 'MQTT Password', value: mqttPassProvisionValue, key: 'mqtt_pass' },
-                      { label: 'Device Secret (Optional)', value: credentials.device_secret, key: 'secret' },
+                      { label: 'Bootstrap URL', value: bootstrapProvisionValue, key: 'bootstrap_url' },
+                      { label: 'Device Secret', value: credentials.device_secret, key: 'secret' },
                     ].map(item => (
                       <div key={item.label}>
                         <p className="text-xs font-semibold text-muted-foreground uppercase mb-1">{item.label}</p>
@@ -637,11 +662,27 @@ export default function DevicesPage() {
                     ))}
                   </div>
 
+                  <div className="rounded-xl border border-emerald-200 bg-emerald-50/80 p-4 mb-6 text-sm text-emerald-950 dark:border-emerald-900/60 dark:bg-emerald-950/20 dark:text-emerald-100">
+                    <p className="font-semibold">Recommended provisioning mode: bootstrap</p>
+                    <p className="mt-1 text-xs text-emerald-800 dark:text-emerald-200/80">
+                      The ESP32 only needs its device identity, secret, and the bootstrap URL. It will fetch the MQTT broker settings securely at boot.
+                    </p>
+                  </div>
+
+                  {!credentials.mqtt_lan_exposure_enabled && (
+                    <div className="rounded-xl border border-amber-200 bg-amber-50/80 p-4 mb-6 text-sm text-amber-950 dark:border-amber-900/60 dark:bg-amber-950/20 dark:text-amber-100">
+                      <p className="font-semibold">LAN device access is still disabled in Docker</p>
+                      <p className="mt-1 text-xs text-amber-800 dark:text-amber-200/80">
+                        Real ESP32 devices cannot reach the broker while <code>MQTT_BIND_ADDRESS</code> stays on <code>127.0.0.1</code>. Set it to <code>0.0.0.0</code> before starting Docker if the device will connect from another machine on your network.
+                      </p>
+                    </div>
+                  )}
+
                   {/* Serial Provisioning Instructions */}
                   <div className="rounded-xl bg-gray-900 dark:bg-gray-950 p-4 mb-6">
                     <div className="flex items-center gap-2 mb-3">
                       <Terminal className="w-4 h-4 text-emerald-400" />
-                      <p className="text-sm font-semibold text-white">Flash to ESP32 via Serial Monitor</p>
+                      <p className="text-sm font-semibold text-white">Bootstrap Provisioning via Serial Monitor</p>
                     </div>
                     <p className="text-xs text-gray-400 mb-3">
                       Open Arduino IDE Serial Monitor at 115200 baud and send these commands:
@@ -659,47 +700,23 @@ export default function DevicesPage() {
                       </div>
                       <div className="flex items-center gap-2">
                         <span className="text-gray-500 select-none">&gt;</span>
-                        <code className="text-emerald-400">SET org_id {credentials.org_id}</code>
+                        <code className="text-emerald-400">SET device_secret {credentials.device_secret}</code>
                         <button
-                          onClick={() => copyToClipboard(`SET org_id ${credentials.org_id}`, 'cmd_org')}
+                          onClick={() => copyToClipboard(`SET device_secret ${credentials.device_secret}`, 'cmd_secret')}
                           className="ml-auto shrink-0 p-1 rounded text-gray-500 hover:text-white transition-colors"
                         >
-                          {copiedField === 'cmd_org' ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                          {copiedField === 'cmd_secret' ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
                         </button>
                       </div>
                       <div className="flex items-center gap-2">
                         <span className="text-gray-500 select-none">&gt;</span>
-                        <code className="text-emerald-400">SET mqtt_user {mqttUserProvisionValue}</code>
+                        <code className="text-emerald-400">SET bootstrap_url {bootstrapProvisionValue}</code>
                         <button
-                          onClick={() => copyToClipboard(`SET mqtt_user ${mqttUserProvisionValue}`, 'cmd_mqtt_user')}
+                          onClick={() => copyToClipboard(`SET bootstrap_url ${bootstrapProvisionValue}`, 'cmd_bootstrap_url')}
                           className="ml-auto shrink-0 p-1 rounded text-gray-500 hover:text-white transition-colors"
                         >
-                          {copiedField === 'cmd_mqtt_user' ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                          {copiedField === 'cmd_bootstrap_url' ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
                         </button>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-gray-500 select-none">&gt;</span>
-                        <code className="text-emerald-400">SET mqtt_pass {mqttPassProvisionValue}</code>
-                        <button
-                          onClick={() => copyToClipboard(`SET mqtt_pass ${mqttPassProvisionValue}`, 'cmd_mqtt_pass')}
-                          className="ml-auto shrink-0 p-1 rounded text-gray-500 hover:text-white transition-colors"
-                        >
-                          {copiedField === 'cmd_mqtt_pass' ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
-                        </button>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-gray-500 select-none">&gt;</span>
-                        <code className="text-blue-400">SET device_secret {credentials.device_secret}</code>
-                        <button
-                          onClick={() => copyToClipboard(`SET device_secret ${credentials.device_secret}`, 'cmd_secret_optional')}
-                          className="ml-auto shrink-0 p-1 rounded text-gray-500 hover:text-white transition-colors"
-                        >
-                          {copiedField === 'cmd_secret_optional' ? <Check className="w-3 h-3 text-blue-400" /> : <Copy className="w-3 h-3" />}
-                        </button>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-gray-500 select-none">&gt;</span>
-                        <code className="text-yellow-400">SET mqtt_host YOUR_SERVER_IP</code>
                       </div>
                       <div className="flex items-center gap-2">
                         <span className="text-gray-500 select-none">&gt;</span>
@@ -716,13 +733,68 @@ export default function DevicesPage() {
                     </div>
                     <p className="text-xs text-gray-500 mt-3">
                       <span className="text-emerald-400">Green</span> = auto-filled from credentials &bull;
-                      <span className="text-yellow-400 ml-1">Yellow</span> = you need to fill in &bull;
-                      <span className="text-blue-400 ml-1">Blue</span> = optional
+                      <span className="text-yellow-400 ml-1">Yellow</span> = you need to fill in
                     </p>
                     <p className="text-xs text-gray-500 mt-1">
-                      <code className="text-blue-400">device_secret</code> is reserved for future per-device auth and is not required for the local Mosquitto broker setup.
+                      The firmware will fetch <code className="text-emerald-400">org_id</code>, MQTT host, port, username, and password from the bootstrap endpoint automatically.
                     </p>
+                    {credentials.bootstrap_requires_host_override && (
+                      <p className="text-xs text-amber-300 mt-1">
+                        Replace <code>YOUR_SERVER_IP</code> with the LAN IP or hostname of the machine running AscultiCor.
+                      </p>
+                    )}
                   </div>
+
+                  <details className="rounded-xl border border-border bg-background p-4 mb-6">
+                    <summary className="cursor-pointer text-sm font-semibold text-foreground">
+                      Legacy manual MQTT provisioning
+                    </summary>
+                    <p className="text-xs text-muted-foreground mt-3">
+                      Use this only if you intentionally want the ESP32 to store raw broker credentials locally.
+                    </p>
+                    <div className="bg-muted rounded-lg p-3 space-y-2 mt-3 font-mono text-xs">
+                      <div className="flex items-center gap-2">
+                        <span className="text-muted-foreground select-none">&gt;</span>
+                        <code className="text-foreground">SET org_id {credentials.org_id}</code>
+                        <button
+                          onClick={() => copyToClipboard(`SET org_id ${credentials.org_id}`, 'cmd_org')}
+                          className="ml-auto shrink-0 p-1 rounded text-muted-foreground hover:text-foreground transition-colors"
+                        >
+                          {copiedField === 'cmd_org' ? <Check className="w-3 h-3 text-emerald-500" /> : <Copy className="w-3 h-3" />}
+                        </button>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-muted-foreground select-none">&gt;</span>
+                        <code className="text-foreground">SET mqtt_host {credentials.mqtt_host}</code>
+                        <button
+                          onClick={() => copyToClipboard(`SET mqtt_host ${credentials.mqtt_host}`, 'cmd_mqtt_host')}
+                          className="ml-auto shrink-0 p-1 rounded text-muted-foreground hover:text-foreground transition-colors"
+                        >
+                          {copiedField === 'cmd_mqtt_host' ? <Check className="w-3 h-3 text-emerald-500" /> : <Copy className="w-3 h-3" />}
+                        </button>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-muted-foreground select-none">&gt;</span>
+                        <code className="text-foreground">SET mqtt_user {mqttUserProvisionValue}</code>
+                        <button
+                          onClick={() => copyToClipboard(`SET mqtt_user ${mqttUserProvisionValue}`, 'cmd_mqtt_user')}
+                          className="ml-auto shrink-0 p-1 rounded text-muted-foreground hover:text-foreground transition-colors"
+                        >
+                          {copiedField === 'cmd_mqtt_user' ? <Check className="w-3 h-3 text-emerald-500" /> : <Copy className="w-3 h-3" />}
+                        </button>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-muted-foreground select-none">&gt;</span>
+                        <code className="text-foreground">SET mqtt_pass {mqttPassProvisionValue}</code>
+                        <button
+                          onClick={() => copyToClipboard(`SET mqtt_pass ${mqttPassProvisionValue}`, 'cmd_mqtt_pass')}
+                          className="ml-auto shrink-0 p-1 rounded text-muted-foreground hover:text-foreground transition-colors"
+                        >
+                          {copiedField === 'cmd_mqtt_pass' ? <Check className="w-3 h-3 text-emerald-500" /> : <Copy className="w-3 h-3" />}
+                        </button>
+                      </div>
+                    </div>
+                  </details>
 
                   <button
                     onClick={() => { setShowAddModal(false); setCredentials(null) }}

@@ -1,7 +1,6 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { useMQTT } from '../hooks/useMQTT'
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
@@ -102,18 +101,6 @@ export default function Dashboard() {
   const [error, setError] = useState<string | null>(null)
   const router = useRouter()
   const supabase = createClientComponentClient()
-
-  // ── Real-time MQTT WebSocket (replaces setInterval polling) ────────
-  const { connected: mqttConnected, lastMessage: mqttPrediction } = useMQTT()
-
-  // Update dashboard state when a new MQTT prediction arrives
-  useEffect(() => {
-    if (mqttPrediction) {
-      setLatestPredictionLabel(mqttPrediction.ecg_arrhythmia || '')
-      setLatestConfidence(Math.round((mqttPrediction.confidence_score || 0) * 100))
-      setLastUpdated(new Date())
-    }
-  }, [mqttPrediction])
 
   const fetchDashboardData = useCallback(async () => {
     try {
@@ -334,51 +321,20 @@ export default function Dashboard() {
       })
       .subscribe()
 
-    // Fallback: only poll via setInterval if MQTT is disconnected
-    const interval = mqttConnected ? null : setInterval(fetchDashboardData, 30000)
+    // Polling remains the supported live path because browser MQTT topics are
+    // not produced by the backend and Supabase realtime is intentionally limited.
+    const interval = setInterval(fetchDashboardData, 5000)
 
     return () => {
-      if (interval) clearInterval(interval)
+      clearInterval(interval)
       supabase.removeChannel(channel)
     }
-  }, [fetchDashboardData, supabase, mqttConnected])
+  }, [fetchDashboardData, supabase])
 
   const activeSessions = sessions.filter(s => s.status === 'streaming' || s.status === 'processing').length
   const completedSessions = sessions.filter(s => s.status === 'done').length
   const alertCount = sessions.filter(s => s.status === 'error').length
   const lastUpdatedLabel = lastUpdated ? `Updated ${lastUpdated.toLocaleTimeString()}` : 'Updating...'
-
-  const sparklineData = {
-    sessions: [2, 4, 3, 6, 4, 7, 5],
-    devices: [1, 2, 2, 3, 2, 3, 3],
-    predictions: [1, 3, 2, 5, 4, 6, 7],
-    alerts: [0, 1, 0, 2, 1, 0, 1],
-    latency: [120, 110, 130, 100, 95, 105, 98],
-    offline: [3, 2, 3, 2, 1, 2, 1],
-  }
-
-  const Sparkline = ({ values, color }: { values: number[]; color: string }) => {
-    const max = Math.max(...values)
-    const min = Math.min(...values)
-    const range = max - min || 1
-    const points = values.map((v, i) => {
-      const x = (i / (values.length - 1)) * 60
-      const y = 20 - ((v - min) / range) * 18
-      return `${x},${y}`
-    }).join(' ')
-    return (
-      <svg viewBox="0 0 60 22" className="w-16 h-6">
-        <polyline
-          fill="none"
-          stroke={color}
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          points={points}
-        />
-      </svg>
-    )
-  }
 
   const getStatusBadge = (status: string) => {
     const map: Record<string, string> = {
@@ -593,7 +549,7 @@ export default function Dashboard() {
 
             <EcgGraphPanel
               data={isEcgDemo ? defaultEcg : ecgData}
-              liveLabel={isEcgDemo ? 'Simulated' : `Live · ${lastUpdatedLabel.replace('Updated ', '')}`}
+              liveLabel={isEcgDemo ? 'Awaiting live data' : `Live · ${lastUpdatedLabel.replace('Updated ', '')}`}
             />
             {isEcgDemo && (
               <div className="-mt-2 ml-1 mb-1">
@@ -603,7 +559,7 @@ export default function Dashboard() {
 
             <PcgGraphPanel
               data={isPcgDemo ? defaultPcg : pcgData}
-              liveLabel={isPcgDemo ? 'Simulated' : `Live · ${lastUpdatedLabel.replace('Updated ', '')}`}
+              liveLabel={isPcgDemo ? 'Awaiting live data' : `Live · ${lastUpdatedLabel.replace('Updated ', '')}`}
             />
             {isPcgDemo && (
               <div className="-mt-2 ml-1 mb-1">
@@ -700,14 +656,16 @@ export default function Dashboard() {
             </GlassCard>
 
             <AIAnalyticsPanel
-              confidence={latestConfidence > 0 ? latestConfidence : (predictionCount > 0 ? 86 : 0)}
+              confidence={latestConfidence}
               anomalyDetected={alertCount > 0}
               anomalyDescription={
                 alertCount > 0
-                  ? `${alertCount} alert(s) detected. Review recommended.`
+                  ? `${alertCount} session(s) require review.`
                   : latestPredictionLabel
-                    ? `Latest Analysis: ${latestPredictionLabel}. No acute anomalies.`
-                    : 'All cardiac signals within normal parameters. No anomalies detected in recent analysis.'
+                    ? `Latest completed analysis: ${latestPredictionLabel}. Open the session for detailed findings.`
+                    : predictionCount > 0
+                      ? 'Predictions are available. Open the latest session for details.'
+                      : 'Awaiting completed analyses from the inference pipeline.'
               }
               predictionCount={predictionCount}
             />

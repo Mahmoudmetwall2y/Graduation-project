@@ -39,6 +39,7 @@ export async function GET(
           status,
           created_at,
           ended_at,
+          recordings:recordings(id),
           predictions:predictions(id, modality, created_at)
         )
       `)
@@ -79,7 +80,7 @@ export async function GET(
       totalSessions: device.sessions?.length || 0,
       completedSessions: device.sessions?.filter((s: any) => s.status === 'done').length || 0,
       totalRecordings: device.sessions?.reduce((acc: number, s: any) =>
-        acc + (s.predictions?.length || 0), 0
+        acc + (s.recordings?.length || 0), 0
       ) || 0,
       lastSession: device.sessions?.[0]?.created_at || null,
       activeAlerts: alerts?.length || 0

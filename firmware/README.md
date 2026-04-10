@@ -40,22 +40,36 @@ Add ESP32 board support:
 
 ### 4. Provision Credentials
 
-Open Serial Monitor (115200 baud) and send:
+Recommended bootstrap flow:
+
+```
+SET device_id xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+SET device_secret asc_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+SET bootstrap_url http://YOUR_SERVER_IP/api/device/bootstrap
+SET wifi_ssid YourNetworkName
+SET wifi_pass YourPassword
+REBOOT
+```
+
+After reboot, the firmware will fetch `org_id`, `mqtt_host`, `mqtt_port`, `mqtt_user`, and `mqtt_pass` from the AscultiCor app automatically.
+
+Legacy manual MQTT flow is still supported:
 
 ```
 SET device_id xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
 SET org_id xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+SET mqtt_host 192.168.1.100
+SET mqtt_port 1883
 SET mqtt_user asculticor
 SET mqtt_pass your_broker_password
-SET mqtt_host 192.168.1.100
 SET wifi_ssid YourNetworkName
 SET wifi_pass YourPassword
-SET device_secret asc_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   # optional (reserved for future auth)
 REBOOT
 ```
 
 Credentials persist in NVS flash across re-flashes.
-`device_secret` is optional in the current local broker setup and reserved for future per-device auth flows.
+
+> For real ESP32 devices on your LAN, set `MQTT_BIND_ADDRESS=0.0.0.0` before starting Docker. If it stays on `127.0.0.1`, the broker is reachable only from the host machine.
 
 ## Wiring
 
@@ -96,6 +110,11 @@ LO-  → GPIO 35        A/R  → float (default)
 | `REBOOT` | Restart ESP32 |
 | `STATUS` | Print WiFi/MQTT/streaming status |
 | `HELP` | List available commands |
+
+Important keys:
+- `bootstrap_url`: Recommended provisioning endpoint for secure broker bootstrap
+- `device_secret`: Required for bootstrap mode
+- `mqtt_port`: Now stored correctly as an integer in NVS
 
 ## Changelog
 

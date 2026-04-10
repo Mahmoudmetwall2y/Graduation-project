@@ -289,6 +289,7 @@ class MQTTHandler:
             
             # Subscribe to all org topics
             # Pattern: org/+/device/+/session/+/meta
+            client.subscribe("org/+/device/+/status", qos=1)
             client.subscribe("org/+/device/+/session/+/meta", qos=1)
             client.subscribe("org/+/device/+/session/+/pcg", qos=0)
             client.subscribe("org/+/device/+/session/+/ecg", qos=0)
@@ -338,30 +339,47 @@ class MQTTHandler:
         """Callback for MQTT message — runs in the paho-mqtt thread."""
         try:
             topic_parts = msg.topic.split('/')
-            
-            # Parse topic: org/{orgId}/device/{deviceId}/session/{sessionId}/{type}
-            # Expected parts: ["org", orgId, "device", deviceId, "session", sessionId, type]
-            if len(topic_parts) != 7:
-                logger.warning(f"Invalid topic format: {msg.topic}")
-                return
-            
-            org_id = topic_parts[1]
-            device_id = topic_parts[3]
-            session_id = topic_parts[5]
-            msg_type = topic_parts[6]
-            
-            # Route message
-            if msg_type == 'meta':
-                self._handle_meta_message(org_id, device_id, session_id, msg.payload)
-            elif msg_type == 'pcg':
-                self._handle_data_chunk(org_id, device_id, session_id, 'pcg', msg.payload)
-            elif msg_type == 'ecg':
-                self._handle_data_chunk(org_id, device_id, session_id, 'ecg', msg.payload)
-            elif msg_type == 'heartbeat':
-                self._run_sync_in_executor(
-                    self.supabase.update_device_last_seen, device_id
+
+            # Device runtime status: org/{orgId}/device/{deviceId}/status
+            if (
+                len(topic_parts) == 5 and
+                topic_parts[0] == 'org' and
+                topic_parts[2] == 'device' and
+                topic_parts[4] == 'status'
+            ):
+                self._handle_status_message(
+                    topic_parts[1],
+                    topic_parts[3],
+                    msg.payload
                 )
-            
+                return
+
+            # Session traffic: org/{orgId}/device/{deviceId}/session/{sessionId}/{type}
+            if (
+                len(topic_parts) == 7 and
+                topic_parts[0] == 'org' and
+                topic_parts[2] == 'device' and
+                topic_parts[4] == 'session'
+            ):
+                org_id = topic_parts[1]
+                device_id = topic_parts[3]
+                session_id = topic_parts[5]
+                msg_type = topic_parts[6]
+
+                if msg_type == 'meta':
+                    self._handle_meta_message(org_id, device_id, session_id, msg.payload)
+                elif msg_type == 'pcg':
+                    self._handle_data_chunk(org_id, device_id, session_id, 'pcg', msg.payload)
+                elif msg_type == 'ecg':
+                    self._handle_data_chunk(org_id, device_id, session_id, 'ecg', msg.payload)
+                elif msg_type == 'heartbeat':
+                    self._handle_heartbeat_message(org_id, device_id, msg.payload)
+                else:
+                    logger.warning(f"Unsupported session topic suffix: {msg.topic}")
+                return
+
+            logger.warning(f"Invalid topic format: {msg.topic}")
+             
         except Exception as e:
             logger.error(f"Error handling message: {e}")
     
@@ -395,6 +413,111 @@ class MQTTHandler:
             asyncio.run_coroutine_threadsafe(coro, self.loop)
         else:
             logger.error("Cannot schedule async task: event loop not available")
+
+    @staticmethod
+    def _coerce_int(value: Any) -> Optional[int]:
+        """Convert numeric payload values to int when possible."""
+        if value is None or value == "":
+            return None
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _coerce_float(value: Any) -> Optional[float]:
+        """Convert numeric payload values to float when possible."""
+        if value is None or value == "":
+            return None
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    def _handle_status_message(self, org_id: str, device_id: str, payload: bytes):
+        """Persist retained device status updates for dashboards."""
+        try:
+            status_payload = json.loads(payload.decode('utf-8'))
+            now_iso = datetime.now(timezone.utc).isoformat()
+
+            telemetry = {
+                "free_heap_bytes": self._coerce_int(status_payload.get("free_heap")),
+                "wifi_rssi": self._coerce_int(status_payload.get("rssi")),
+                "battery_voltage": self._coerce_float(
+                    status_payload.get("battery_voltage") or status_payload.get("battery")
+                ),
+                "telemetry_json": status_payload,
+                "recorded_at": now_iso,
+            }
+            self._run_sync_in_executor(
+                self.supabase.create_device_telemetry,
+                device_id,
+                org_id,
+                telemetry,
+            )
+
+            device_updates = {
+                "status": status_payload.get("status") or "online",
+                "last_seen_at": now_iso,
+                "signal_strength": self._coerce_int(status_payload.get("rssi")),
+                "firmware_version": status_payload.get("firmware_version"),
+                "ip_address": status_payload.get("ip"),
+                "battery_level": self._coerce_int(
+                    status_payload.get("battery_level") or status_payload.get("battery_percent")
+                ),
+            }
+            self._run_sync_in_executor(
+                self.supabase.update_device_status,
+                device_id,
+                device_updates,
+            )
+        except Exception as e:
+            logger.error(f"Error handling device status message: {e}")
+
+    def _handle_heartbeat_message(self, org_id: str, device_id: str, payload: bytes):
+        """Persist heartbeat payloads into device telemetry for dashboards and alerts."""
+        try:
+            heartbeat = json.loads(payload.decode('utf-8'))
+            now_iso = datetime.now(timezone.utc).isoformat()
+
+            telemetry = {
+                "uptime_seconds": self._coerce_int(
+                    heartbeat.get("uptime_seconds") or heartbeat.get("uptime_sec")
+                ),
+                "free_heap_bytes": self._coerce_int(
+                    heartbeat.get("free_heap_bytes") or heartbeat.get("free_heap")
+                ),
+                "wifi_rssi": self._coerce_int(heartbeat.get("wifi_rssi") or heartbeat.get("rssi")),
+                "battery_voltage": self._coerce_float(
+                    heartbeat.get("battery_voltage") or heartbeat.get("battery")
+                ),
+                "temperature_celsius": self._coerce_float(heartbeat.get("temperature_celsius")),
+                "error_count": self._coerce_int(heartbeat.get("error_count")) or 0,
+                "telemetry_json": heartbeat,
+                "recorded_at": now_iso,
+            }
+            self._run_sync_in_executor(
+                self.supabase.create_device_telemetry,
+                device_id,
+                org_id,
+                telemetry,
+            )
+
+            device_updates = {
+                "status": "online",
+                "last_seen_at": now_iso,
+                "signal_strength": self._coerce_int(heartbeat.get("wifi_rssi") or heartbeat.get("rssi")),
+                "battery_level": self._coerce_int(
+                    heartbeat.get("battery_level") or heartbeat.get("battery_percent")
+                ),
+            }
+            self._run_sync_in_executor(
+                self.supabase.update_device_status,
+                device_id,
+                device_updates,
+            )
+        except Exception as e:
+            logger.error(f"Error handling heartbeat message: {e}")
     
     def _handle_start_pcg(
         self, 
@@ -405,6 +528,10 @@ class MQTTHandler:
     ):
         """Handle start_pcg message."""
         buffer_key = f"{session_id}_pcg"
+
+        if not self.supabase.ensure_session_exists(session_id, org_id, device_id):
+            logger.error(f"Unable to start PCG stream for session {session_id}: session row unavailable")
+            return
         
         if buffer_key in self.buffers:
             logger.warning(f"PCG buffer already exists for session {session_id}")
@@ -419,9 +546,8 @@ class MQTTHandler:
         )
         
         # Update session status (sync call dispatched to thread pool)
-        self._run_sync_in_executor(
-            self.supabase.update_session_status, session_id, 'streaming'
-        )
+        if not self.supabase.update_session_status(session_id, 'streaming'):
+            logger.warning(f"Failed to mark PCG session {session_id} as streaming")
         
         logger.info(f"Started PCG streaming for session {session_id}")
     
@@ -434,6 +560,10 @@ class MQTTHandler:
     ):
         """Handle start_ecg message."""
         buffer_key = f"{session_id}_ecg"
+
+        if not self.supabase.ensure_session_exists(session_id, org_id, device_id):
+            logger.error(f"Unable to start ECG stream for session {session_id}: session row unavailable")
+            return
         
         if buffer_key in self.buffers:
             logger.warning(f"ECG buffer already exists for session {session_id}")
@@ -447,9 +577,8 @@ class MQTTHandler:
             config=config
         )
         
-        self._run_sync_in_executor(
-            self.supabase.update_session_status, session_id, 'streaming'
-        )
+        if not self.supabase.update_session_status(session_id, 'streaming'):
+            logger.warning(f"Failed to mark ECG session {session_id} as streaming")
         
         logger.info(f"Started ECG streaming for session {session_id}")
     

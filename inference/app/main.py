@@ -4,6 +4,7 @@ Health checks, config endpoint, and MQTT lifecycle management.
 """
 
 import os
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Request
@@ -119,6 +120,8 @@ class ModelDetail(BaseModel):
 class HealthResponse(BaseModel):
     status: str
     mqtt_connected: bool
+    supabase_connected: bool
+    storage_connected: bool
     demo_mode: bool
     active_sessions: int
     models_loaded: int
@@ -184,12 +187,16 @@ async def health_check(request: Request):
     active_sessions = len(mqtt_handler.buffers)
     engine = mqtt_handler.inference_engine
     model_info = engine.get_model_status()
+    loop = asyncio.get_running_loop()
+    connectivity = await loop.run_in_executor(None, mqtt_handler.supabase.check_connectivity)
     
     # Determine overall status
     all_loaded = model_info['models_loaded'] == model_info['models_total']
-    if mqtt_connected and all_loaded:
+    supabase_ok = connectivity["database"]
+    storage_ok = connectivity["storage"]
+    if mqtt_connected and all_loaded and supabase_ok and storage_ok:
         status = "healthy"
-    elif mqtt_connected or model_info['models_loaded'] > 0:
+    elif mqtt_connected or model_info['models_loaded'] > 0 or supabase_ok:
         status = "degraded"
     else:
         status = "unhealthy"
@@ -197,6 +204,8 @@ async def health_check(request: Request):
     return HealthResponse(
         status=status,
         mqtt_connected=mqtt_connected,
+        supabase_connected=supabase_ok,
+        storage_connected=storage_ok,
         demo_mode=engine.demo_mode_active,
         active_sessions=active_sessions,
         models_loaded=model_info['models_loaded'],
@@ -225,11 +234,11 @@ async def get_config(request: Request):
     
     return ConfigResponse(
         preprocessing_version=get_preprocessing_version(),
-        pcg_sample_rate=int(os.getenv("PCG_SAMPLE_RATE", 22050)),
-        pcg_target_duration=float(os.getenv("PCG_TARGET_DURATION", 10)),
+        pcg_sample_rate=engine.pcg_preprocessor.sample_rate,
+        pcg_target_duration=engine.pcg_preprocessor.target_duration,
         pcg_max_duration=float(os.getenv("PCG_MAX_DURATION", 15)),
-        ecg_sample_rate=int(os.getenv("ECG_SAMPLE_RATE", 360)),
-        ecg_window_size=int(os.getenv("ECG_WINDOW_SIZE", 500)),
+        ecg_sample_rate=engine.ecg_preprocessor.sample_rate,
+        ecg_window_size=engine.ecg_preprocessor.window_size,
         ecg_max_duration=float(os.getenv("ECG_MAX_DURATION", 60)),
         stream_timeout_sec=int(os.getenv("STREAM_TIMEOUT_SEC", 10)),
         metrics_update_hz=float(os.getenv("METRICS_UPDATE_HZ", 2)),

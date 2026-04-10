@@ -10,36 +10,36 @@ AscultiCor now supports **unlimited ESP32 devices** with individual dashboards, 
 ┌─────────────────────────────────────────────────────────────────┐
 │                     AscultiCor System                           │
 ├─────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐                     │
-│  │ ESP32 #1 │  │ ESP32 #2 │  │ ESP32 #N │   Multiple Devices  │
-│  │ Patient  │  │ Patient  │  │ Patient  │                     │
-│  │ Room 101 │  │ Room 102 │  │ Room 10N │                     │
-│  └────┬─────┘  └────┬─────┘  └────┬─────┘                     │
-│       │             │             │                            │
-│       └─────────────┴─────────────┘                            │
-│                     │                                          │
-│                     ▼                                          │
-│          ┌──────────────────┐                                 │
-│          │   MQTT Broker    │                                 │
-│          │  (Mosquitto/AWS) │                                 │
-│          └────────┬─────────┘                                 │
-│                   │                                            │
-│       ┌───────────┼───────────┐                               │
-│       ▼           ▼           ▼                               │
-│  ┌─────────┐ ┌─────────┐ ┌─────────┐                         │
-│  │Inference│ │Supabase │ │Next.js  │                         │
-│  │Service  │ │Database │ │Frontend │                         │
-│  └────┬────┘ └────┬────┘ └────┬────┘                         │
-│       │           │           │                                │
-│       └───────────┴───────────┘                                │
-│                   │                                            │
-│                   ▼                                            │
-│          ┌──────────────────┐                                 │
-│          │   Web Dashboard  │                                 │
-│          │  (All Devices)   │                                 │
-│          └──────────────────┘                                 │
-│                                                                  │
+│                                                                 │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐                       │
+│  │ ESP32 #1 │  │ ESP32 #2 │  │ ESP32 #N │   Multiple Devices    │
+│  │ Patient  │  │ Patient  │  │ Patient  │                       │
+│  │ Room 101 │  │ Room 102 │  │ Room 10N │                       │
+│  └────┬─────┘  └────┬─────┘  └────┬─────┘                       │
+│       │             │             │                             │
+│       └─────────────┴─────────────┘                             │
+│                     │                                           │
+│                     ▼                                           │
+│          ┌──────────────────┐                                   │
+│          │   MQTT Broker    │                                   │
+│          │  (Mosquitto/AWS) │                                   │
+│          └────────┬─────────┘                                   │
+│                   │                                             │
+│       ┌───────────┼───────────┐                                 │
+│       ▼           ▼           ▼                                 │
+│  ┌─────────┐ ┌─────────┐ ┌─────────┐                            │
+│  │Inference│ │Supabase │ │Next.js  │                            │
+│  │Service  │ │Database │ │Frontend │                            │
+│  └────┬────┘ └────┬────┘ └────┬────┘                            │
+│       │           │           │                                 │
+│       └───────────┴───────────┘                                 │
+│                   │                                             │
+│                   ▼                                             │
+│          ┌──────────────────┐                                   │
+│          │   Web Dashboard  │                                   │
+│          │  (All Devices)   │                                   │
+│          └──────────────────┘                                   │
+│                                                                 │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -90,21 +90,37 @@ AscultiCor now supports **unlimited ESP32 devices** with individual dashboards, 
    After creation, you'll see:
    ```
    Device ID: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
-   Secret Key: asc_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+   Device Secret: asc_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+   Bootstrap URL: http://YOUR_SERVER_IP/api/device/bootstrap
    Organization ID: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
    ```
    
-   **⚠️ IMPORTANT:** Save these immediately! You won't see the secret key again.
+   **IMPORTANT:** Save these immediately. The device secret is shown only once.
 
 ### Step 2: Configure ESP32 Firmware
 
-Update your ESP32 code with the credentials:
+Recommended bootstrap provisioning via Serial Monitor:
+
+```text
+SET device_id YOUR_DEVICE_ID
+SET device_secret YOUR_SECRET_KEY
+SET bootstrap_url http://YOUR_SERVER_IP/api/device/bootstrap
+SET wifi_ssid YOUR_WIFI_NAME
+SET wifi_pass YOUR_WIFI_PASSWORD
+REBOOT
+```
+
+The firmware will fetch `org_id`, `mqtt_host`, `mqtt_port`, `mqtt_user`, and `mqtt_pass` from AscultiCor automatically.
+
+Legacy manual MQTT provisioning is still supported:
 
 ```cpp
 // Device Configuration
 const char* device_id = "YOUR_DEVICE_ID";
-const char* device_secret = "YOUR_SECRET_KEY";
 const char* org_id = "YOUR_ORG_ID";
+const char* mqtt_host = "YOUR_BROKER_HOST";
+const char* mqtt_user = "YOUR_BROKER_USER";
+const char* mqtt_pass = "YOUR_BROKER_PASSWORD";
 
 // MQTT Topics will be:
 // org/{org_id}/device/{device_id}/session/{session_id}/meta
@@ -117,6 +133,8 @@ const char* org_id = "YOUR_ORG_ID";
 1. Flash the firmware to ESP32
 2. Power on the device
 3. Device will automatically connect and appear as "online"
+
+> Note: For real hardware on your LAN, set `MQTT_BIND_ADDRESS=0.0.0.0` before starting Docker. Otherwise the broker stays local-only on `127.0.0.1`.
 
 ### Step 4: View Device Dashboard
 

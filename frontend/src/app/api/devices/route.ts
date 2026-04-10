@@ -4,6 +4,42 @@ import { NextResponse } from 'next/server'
 import { randomUUID } from 'crypto'
 import bcrypt from 'bcryptjs'
 
+function getRequestOrigin(request: Request) {
+  const requestUrl = new URL(request.url)
+  const forwardedProto = request.headers.get('x-forwarded-proto')
+  const forwardedHost = request.headers.get('x-forwarded-host')
+  const host = forwardedHost || request.headers.get('host')
+
+  if (host) {
+    return `${forwardedProto || requestUrl.protocol.replace(':', '')}://${host}`
+  }
+
+  return requestUrl.origin
+}
+
+function getBootstrapBaseUrl(request: Request) {
+  const configured = process.env.DEVICE_BOOTSTRAP_PUBLIC_BASE_URL?.trim()
+  if (configured) {
+    return configured.replace(/\/$/, '')
+  }
+
+  return getRequestOrigin(request)
+}
+
+function stripPort(host: string) {
+  return host.replace(/:\d+$/, '')
+}
+
+function isLoopbackHost(host: string) {
+  const normalized = stripPort(host).toLowerCase()
+  return normalized === 'localhost' || normalized === '127.0.0.1' || normalized === '0.0.0.0'
+}
+
+function parseBoolean(value: string | undefined, fallback = false) {
+  if (!value) return fallback
+  return ['1', 'true', 'yes', 'on'].includes(value.toLowerCase())
+}
+
 // GET /api/devices - List all devices
 export async function GET(request: Request) {
   try {
@@ -139,12 +175,30 @@ export async function POST(request: Request) {
       })
     if (auditError) console.error('Audit log failed (device_created):', auditError)
 
+    const bootstrapBaseUrl = getBootstrapBaseUrl(request)
+    const bootstrapUrl = `${bootstrapBaseUrl}/api/device/bootstrap`
+    const bootstrapHost = new URL(bootstrapBaseUrl).host
+    const mqttHost =
+      process.env.DEVICE_BOOTSTRAP_MQTT_HOST?.trim() || stripPort(new URL(bootstrapBaseUrl).host)
+    const mqttPort = Number(process.env.DEVICE_BOOTSTRAP_MQTT_PORT || 1883)
+    const mqttTls = parseBoolean(process.env.DEVICE_BOOTSTRAP_MQTT_TLS, false)
+    const mqttLanExposureEnabled = !isLoopbackHost(
+      process.env.MQTT_BIND_ADDRESS || '127.0.0.1'
+    )
+
     return NextResponse.json({
       device,
       credentials: {
         device_id: deviceId,
         device_secret: deviceSecret, // Show only once!
         org_id: profile.org_id,
+        bootstrap_url: bootstrapUrl,
+        bootstrap_requires_host_override: isLoopbackHost(bootstrapHost),
+        provisioning_mode: 'bootstrap_recommended',
+        mqtt_host: mqttHost,
+        mqtt_port: mqttPort,
+        mqtt_tls: mqttTls,
+        mqtt_lan_exposure_enabled: mqttLanExposureEnabled,
         mqtt_user: mqttUser,
         mqtt_pass: mqttPass
       }

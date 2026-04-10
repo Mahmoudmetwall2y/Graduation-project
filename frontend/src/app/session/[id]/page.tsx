@@ -857,7 +857,7 @@ export default function SessionDetailPage() {
             { label: 'Duration', value: durationSeconds ? `${durationSeconds}s` : 'In progress', tone: 'badge-neutral' },
             { label: 'Patient', value: session.patient?.full_name || 'Not linked', tone: 'badge-neutral' },
             { label: 'Predictions', value: `${predictions.length}`, tone: 'badge-info' },
-            { label: 'Heart Rate', value: isLiveFresh ? `${Math.round(65 + Math.random() * 15)} BPM` : 'N/A', tone: 'badge-warning' },
+            { label: 'Heart Rate', value: lastLiveAt ? 'Not calculated' : 'Unavailable', tone: 'badge-warning' },
           ].map((item) => (
             <div key={item.label} className="rounded-xl border border-border bg-card/70 p-4">
               <p className="text-xs uppercase tracking-wider text-muted-foreground/70">{item.label}</p>

@@ -67,8 +67,8 @@ def get_paths(colab=False, drive_root='/content/drive/MyDrive/cardiosense'):
         'output':   output,
     }
 
-WINDOW_SIZE   = 500      # samples per ECG window (~1.4 seconds at 360 Hz)
-STEP_SIZE     = 250      # 50% overlap
+WINDOW_SIZE   = 300      # samples per ECG window (~0.83 seconds at 360 Hz)
+STEP_SIZE     = 150      # 50% overlap
 SAMPLE_RATE   = 360      # MIT-BIH sampling rate
 
 # Beat types to include (common + clinically significant)

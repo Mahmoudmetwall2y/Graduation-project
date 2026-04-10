@@ -28,6 +28,8 @@
  */
 
 #include <WiFi.h>
+#include <WiFiClientSecure.h>
+#include <HTTPClient.h>
 #include <PubSubClient.h>
 #include <ArduinoJson.h>
 #include <Preferences.h>   // NVS flash storage for credentials
@@ -49,6 +51,7 @@
 #define DEFAULT_MQTT_PORT       1883
 #define DEFAULT_MQTT_USER       "asculticor"
 #define DEFAULT_MQTT_PASS       "CHANGE_ME_IN_PRODUCTION"
+#define DEFAULT_BOOTSTRAP_URL   ""
 
 // Default device identity (overridden after web registration)
 #define DEFAULT_ORG_ID          "00000000-0000-0000-0000-000000000001"
@@ -106,9 +109,10 @@ char mqtt_host[128];
 int  mqtt_port;
 char mqtt_user[64];
 char mqtt_pass[64];
+char bootstrap_url[192];
 char org_id[40];
 char device_id[40];
-char device_secret[80];  // Optional future-use secret (not used by current broker auth)
+char device_secret[80];  // Used by bootstrap provisioning and future per-device auth
 char session_id[37];
 
 // State
@@ -176,6 +180,7 @@ void loadCredentials() {
   mqtt_port = nvs.getInt("mqtt_port", DEFAULT_MQTT_PORT);
   strlcpy(mqtt_user,     nvs.getString("mqtt_user",     DEFAULT_MQTT_USER).c_str(),   sizeof(mqtt_user));
   strlcpy(mqtt_pass,     nvs.getString("mqtt_pass",     DEFAULT_MQTT_PASS).c_str(),   sizeof(mqtt_pass));
+  strlcpy(bootstrap_url, nvs.getString("bootstrap_url", DEFAULT_BOOTSTRAP_URL).c_str(), sizeof(bootstrap_url));
   strlcpy(org_id,        nvs.getString("org_id",        DEFAULT_ORG_ID).c_str(),      sizeof(org_id));
   strlcpy(device_id,     nvs.getString("device_id",     DEFAULT_DEVICE_ID).c_str(),   sizeof(device_id));
   strlcpy(device_secret, nvs.getString("device_secret", "").c_str(),                  sizeof(device_secret));
@@ -185,16 +190,109 @@ void loadCredentials() {
   Serial.println("[NVS] Credentials loaded:");
   Serial.printf("  WiFi SSID     : %s\n", wifi_ssid);
   Serial.printf("  MQTT Host     : %s:%d\n", mqtt_host, mqtt_port);
+  Serial.printf("  Bootstrap URL : %s\n", strlen(bootstrap_url) > 0 ? bootstrap_url : "(not set)");
   Serial.printf("  Device ID     : %s\n", device_id);
-  Serial.printf("  Device Secret : %s (optional)\n", strlen(device_secret) > 0 ? "***set***" : "(not set)");
+  Serial.printf("  Device Secret : %s\n", strlen(device_secret) > 0 ? "***set***" : "(not set)");
   Serial.printf("  Org ID        : %s\n", org_id);
 }
 
 void saveCredential(const char *key, const char *value) {
   nvs.begin("asculticor", false);  // read-write
-  nvs.putString(key, value);
+
+  if (strcmp(key, "mqtt_port") == 0) {
+    nvs.putInt(key, atoi(value));
+  } else {
+    nvs.putString(key, value);
+  }
+
   nvs.end();
   Serial.printf("[NVS] Saved %s = %s\n", key, value);
+}
+
+bool shouldUseBootstrap() {
+  return strlen(device_secret) > 0 && strlen(bootstrap_url) > 0;
+}
+
+bool fetchBootstrapConfig() {
+  if (!shouldUseBootstrap() || WiFi.status() != WL_CONNECTED) {
+    return false;
+  }
+
+  HTTPClient http;
+  StaticJsonDocument<256> requestDoc;
+  requestDoc["device_id"] = device_id;
+  requestDoc["device_secret"] = device_secret;
+
+  String requestBody;
+  serializeJson(requestDoc, requestBody);
+
+  bool isHttps = strncmp(bootstrap_url, "https://", 8) == 0;
+  int httpCode = -1;
+  String responseBody;
+
+  if (isHttps) {
+    WiFiClientSecure secureClient;
+    secureClient.setInsecure();  // Replace with CA validation in production.
+    if (!http.begin(secureClient, bootstrap_url)) {
+      Serial.println("[BOOTSTRAP] Failed to initialize HTTPS client");
+      return false;
+    }
+  } else {
+    WiFiClient client;
+    if (!http.begin(client, bootstrap_url)) {
+      Serial.println("[BOOTSTRAP] Failed to initialize HTTP client");
+      return false;
+    }
+  }
+
+  http.addHeader("Content-Type", "application/json");
+  http.setTimeout(8000);
+
+  Serial.printf("[BOOTSTRAP] Requesting broker config from %s\n", bootstrap_url);
+  httpCode = http.POST(requestBody);
+  if (httpCode <= 0) {
+    Serial.printf("[BOOTSTRAP] Request failed, code=%d\n", httpCode);
+    http.end();
+    return false;
+  }
+
+  responseBody = http.getString();
+  http.end();
+
+  if (httpCode != HTTP_CODE_OK) {
+    Serial.printf("[BOOTSTRAP] Server returned HTTP %d: %s\n", httpCode, responseBody.c_str());
+    return false;
+  }
+
+  StaticJsonDocument<512> responseDoc;
+  DeserializationError err = deserializeJson(responseDoc, responseBody);
+  if (err) {
+    Serial.printf("[BOOTSTRAP] Invalid JSON response: %s\n", err.c_str());
+    return false;
+  }
+
+  const char *newMqttHost = responseDoc["mqtt_host"];
+  const char *newMqttUser = responseDoc["mqtt_user"];
+  const char *newMqttPass = responseDoc["mqtt_pass"];
+  const char *newOrgId    = responseDoc["org_id"];
+  int newMqttPort         = responseDoc["mqtt_port"] | DEFAULT_MQTT_PORT;
+
+  if (!newMqttHost || !newMqttUser || !newMqttPass || !newOrgId) {
+    Serial.println("[BOOTSTRAP] Response missing required broker fields");
+    return false;
+  }
+
+  strlcpy(mqtt_host, newMqttHost, sizeof(mqtt_host));
+  strlcpy(mqtt_user, newMqttUser, sizeof(mqtt_user));
+  strlcpy(mqtt_pass, newMqttPass, sizeof(mqtt_pass));
+  strlcpy(org_id, newOrgId, sizeof(org_id));
+  mqtt_port = newMqttPort;
+
+  buildTopicBase();
+  mqtt.setServer(mqtt_host, mqtt_port);
+
+  Serial.printf("[BOOTSTRAP] Loaded broker config: %s:%d\n", mqtt_host, mqtt_port);
+  return true;
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -231,19 +329,24 @@ void handleSerialProvisioning() {
       mqtt.connected() ? "OK" : "DISCONNECTED",
       isStreaming ? "YES" : "NO");
     Serial.printf("[STATUS] Free heap: %d bytes\n", ESP.getFreeHeap());
+    Serial.printf("[STATUS] Bootstrap: %s\n",
+      shouldUseBootstrap() ? bootstrap_url : "(disabled)");
   } else if (line == "HELP") {
     Serial.println("Commands: SET <key> <value> | REBOOT | STATUS | HELP");
-    Serial.println("Keys: wifi_ssid, wifi_pass, mqtt_host, mqtt_port, mqtt_user, mqtt_pass, org_id, device_id, device_secret");
-    Serial.println("\nQuick setup (from web app 'Add Device' modal):");
-    Serial.println("  SET device_id    <id from web>");
+    Serial.println("Keys: wifi_ssid, wifi_pass, mqtt_host, mqtt_port, mqtt_user, mqtt_pass, bootstrap_url, org_id, device_id, device_secret");
+    Serial.println("\nRecommended bootstrap setup (from web app 'Add Device' modal):");
+    Serial.println("  SET device_id     <id from web>");
+    Serial.println("  SET device_secret <secret from web>");
+    Serial.println("  SET bootstrap_url <http://server/api/device/bootstrap>");
+    Serial.println("  SET wifi_ssid     <your WiFi name>");
+    Serial.println("  SET wifi_pass     <your WiFi password>");
+    Serial.println("  REBOOT");
+    Serial.println("\nLegacy manual MQTT setup:");
     Serial.println("  SET org_id       <org from web>");
+    Serial.println("  SET mqtt_host    <broker host>");
+    Serial.println("  SET mqtt_port    1883");
     Serial.println("  SET mqtt_user    <broker user>");
     Serial.println("  SET mqtt_pass    <broker password>");
-    Serial.println("  SET mqtt_host    <your server IP>");
-    Serial.println("  SET wifi_ssid    <your WiFi name>");
-    Serial.println("  SET wifi_pass    <your WiFi password>");
-    Serial.println("  SET device_secret <optional: reserved for future auth>");
-    Serial.println("  REBOOT");
   }
 }
 
@@ -470,6 +573,10 @@ bool mqttReconnect() {
   char clientId[48];
   snprintf(clientId, sizeof(clientId), "ESP32-%s", device_id);
 
+  if (shouldUseBootstrap() && WiFi.status() == WL_CONNECTED) {
+    fetchBootstrapConfig();
+  }
+
   Serial.printf("[MQTT] Connecting as %s to %s:%d (auth: mqtt_user/mqtt_pass)...\n",
                 clientId, mqtt_host, mqtt_port);
 
@@ -686,6 +793,12 @@ void setup() {
 
   // WiFi
   setupWiFi();
+
+  if (shouldUseBootstrap() && WiFi.status() == WL_CONNECTED) {
+    if (!fetchBootstrapConfig()) {
+      Serial.println("[BOOTSTRAP] Falling back to locally stored MQTT credentials");
+    }
+  }
 
   // MQTT
   mqtt.setServer(mqtt_host, mqtt_port);
