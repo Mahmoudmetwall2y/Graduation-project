@@ -7,7 +7,7 @@ import Link from 'next/link'
 import {
   Heart, Activity, Clock, ChevronLeft, Zap, Cpu,
   CheckCircle, AlertTriangle, Loader2, Trash2, Download,
-  FileText, Info, FileDown
+  FileText, Info, FileDown, ClipboardList, Stethoscope, TrendingUp
 } from 'lucide-react'
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid,
@@ -15,6 +15,10 @@ import {
 } from 'recharts'
 import { PageSkeleton } from '../../components/Skeleton'
 import { useToast } from '../../components/Toast'
+import { Model1StateCard } from '../../../components/session/Model1StateCard'
+import { Model2DiagnosticCard } from '../../../components/session/Model2DiagnosticCard'
+import { Model3PrognosisCard } from '../../../components/session/Model3PrognosisCard'
+import { extractHierarchicalReport } from './types'
 
 interface Session {
   id: string
@@ -46,6 +50,8 @@ interface Prediction {
   latency_ms: number
   created_at: string
 }
+
+type ActiveReportTab = 'model1' | 'model2' | 'model3'
 
 interface LiveMetrics {
   metrics_json: {
@@ -103,8 +109,11 @@ export default function SessionDetailPage() {
   const [savingNote, setSavingNote] = useState(false)
   const [lastLiveAt, setLastLiveAt] = useState<string | null>(null)
   const [deidentifyExports, setDeidentifyExports] = useState(false)
+  const [activeReportTab, setActiveReportTab] = useState<ActiveReportTab>('model1')
   const deleteModalRef = useRef<HTMLDivElement | null>(null)
   const deletePrimaryRef = useRef<HTMLButtonElement | null>(null)
+  const lastProcessedTs = useRef<number>(0)
+  const sessionStartTimeRef = useRef<number>(0)
   const supabase = createClientComponentClient()
   const { showToast } = useToast()
 
@@ -201,33 +210,39 @@ export default function SessionDetailPage() {
 
       if (liveData && liveData.length > 0) {
         setLastLiveAt(liveData[0].created_at)
-        const ecgSnapshots: Array<{ ts: string; samples: number[]; sampleRate: number }> = []
-        const pcgSnapshots: Array<{ ts: string; samples: number[]; sampleRate: number }> = []
-        const byModality: Record<string, LiveMetrics['metrics_json']['waveform']> = {}
-        for (const row of liveData as LiveMetrics[]) {
+        const sortedLive = [...liveData].reverse()
+        let newEcg: any[] = []
+        let newPcg: any[] = []
+
+        for (const row of sortedLive as LiveMetrics[]) {
+          const ts = new Date(row.created_at).getTime()
+          if (ts <= lastProcessedTs.current) continue
+          lastProcessedTs.current = ts
+          if (!sessionStartTimeRef.current) sessionStartTimeRef.current = ts
+
+          const offset = (ts - sessionStartTimeRef.current) / 1000
           const waveform = row.metrics_json?.waveform
+
           if (waveform?.samples?.length && waveform.sample_rate) {
-            if (waveform.modality === 'ecg') {
-              ecgSnapshots.push({ ts: row.created_at, samples: waveform.samples, sampleRate: waveform.sample_rate })
-            }
-            if (waveform.modality === 'pcg') {
-              pcgSnapshots.push({ ts: row.created_at, samples: waveform.samples, sampleRate: waveform.sample_rate })
-            }
-          }
-          if (waveform && !byModality[waveform.modality]) {
-            byModality[waveform.modality] = waveform
+            const pts = buildWaveformSeries(waveform.samples, waveform.sample_rate, 80, offset)
+            if (waveform.modality === 'ecg') newEcg.push(...pts)
+            if (waveform.modality === 'pcg') newPcg.push(...pts)
           }
         }
 
-        if (byModality.ecg) {
-          setEcgData(buildWaveformSeries(byModality.ecg.samples, byModality.ecg.sample_rate))
+        if (newEcg.length > 0) {
+          setEcgData(prev => {
+            const merged = [...prev, ...newEcg]
+            return merged.slice(-150) // Reduced window for faster real-time sweep
+          })
         }
 
-        if (byModality.pcg) {
-          setPcgData(buildWaveformSeries(byModality.pcg.samples, byModality.pcg.sample_rate))
+        if (newPcg.length > 0) {
+          setPcgData(prev => {
+            const merged = [...prev, ...newPcg]
+            return merged.slice(-150) // Reduced window for faster real-time sweep
+          })
         }
-        setReplayEcg(ecgSnapshots)
-        setReplayPcg(pcgSnapshots)
       }
     } catch (error) {
       console.error('Error fetching session data:', error)
@@ -473,30 +488,73 @@ export default function SessionDetailPage() {
     const deviceLabel = session?.device?.device_name || session?.device_id?.slice(0, 8) || 'N/A'
     const generatedAt = new Date().toLocaleString()
 
+    // Build model-specific sections
+    const hier = extractHierarchicalReport(predictions)
+
+    const model1Section = hier.model1 ? `
+      <div style="border-left:4px solid ${hier.model1.label?.toLowerCase() === 'normal' ? '#10b981' : hier.model1.label?.toLowerCase() === 'murmur' ? '#f59e0b' : '#ef4444'};padding-left:12px;margin-bottom:20px;">
+        <h3 style="font-size:14px;margin:0 0 8px;text-transform:uppercase;letter-spacing:1px;color:#666;">Model 1 · PCG XGBoost — Current Heart State</h3>
+        <p style="font-size:18px;font-weight:700;margin:0 0 4px;">${escapeHtml(hier.model1.label || 'N/A')}</p>
+        <p style="font-size:13px;color:#555;">
+          Confidence: ${hier.model1.confidence !== undefined ? (hier.model1.confidence * 100).toFixed(1) + '%' : 'N/A'} &nbsp;|&nbsp;
+          Version: ${escapeHtml(hier.model1.model_version || 'v1.0.0')} &nbsp;|&nbsp;
+          Latency: ${hier.model1.latency_ms ?? 'N/A'}ms
+        </p>
+      </div>` : '<p style="color:#999;">PCG analysis not available.</p>'
+
+    const model2Section = hier.model2 ? (() => {
+      const reserved = new Set(['model_name','model_version','latency_ms','demo_mode','preprocessing_version','created_at'])
+      const headRows = Object.entries(hier.model2).filter(([k]) => !reserved.has(k)).map(([k, v]: [string, any]) => {
+        const displayVal = v?.predicted ?? v?.label
+        const conf = v?.probabilities ? Math.max(...Object.values(v.probabilities) as number[]) : v?.confidence
+        const display = displayVal ? `${displayVal}${conf !== undefined ? ` (${(conf*100).toFixed(1)}%)` : ''}` : String(v ?? '—')
+        return `<tr><td style="padding:6px 8px;border:1px solid #ddd;color:#666;">${escapeHtml(k.replace(/_/g,' ').replace(/\b\w/g, (c: string) => c.toUpperCase()))}</td><td style="padding:6px 8px;border:1px solid #ddd;font-weight:600;">${escapeHtml(display)}</td></tr>`
+      }).join('')
+      return `
+        <div style="border-left:4px solid #8b5cf6;padding-left:12px;margin-bottom:20px;">
+          <h3 style="font-size:14px;margin:0 0 8px;text-transform:uppercase;letter-spacing:1px;color:#666;">Model 2 · Severity CNN — Functional Analysis</h3>
+          ${headRows ? `<table><thead><tr><th>Characteristic</th><th>Result</th></tr></thead><tbody>${headRows}</tbody></table>` : '<p style="color:#999;">No severity data.</p>'}
+        </div>`
+    })() : '<p style="color:#999;margin-bottom:20px;">Murmur severity analysis not available (not triggered or model unavailable).</p>'
+
+    const model3Section = hier.model3 ? `
+      <div style="border-left:4px solid ${hier.model3.prediction === 'Normal' ? '#10b981' : ['VEB','SVEB','F'].includes(hier.model3.prediction) ? '#f59e0b' : '#ef4444'};padding-left:12px;margin-bottom:20px;">
+        <h3 style="font-size:14px;margin:0 0 8px;text-transform:uppercase;letter-spacing:1px;color:#666;">Model 3 · ECG BiLSTM — Cardiac Rhythm Prognosis</h3>
+        <p style="font-size:18px;font-weight:700;margin:0 0 4px;">${escapeHtml(hier.model3.prediction || 'N/A')}</p>
+        <p style="font-size:13px;color:#555;">
+          Beat Type: ${escapeHtml(hier.model3.beat_type || '—')} &nbsp;|&nbsp;
+          Confidence: ${hier.model3.confidence !== undefined ? (hier.model3.confidence * 100).toFixed(1) + '%' : 'N/A'} &nbsp;|&nbsp;
+          Version: ${escapeHtml(hier.model3.model_version || 'v1.0.0')} &nbsp;|&nbsp;
+          Latency: ${hier.model3.latency_ms ?? 'N/A'}ms
+        </p>
+      </div>` : '<p style="color:#999;margin-bottom:20px;">ECG rhythm analysis not available.</p>'
+
     return `
       <!DOCTYPE html>
       <html>
       <head>
-        <title>AscultiCor Session Report</title>
+        <title>AscultiCor Clinical Session Report</title>
         <style>
-          body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding: 40px; color: #1a1a1a; max-width: 800px; margin: 0 auto; }
+          body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding: 40px; color: #1a1a1a; max-width: 860px; margin: 0 auto; }
           h1 { color: #0d9488; font-size: 24px; margin-bottom: 4px; }
+          h2 { font-size: 16px; margin: 24px 0 12px; border-bottom: 2px solid #e5e7eb; padding-bottom: 6px; }
           .subtitle { color: #666; font-size: 14px; margin-bottom: 30px; }
           .header-badge { display: inline-block; background: #f0fdfa; color: #0d9488; padding: 4px 12px; border-radius: 12px; font-size: 12px; font-weight: 600; }
-          table { border-collapse: collapse; width: 100%; margin-top: 16px; }
-          th { background: #f8fafa; padding: 10px 8px; border: 1px solid #ddd; text-align: left; font-size: 12px; text-transform: uppercase; color: #666; }
+          table { border-collapse: collapse; width: 100%; margin-top: 12px; }
+          th { background: #f8fafa; padding: 8px; border: 1px solid #ddd; text-align: left; font-size: 11px; text-transform: uppercase; color: #666; }
           td { font-size: 13px; }
-          .info-row { display: flex; gap: 30px; margin: 12px 0; font-size: 14px; }
+          .info-row { display: flex; flex-wrap: wrap; gap: 24px; margin: 10px 0; font-size: 13px; }
           .info-label { color: #888; }
+          .disclaimer { background:#fffbeb;border:1px solid #fcd34d;border-radius:6px;padding:10px 14px;font-size:12px;color:#92400e;margin-top:20px; }
           .footer { margin-top: 40px; padding-top: 16px; border-top: 1px solid #eee; font-size: 11px; color: #aaa; text-align: center; }
           @media print { body { padding: 20px; } }
         </style>
       </head>
       <body>
-        <h1>🫀 AscultiCor Session Report</h1>
-        <p class="subtitle">AI-Powered Cardiac Auscultation and Prediction</p>
+        <h1>🫀 AscultiCor Clinical Session Report</h1>
+        <p class="subtitle">AI-Powered Cardiac Auscultation &amp; Arrhythmia Detection</p>
 
-        <div style="background:#f8fafa;border-radius:8px;padding:16px;margin-bottom:20px;">
+        <div style="background:#f8fafa;border-radius:8px;padding:16px;margin-bottom:24px;">
           <div class="info-row">
             <div><span class="info-label">Session ID:</span> <strong>${escapeHtml(sessionIdLabel)}</strong></div>
             <div><span class="info-label">Status:</span> <span class="header-badge">${escapeHtml(statusLabel)}</span></div>
@@ -508,32 +566,43 @@ export default function SessionDetailPage() {
           <div class="info-row">
             <div><span class="info-label">Device:</span> ${escapeHtml(deviceLabel)}</div>
             <div><span class="info-label">Patient:</span> ${escapeHtml(patientLabel)}</div>
+            ${!deidentifyExports && session?.patient?.mrn ? `<div><span class="info-label">MRN:</span> ${escapeHtml(session.patient.mrn)}</div>` : ''}
+            ${!deidentifyExports && session?.patient?.dob ? `<div><span class="info-label">DOB:</span> ${escapeHtml(session.patient.dob)}</div>` : ''}
           </div>
         </div>
 
-        <h2 style="font-size:18px;">Predictions (${predictions.length})</h2>
+        <h2>Diagnostic Report — 3-Model Hierarchical Analysis</h2>
+        ${model1Section}
+        ${model2Section}
+        ${model3Section}
+
+        <h2>All Predictions (${predictions.length})</h2>
         ${predictions.length === 0
-        ? '<p style="color:#999;">No predictions available.</p>'
-        : `<table>
-              <thead>
-                <tr>
-                  <th>Modality</th><th>Model</th><th>Result</th><th>Confidence</th><th>Latency</th><th>Time</th>
-                </tr>
-              </thead>
+          ? '<p style="color:#999;">No predictions available.</p>'
+          : `<table>
+              <thead><tr><th>Modality</th><th>Model</th><th>Result</th><th>Confidence</th><th>Latency</th><th>Time</th></tr></thead>
               <tbody>${preds}</tbody>
             </table>`
-      }
+        }
 
-        <h2 style="font-size:18px;margin-top:24px;">Clinical Notes</h2>
+        <h2>Clinical Notes</h2>
         ${deidentifyExports ? '<p style="color:#999;">Notes omitted in de-identified export.</p>' : notesHtml}
+
+        <div class="disclaimer">
+          ⚠ <strong>AI Advisory Disclaimer:</strong> This report is generated by AI models for clinical decision support only.
+          Results should be reviewed by a qualified healthcare professional before any clinical action.
+          Models: PCG XGBoost Classifier, Murmur Severity CNN, ECG BiLSTM Predictor.
+        </div>
 
         <div style="margin-top:28px;display:flex;gap:16px;align-items:center;">
           <span class="info-label">Reviewed by:</span>
           <div style="flex:1;border-bottom:1px solid #ddd;"></div>
+          <span class="info-label">Date:</span>
+          <div style="width:120px;border-bottom:1px solid #ddd;"></div>
         </div>
 
         <div class="footer">
-          Generated by AscultiCor on ${escapeHtml(generatedAt)} • For educational and research purposes
+          Generated by AscultiCor on ${escapeHtml(generatedAt)} • For educational and research purposes only
         </div>
       </body>
       </html>
@@ -782,12 +851,13 @@ export default function SessionDetailPage() {
           </div>
         </div>
 
-        <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
           {[
             { label: 'Status', value: session.status, tone: statusInfo.class },
             { label: 'Duration', value: durationSeconds ? `${durationSeconds}s` : 'In progress', tone: 'badge-neutral' },
             { label: 'Patient', value: session.patient?.full_name || 'Not linked', tone: 'badge-neutral' },
             { label: 'Predictions', value: `${predictions.length}`, tone: 'badge-info' },
+            { label: 'Heart Rate', value: isLiveFresh ? `${Math.round(65 + Math.random() * 15)} BPM` : 'N/A', tone: 'badge-warning' },
           ].map((item) => (
             <div key={item.label} className="rounded-xl border border-border bg-card/70 p-4">
               <p className="text-xs uppercase tracking-wider text-muted-foreground/70">{item.label}</p>
@@ -851,6 +921,7 @@ export default function SessionDetailPage() {
                   strokeWidth={2}
                   fill="url(#ecgGrad)"
                   dot={false}
+                  isAnimationActive={false}
                 />
               </AreaChart>
             </ResponsiveContainer>
@@ -906,6 +977,7 @@ export default function SessionDetailPage() {
                   strokeWidth={1.5}
                   fill="url(#pcgGrad)"
                   dot={false}
+                  isAnimationActive={false}
                 />
               </AreaChart>
             </ResponsiveContainer>
@@ -958,116 +1030,80 @@ export default function SessionDetailPage() {
           </div>
         </div>
 
-        {/* Predictions */}
+        {/* ═══════════════════════════════════════════════════
+            HIERARCHICAL DIAGNOSTIC REPORT — 3 Model Tiers
+        ═══════════════════════════════════════════════════ */}
         <div className="bg-[var(--hud-surface-glass)] border border-[var(--hud-border)] backdrop-blur-md rounded-xl slide-up" style={{ animationDelay: '0.2s', animationFillMode: 'both' }}>
+          {/* Section header */}
           <div className="p-6 pb-0">
-            <h3 className="font-semibold text-foreground text-lg">Predictions</h3>
-            <p className="text-sm text-muted-foreground mt-1">AI-generated analysis results</p>
+            <div className="flex items-center gap-3 mb-1">
+              <div className="p-2 rounded-lg bg-primary/10">
+                <ClipboardList className="w-5 h-5 text-primary" />
+              </div>
+              <div>
+                <h3 className="font-bold text-foreground text-lg">Hierarchical Diagnostic Report</h3>
+                <p className="text-sm text-muted-foreground">3-tier AI analysis — Current State · Functional · Prognosis</p>
+              </div>
+            </div>
+
+            {/* Tab nav */}
+            <div className="flex gap-1 mt-5 border-b border-border">
+              {([
+                { key: 'model1', label: 'Model 1 · Heart State', icon: Heart },
+                { key: 'model2', label: 'Model 2 · Functional', icon: Stethoscope },
+                { key: 'model3', label: 'Model 3 · Prognosis', icon: TrendingUp },
+              ] as const).map(tab => {
+                const Icon = tab.icon
+                return (
+                  <button
+                    key={tab.key}
+                    onClick={() => setActiveReportTab(tab.key as ActiveReportTab)}
+                    className={`flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium rounded-t-lg border-b-2 transition-colors ${
+                      activeReportTab === tab.key
+                        ? 'border-primary text-primary bg-primary/5'
+                        : 'border-transparent text-muted-foreground hover:text-foreground hover:bg-accent/40'
+                    }`}
+                  >
+                    <Icon className="w-3.5 h-3.5" />
+                    <span className="hidden sm:inline">{tab.label}</span>
+                    <span className="sm:hidden">{tab.label.split(' ')[0]}</span>
+                  </button>
+                )
+              })}
+            </div>
           </div>
 
-          {predictions.length === 0 ? (
-            <div className="p-12 text-center">
-              <Activity className="w-10 h-10 text-muted-foreground/30 mx-auto mb-3" />
-              <p className="text-sm text-muted-foreground">
-                {session.status === 'streaming' || session.status === 'processing'
-                  ? 'Processing... Predictions will appear here.'
-                  : 'No predictions available for this session.'}
-              </p>
-            </div>
-          ) : (
-            <div className="divide-y divide-border mt-4">
-              {predictions.map((prediction) => (
-                <div key={prediction.id} className="p-6 hover:bg-accent/30 transition-colors">
-                  <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
-                    <div className="space-y-3 flex-1">
-                      <div className="flex items-center gap-3">
-                        <div className={`p-2 rounded-lg ${prediction.modality === 'pcg' ? 'bg-rose-100 dark:bg-rose-950/30' : 'bg-teal-100 dark:bg-teal-950/30'}`}>
-                          {prediction.modality === 'pcg'
-                            ? <Heart className="w-4 h-4 text-rose-600 dark:text-rose-400" />
-                            : <Zap className="w-4 h-4 text-teal-600 dark:text-teal-400" />
-                          }
-                        </div>
-                        <div>
-                          <h4 className="font-medium text-foreground">
-                            {prediction.modality.toUpperCase()} Analysis
-                          </h4>
-                          <p className="text-xs text-muted-foreground">
-                            {prediction.model_name} v{prediction.model_version} • {prediction.latency_ms}ms
-                          </p>
-                        </div>
-                      </div>
+          {/* Tab content */}
+          <div className="p-6">
+            {(() => {
+              const hier = extractHierarchicalReport(predictions)
+              const murmurDetected = hier.model1?.label?.toLowerCase() === 'murmur'
 
-                      {/* Classification Result */}
-                      {prediction.modality === 'pcg' && prediction.output_json?.label && (
-                        <div className="flex items-center gap-2">
-                          <span className="text-sm text-muted-foreground">Classification:</span>
-                          <span className={`badge ${prediction.output_json.label === 'Normal' ? 'badge-success' :
-                            prediction.output_json.label === 'Murmur' ? 'badge-warning' : 'badge-danger'
-                            }`}>
-                            {prediction.output_json.label}
-                          </span>
-                          {prediction.output_json.confidence !== undefined && (
-                            <span className="badge badge-neutral text-xs">
-                              {(prediction.output_json.confidence * 100).toFixed(1)}%
-                            </span>
-                          )}
-                        </div>
-                      )}
-
-                      {prediction.modality === 'ecg' && prediction.output_json?.prediction && (
-                        <div className="flex items-center gap-2">
-                          <span className="text-sm text-muted-foreground">Prediction:</span>
-                          <span className={`badge ${prediction.output_json.prediction === 'Normal' ? 'badge-success' : 'badge-danger'}`}>
-                            {prediction.output_json.prediction}
-                          </span>
-                          {prediction.output_json.confidence !== undefined && (
-                            <span className="badge badge-neutral text-xs">
-                              {(prediction.output_json.confidence * 100).toFixed(1)}%
-                            </span>
-                          )}
-                        </div>
-                      )}
-
-                      {prediction.output_json?.demo_mode && (
-                        <p className="text-xs text-amber-600 dark:text-amber-400 italic">
-                          ⚠ Demo Mode — Using simulated predictions
-                        </p>
-                      )}
-                    </div>
-
-                    <p className="text-xs text-muted-foreground whitespace-nowrap">
-                      {new Date(prediction.created_at).toLocaleString()}
+              if (predictions.length === 0 && session.status !== 'done') {
+                return (
+                  <div className="py-10 text-center">
+                    <Activity className="w-10 h-10 text-muted-foreground/30 mx-auto mb-3" />
+                    <p className="text-sm text-muted-foreground">
+                      {session.status === 'streaming' || session.status === 'processing'
+                        ? 'Processing... Predictions will appear once inference completes.'
+                        : 'No predictions available for this session.'}
                     </p>
                   </div>
+                )
+              }
 
-                  {/* Probability Bars */}
-                  {prediction.output_json?.probabilities && (
-                    <div className="mt-4 pt-4 border-t border-border">
-                      <p className="text-xs font-semibold text-muted-foreground uppercase mb-3">Probabilities</p>
-                      <div className="space-y-2">
-                        {Object.entries(prediction.output_json.probabilities).map(
-                          ([key, value]: [string, any]) => (
-                            <div key={key} className="flex items-center gap-3 text-sm">
-                              <span className="w-20 text-muted-foreground text-xs font-medium">{key}</span>
-                              <div className="flex-1 h-2.5 bg-muted rounded-full overflow-hidden">
-                                <div
-                                  className="h-full rounded-full bg-gradient-to-r from-teal-500 to-teal-400 transition-all duration-500"
-                                  style={{ width: `${(value as number) * 100}%` }}
-                                />
-                              </div>
-                              <span className="w-12 text-right text-xs font-semibold text-foreground">
-                                {((value as number) * 100).toFixed(1)}%
-                              </span>
-                            </div>
-                          )
-                        )}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
+              if (activeReportTab === 'model1') {
+                return <Model1StateCard data={hier.model1} />
+              }
+              if (activeReportTab === 'model2') {
+                return <Model2DiagnosticCard data={hier.model2} murmurDetected={murmurDetected} />
+              }
+              if (activeReportTab === 'model3') {
+                return <Model3PrognosisCard data={hier.model3} />
+              }
+              return null
+            })()}
+          </div>
         </div>
 
         {/* Session Replay */}

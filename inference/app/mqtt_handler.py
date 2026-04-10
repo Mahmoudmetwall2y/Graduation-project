@@ -247,10 +247,9 @@ class MQTTHandler:
         blocking the asyncio event loop or the MQTT callback thread.
         """
         if self.loop and self.loop.is_running():
-            return asyncio.run_coroutine_threadsafe(
-                self.loop.run_in_executor(_executor, func, *args),
-                self.loop
-            )
+            async def _wrap():
+                return await self.loop.run_in_executor(_executor, func, *args)
+            return asyncio.run_coroutine_threadsafe(_wrap(), self.loop)
         else:
             logger.warning("Event loop not available, running synchronously")
             return func(*args)
@@ -595,9 +594,25 @@ class MQTTHandler:
                         severity_result
                     )
                     if not severity_id:
-                        raise RuntimeError(
-                            f"Failed to create murmur severity row for session {session_id}"
+                        logger.warning(
+                            f"Failed to create murmur severity row for session {session_id} — "
+                            "PCG prediction saved, severity data skipped"
                         )
+                    
+                    # Also write severity to predictions table so the frontend
+                    # can display Model 2 data via extractHierarchicalReport.
+                    await loop.run_in_executor(
+                        _executor,
+                        self.supabase.create_prediction,
+                        buffer.org_id,
+                        session_id,
+                        'pcg',
+                        'murmur_severity_cnn',
+                        severity_result.get('model_version', 'v1.0.0'),
+                        severity_result.get('preprocessing_version', 'v1.0.0'),
+                        severity_result,
+                        severity_result.get('latency_ms', 0)
+                    )
             
             # Audit log
             await loop.run_in_executor(_executor,

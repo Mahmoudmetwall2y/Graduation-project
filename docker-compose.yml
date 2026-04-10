@@ -24,6 +24,26 @@ services:
       retries: 3
       start_period: 10s
 
+  # NGINX Secure Reverse Proxy
+  nginx:
+    build:
+      context: ./nginx
+      dockerfile: Dockerfile
+    container_name: asculticor-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    networks:
+      - asculticor-network
+    depends_on:
+      mosquitto:
+        condition: service_healthy
+      frontend:
+        condition: service_started
+      inference:
+        condition: service_started
+    restart: unless-stopped
+
   # Inference/Ingress Service (Python FastAPI)
   inference:
     build:
@@ -63,8 +83,9 @@ services:
       # Logging
       - LOG_LEVEL=INFO
       - INFERENCE_INTERNAL_TOKEN=${INFERENCE_INTERNAL_TOKEN:?INFERENCE_INTERNAL_TOKEN is required}
+      - MODELS_DIR=/app/models
     volumes:
-      - ./inference/models:/app/models:ro
+      - ./models:/app/models:ro
       - inference_cache:/app/cache
     networks:
       - asculticor-network
@@ -87,14 +108,14 @@ services:
       args:
         - NEXT_PUBLIC_SUPABASE_URL=${SUPABASE_URL:?SUPABASE_URL is required}
         - NEXT_PUBLIC_SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY:?SUPABASE_ANON_KEY is required}
-        - NEXT_PUBLIC_MQTT_WS_URL=ws://localhost:9001
+        - NEXT_PUBLIC_MQTT_WS_URL=${NEXT_PUBLIC_MQTT_WS_URL:-wss://localhost/mqtt}
     container_name: asculticor-frontend
     ports:
       - "3000:3000"
     environment:
       - NEXT_PUBLIC_SUPABASE_URL=${SUPABASE_URL:?SUPABASE_URL is required}
       - NEXT_PUBLIC_SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY:?SUPABASE_ANON_KEY is required}
-      - NEXT_PUBLIC_MQTT_WS_URL=ws://localhost:9001
+      - NEXT_PUBLIC_MQTT_WS_URL=${NEXT_PUBLIC_MQTT_WS_URL:-wss://localhost/mqtt}
       - NODE_ENV=production
     networks:
       - asculticor-network

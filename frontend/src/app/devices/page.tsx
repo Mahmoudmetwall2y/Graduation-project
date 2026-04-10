@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { useMQTT } from '../hooks/useMQTT'
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs'
 import Link from 'next/link'
 import {
@@ -50,6 +51,9 @@ export default function DevicesPage() {
   const { showToast } = useToast()
   const channelRef = useRef<any>(null)
 
+  // ── Real-time MQTT WebSocket ───────────────────────────────────────
+  const { connected: mqttConnected, predictions: mqttDevices } = useMQTT()
+
   const fetchDevices = useCallback(async () => {
     try {
       const response = await fetch('/api/devices')
@@ -77,17 +81,17 @@ export default function DevicesPage() {
       })
       .subscribe()
 
-    // Poll fallback for environments without Realtime
-    const interval = setInterval(fetchDevices, 30000)
+    // Poll fallback — only when MQTT WebSocket is disconnected
+    const interval = mqttConnected ? null : setInterval(fetchDevices, 30000)
 
     return () => {
-      clearInterval(interval)
+      if (interval) clearInterval(interval)
       if (channelRef.current) {
         supabase.removeChannel(channelRef.current)
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fetchDevices, supabase])
+  }, [fetchDevices, supabase, mqttConnected])
 
   useEffect(() => {
     if (!showAddModal) return

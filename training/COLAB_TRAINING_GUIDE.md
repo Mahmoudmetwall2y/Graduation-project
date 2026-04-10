@@ -100,9 +100,9 @@ for zip_name in ['archive1.zip', 'archive2.zip', 'archive4.zip',
 
 ---
 
-### Model 3 – CNN ECG Arrhythmia
+### Model 3 – BiLSTM ECG Arrhythmia
 ```python
-!python model3_cnn_ecg_arrhythmia.py \
+!python model3_bilstm_ecg_arrhythmia.py \
     --colab \
     --drive-root /content/drive/MyDrive/cardiosense \
     --max-per-class 3000
@@ -145,8 +145,8 @@ python model1_xgboost_heart_sounds.py
 # Run Model 2 (CNN — will be slow on CPU)
 python model2_cnn_murmur_severity.py
 
-# Run Model 3 (CNN — will be slow on CPU)
-python model3_cnn_ecg_arrhythmia.py
+# Run Model 3 (BiLSTM — will be slow on CPU)
+python model3_bilstm_ecg_arrhythmia.py
 ```
 
 ---
@@ -169,8 +169,8 @@ models/
 │   ├── config.json             ← n_classes per head
 │   └── cm_*.png                ← 6 confusion matrices
 │
-└── model3_cnn_ecg/
-    ├── ecg_cnn_model.keras     ← trained CNN
+└── model3_bilstm_ecg/
+    ├── bilstm_model.keras      ← trained BiLSTM
     ├── label_encoder.pkl       ← beat type mapping
     ├── config.json             ← window_size, classes
     ├── training_history.png

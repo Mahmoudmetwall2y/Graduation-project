@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
+import { useMQTT } from '../hooks/useMQTT'
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
@@ -101,6 +102,18 @@ export default function Dashboard() {
   const [error, setError] = useState<string | null>(null)
   const router = useRouter()
   const supabase = createClientComponentClient()
+
+  // ── Real-time MQTT WebSocket (replaces setInterval polling) ────────
+  const { connected: mqttConnected, lastMessage: mqttPrediction } = useMQTT()
+
+  // Update dashboard state when a new MQTT prediction arrives
+  useEffect(() => {
+    if (mqttPrediction) {
+      setLatestPredictionLabel(mqttPrediction.ecg_arrhythmia || '')
+      setLatestConfidence(Math.round((mqttPrediction.confidence_score || 0) * 100))
+      setLastUpdated(new Date())
+    }
+  }, [mqttPrediction])
 
   const fetchDashboardData = useCallback(async () => {
     try {
@@ -321,13 +334,14 @@ export default function Dashboard() {
       })
       .subscribe()
 
-    const interval = setInterval(fetchDashboardData, 30000)
+    // Fallback: only poll via setInterval if MQTT is disconnected
+    const interval = mqttConnected ? null : setInterval(fetchDashboardData, 30000)
 
     return () => {
-      clearInterval(interval)
+      if (interval) clearInterval(interval)
       supabase.removeChannel(channel)
     }
-  }, [fetchDashboardData, supabase])
+  }, [fetchDashboardData, supabase, mqttConnected])
 
   const activeSessions = sessions.filter(s => s.status === 'streaming' || s.status === 'processing').length
   const completedSessions = sessions.filter(s => s.status === 'done').length

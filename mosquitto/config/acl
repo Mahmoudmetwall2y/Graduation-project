@@ -7,6 +7,10 @@
 # The inference service user can subscribe to all asculticor topics
 user asculticor
 topic readwrite asculticor/#
+topic readwrite org/#
+
+# Allow reading $SYS/# for healthcheck (mosquitto_sub -t $SYS/#)
+topic read $SYS/#
 
 # ───────────────────────────────────
 # Per-device rules (pattern-based)

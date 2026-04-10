@@ -44,12 +44,12 @@ export function generatePcgWaveform(count = 120) {
 }
 
 /** Convert raw sample buffer + sample rate into chart-ready { time, amplitude } series */
-export function buildWaveformSeries(samples: number[], sampleRate: number, maxPoints = 200) {
+export function buildWaveformSeries(samples: number[], sampleRate: number, maxPoints = 200, timeOffset = 0) {
   if (!samples || samples.length === 0 || !sampleRate) return []
   const step = Math.max(1, Math.ceil(samples.length / maxPoints))
   const data = []
   for (let i = 0; i < samples.length; i += step) {
-    const t = i / sampleRate
+    const t = timeOffset + (i / sampleRate)
     data.push({
       time: t.toFixed(2),
       amplitude: parseFloat(samples[i].toFixed(3)),

@@ -201,19 +201,24 @@ class SupabaseClient:
         preprocessing_version: str,
         severity_data: Dict[str, Any]
     ) -> Optional[str]:
-        """Create murmur severity entry."""
+        """Create murmur severity entry.
+        
+        The severity CNN outputs keys like systolic_timing, systolic_shape, etc.
+        Map them to the DB columns (location_json, timing_json, shape_json, etc.).
+        Missing keys are stored as empty dicts.
+        """
         try:
             response = self.client.table("murmur_severity").insert({
                 "org_id": org_id,
                 "session_id": session_id,
                 "model_version": model_version,
                 "preprocessing_version": preprocessing_version,
-                "location_json": severity_data['location'],
-                "timing_json": severity_data['timing'],
-                "shape_json": severity_data['shape'],
-                "grading_json": severity_data['grading'],
-                "pitch_json": severity_data['pitch'],
-                "quality_json": severity_data['quality']
+                "location_json": severity_data.get('murmur_locations', severity_data.get('location', {})),
+                "timing_json": severity_data.get('systolic_timing', severity_data.get('timing', {})),
+                "shape_json": severity_data.get('systolic_shape', severity_data.get('shape', {})),
+                "grading_json": severity_data.get('systolic_grading', severity_data.get('grading', {})),
+                "pitch_json": severity_data.get('systolic_pitch', severity_data.get('pitch', {})),
+                "quality_json": severity_data.get('systolic_quality', severity_data.get('quality', {}))
             }).execute()
             
             severity_id = response.data[0]["id"]

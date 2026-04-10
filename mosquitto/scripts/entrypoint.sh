@@ -10,7 +10,7 @@ if [ -z "$MQTT_USERNAME" ] || [ -z "$MQTT_PASSWORD" ]; then
 fi
 
 mosquitto_passwd -b -c /mosquitto/config/passwd "$MQTT_USERNAME" "$MQTT_PASSWORD"
-chmod 0700 /mosquitto/config/passwd
-chown mosquitto:mosquitto /mosquitto/config/passwd
+chmod 0640 /mosquitto/config/passwd
+chown root:mosquitto /mosquitto/config/passwd
 
 exec /usr/sbin/mosquitto -c /mosquitto/config/mosquitto.conf
