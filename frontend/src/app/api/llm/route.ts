@@ -481,9 +481,12 @@ Remember to include the medical disclaimer and emphasize this is not a diagnosis
 async function generateLLMReport(session: any, reportId: string, supabase: any) {
   const startMs = Date.now()
   const llmProvider = process.env.LLM_PROVIDER || 'demo'
+  const effectiveProvider = llmProvider === 'demo' ? 'demo' : 'demo'
 
   if (llmProvider !== 'demo') {
-    throw new Error(`LLM_PROVIDER=${llmProvider} is not implemented. Switch to demo or add provider integration.`)
+    console.warn(
+      `LLM_PROVIDER=${llmProvider} is not implemented. Falling back to the built-in demo template engine.`
+    )
   }
 
   // Generate template-based report from predictions (no artificial delay)
@@ -496,7 +499,7 @@ async function generateLLMReport(session: any, reportId: string, supabase: any) 
 **MEDICAL DISCLAIMER**: This analysis is for educational and research purposes only. It is NOT a medical diagnosis. Always consult qualified healthcare professionals for medical advice.
 
 > **Note**: This report was generated using a template engine (demo mode), not a large language model.
-> **Provider**: ${llmProvider}
+> **Provider**: ${effectiveProvider}${llmProvider !== 'demo' ? ` (fallback from ${llmProvider})` : ''}
 
 ### Findings Overview
 `

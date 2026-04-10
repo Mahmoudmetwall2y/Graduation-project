@@ -1,0 +1,44 @@
+- generic [active] [ref=e1]:
+  - alert [ref=e2]
+  - main [ref=e4]:
+    - generic [ref=e6]:
+      - generic [ref=e7]:
+        - img [ref=e12]
+        - generic [ref=e14]:
+          - img [ref=e17]
+          - heading "AscultiCor" [level=1] [ref=e20]
+          - paragraph [ref=e21]: AI-Powered Cardiac Auscultation and Prediction
+          - paragraph [ref=e22]: Real-time PCG & ECG analysis using heart sounds and machine learning
+          - generic [ref=e23]:
+            - generic [ref=e24]: Heart Sound Analysis
+            - generic [ref=e25]: ML Inference
+            - generic [ref=e26]: ECG/PCG
+            - generic [ref=e27]: IoT Devices
+      - generic [ref=e29]:
+        - generic [ref=e30]:
+          - heading "Welcome back" [level=2] [ref=e31]
+          - paragraph [ref=e32]: Sign in to your monitoring dashboard
+        - paragraph [ref=e60]: Invalid login credentials
+        - generic [ref=e33]:
+          - generic [ref=e34]:
+            - generic [ref=e35]: Email address
+            - generic [ref=e36]:
+              - img [ref=e37]
+              - textbox "Email address" [ref=e40]:
+                - /placeholder: you@example.com
+                - text: admin@asculticor.local
+          - generic [ref=e41]:
+            - generic [ref=e42]:
+              - generic [ref=e43]: Password
+              - button "Forgot password?" [ref=e44] [cursor=pointer]
+            - generic [ref=e45]:
+              - img [ref=e46]
+              - textbox "Password" [ref=e49]:
+                - /placeholder: ••••••••
+                - text: asculticor123
+              - button "Show password" [ref=e50] [cursor=pointer]:
+                - img [ref=e51]
+          - button "Sign in" [ref=e54] [cursor=pointer]:
+            - text: Sign in
+            - img [ref=e61]
+          - button "Don't have an account? Sign up" [ref=e58] [cursor=pointer]

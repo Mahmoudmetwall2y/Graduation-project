@@ -27,6 +27,29 @@ class SupabaseClient:
         self.client: Client = create_client(url, key)
         self.storage = self.client.storage
         logger.info("Supabase client initialized")
+
+    def check_connectivity(self) -> Dict[str, bool]:
+        """Lightweight dependency check used by the health endpoint."""
+        database_ok = False
+        storage_ok = False
+
+        try:
+            self.client.table("organizations").select("id").limit(1).execute()
+            database_ok = True
+        except Exception as e:
+            logger.error(f"Supabase database connectivity check failed: {e}")
+
+        try:
+            self.storage.list_buckets()
+            storage_ok = True
+        except Exception as e:
+            logger.error(f"Supabase storage connectivity check failed: {e}")
+
+        return {
+            "database": database_ok,
+            "storage": storage_ok,
+            "ok": database_ok and storage_ok,
+        }
     
     # ========== SESSION OPERATIONS ==========
     
@@ -51,9 +74,20 @@ class SupabaseClient:
             if ended_at:
                 update_data["ended_at"] = ended_at
             
-            self.client.table("sessions").update(update_data).eq("id", session_id).execute()
-            logger.info(f"Session {session_id} status updated to {status}")
-            return True
+            (
+                self.client.table("sessions")
+                .update(update_data)
+                .eq("id", session_id)
+                .execute()
+            )
+
+            refreshed = self.get_session(session_id)
+            if refreshed and refreshed.get("status") == status:
+                logger.info(f"Session {session_id} status updated to {status}")
+                return True
+
+            logger.warning(f"Session {session_id} was not found when updating status to {status}")
+            return False
         except Exception as e:
             logger.error(f"Error updating session status: {e}")
             return False
@@ -75,7 +109,7 @@ class SupabaseClient:
             if ended_at:
                 update_data["ended_at"] = ended_at
 
-            result = (
+            (
                 self.client.table("sessions")
                 .update(update_data)
                 .eq("id", session_id)
@@ -83,18 +117,17 @@ class SupabaseClient:
                 .execute()
             )
             
-            # Check if any rows were actually updated
-            if result.data and len(result.data) > 0:
+            refreshed = self.get_session(session_id)
+            if refreshed and refreshed.get("status") == new_status:
                 logger.info(
                     f"Session {session_id} status: {expected_status} → {new_status}"
                 )
                 return True
-            else:
-                logger.debug(
-                    f"Session {session_id} status was not '{expected_status}', "
-                    f"skipping transition to '{new_status}'"
-                )
-                return False
+            logger.debug(
+                f"Session {session_id} status was not '{expected_status}', "
+                f"skipping transition to '{new_status}'"
+            )
+            return False
         except Exception as e:
             logger.error(f"Error in conditional status update: {e}")
             return False
@@ -113,18 +146,131 @@ class SupabaseClient:
         except Exception as e:
             logger.error(f"Error getting stale sessions: {e}")
             return []
+
+    def ensure_session_exists(self, session_id: str, org_id: str, device_id: str) -> bool:
+        """Create a session row for device-originated streams when the UI did not pre-create one."""
+        try:
+            existing_response = (
+                self.client.table("sessions")
+                .select("id, org_id, device_id")
+                .eq("id", session_id)
+                .limit(1)
+                .execute()
+            )
+            existing = existing_response.data[0] if existing_response.data else None
+
+            if existing:
+                if existing["device_id"] != device_id or existing["org_id"] != org_id:
+                    logger.error(
+                        f"Session {session_id} already exists with mismatched ownership "
+                        f"(device={existing['device_id']}, org={existing['org_id']})"
+                    )
+                    return False
+                return True
+
+            device_response = (
+                self.client.table("devices")
+                .select("id, org_id, owner_user_id")
+                .eq("id", device_id)
+                .limit(1)
+                .execute()
+            )
+            device = device_response.data[0] if device_response.data else None
+            if not device:
+                logger.error(f"Cannot auto-create session {session_id}: device {device_id} not found")
+                return False
+
+            device_org_id = device.get("org_id")
+            owner_user_id = device.get("owner_user_id")
+            if not owner_user_id:
+                logger.error(
+                    f"Cannot auto-create session {session_id}: device {device_id} has no owner_user_id"
+                )
+                return False
+
+            if device_org_id != org_id:
+                logger.warning(
+                    f"Topic org_id {org_id} did not match device org_id {device_org_id}; "
+                    "using the database org_id"
+                )
+
+            self.client.table("sessions").insert({
+                "id": session_id,
+                "org_id": device_org_id,
+                "device_id": device_id,
+                "created_by": owner_user_id,
+                "status": "created",
+                "notes": "Auto-created from device stream",
+            }).execute()
+
+            logger.info(f"Auto-created session {session_id} for device {device_id}")
+            return True
+        except Exception as e:
+            logger.error(f"Error ensuring session exists: {e}")
+            return False
     
     # ========== DEVICE OPERATIONS ==========
     
     def update_device_last_seen(self, device_id: str) -> bool:
         """Update device last_seen_at timestamp."""
+        return self.update_device_status(
+            device_id,
+            {
+                "last_seen_at": datetime.now(timezone.utc).isoformat(),
+                "status": "online",
+            }
+        )
+
+    def update_device_status(self, device_id: str, updates: Dict[str, Any]) -> bool:
+        """Update device runtime metadata from heartbeat/status messages."""
+        allowed_fields = {
+            "status",
+            "last_seen_at",
+            "signal_strength",
+            "firmware_version",
+            "ip_address",
+            "battery_level",
+        }
+        payload = {
+            key: value for key, value in updates.items()
+            if key in allowed_fields and value is not None
+        }
+
+        if not payload:
+            return True
+
+        payload["updated_at"] = datetime.now(timezone.utc).isoformat()
+
         try:
-            self.client.table("devices").update({
-                "last_seen_at": datetime.now(timezone.utc).isoformat()
-            }).eq("id", device_id).execute()
+            self.client.table("devices").update(payload).eq("id", device_id).execute()
             return True
         except Exception as e:
-            logger.error(f"Error updating device last_seen: {e}")
+            logger.error(f"Error updating device status: {e}")
+            return False
+
+    def create_device_telemetry(
+        self,
+        device_id: str,
+        org_id: str,
+        telemetry: Dict[str, Any]
+    ) -> bool:
+        """Persist device heartbeat/status data for dashboards and alerting."""
+        try:
+            self.client.table("device_telemetry").insert({
+                "device_id": device_id,
+                "org_id": org_id,
+                "temperature_celsius": telemetry.get("temperature_celsius"),
+                "uptime_seconds": telemetry.get("uptime_seconds"),
+                "free_heap_bytes": telemetry.get("free_heap_bytes"),
+                "wifi_rssi": telemetry.get("wifi_rssi"),
+                "battery_voltage": telemetry.get("battery_voltage"),
+                "error_count": telemetry.get("error_count", 0),
+                "telemetry_json": telemetry.get("telemetry_json", {}),
+                "recorded_at": telemetry.get("recorded_at") or datetime.now(timezone.utc).isoformat(),
+            }).execute()
+            return True
+        except Exception as e:
+            logger.error(f"Error creating device telemetry: {e}")
             return False
     
     # ========== RECORDING OPERATIONS ==========

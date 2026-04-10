@@ -26,7 +26,7 @@ Data flow:
 
 ### Prerequisites
 - Docker and Docker Compose
-- Node.js 18+ (for local frontend development)
+- Node.js 20+ (for local frontend development)
 - A Supabase project (free tier works)
 
 ### 1. Configure environment
@@ -40,6 +40,8 @@ Edit `.env` with your Supabase credentials.
 Configuration notes:
 - `LLM_PROVIDER=demo` uses template reports. Set to a real provider only after integration.
 - `CORS_ORIGIN` is used by Supabase Edge Functions to restrict origins.
+- `MQTT_BIND_ADDRESS=127.0.0.1` keeps the broker local-only. Set `MQTT_BIND_ADDRESS=0.0.0.0` for real ESP32 devices on your LAN.
+- `DEVICE_BOOTSTRAP_PUBLIC_BASE_URL` should be set to a URL reachable by hardware devices if you want to use the recommended bootstrap provisioning flow.
 
 ### 2. Apply database migrations
 
@@ -76,9 +78,12 @@ Optional: enable `.github/workflows/process-llm-queue.yml` and set repository se
 
 ### 5. Login
 
-Default credentials (from seed data):
-- Email: `admin@asculticor.local`
-- Password: `asculticor123`
+Use an existing Supabase Auth user, or create one through the UI at `/auth/login`.
+
+Important notes:
+- `supabase/seed.sql` inserts demo `profiles` and device metadata, but it does **not** create rows in `auth.users`.
+- If you want the historical demo admin account, create `admin@asculticor.local` in Supabase Auth first.
+- Self-signup can auto-provision an `operator` profile only when `DEFAULT_SIGNUP_ORG_ID` is configured or the database contains exactly one organization.
 
 ## Project Structure
 

@@ -6,8 +6,8 @@ services:
       dockerfile: Dockerfile
     container_name: asculticor-mosquitto
     ports:
-      - "127.0.0.1:1883:1883"      # MQTT — localhost only, not publicly accessible
-      - "9001:9001"      # MQTT over WebSocket (needed by browser clients)
+      - "${MQTT_BIND_ADDRESS:-127.0.0.1}:1883:1883"
+      - "${MQTT_WS_BIND_ADDRESS:-127.0.0.1}:9001:9001"
     environment:
       - MQTT_USERNAME=${MQTT_USERNAME}
       - MQTT_PASSWORD=${MQTT_PASSWORD}
@@ -68,8 +68,8 @@ services:
       - PCG_SAMPLE_RATE=22050
       - PCG_TARGET_DURATION=10
       - PCG_MAX_DURATION=15
-      - ECG_SAMPLE_RATE=500
-      - ECG_WINDOW_SIZE=500
+      - ECG_SAMPLE_RATE=360
+      - ECG_WINDOW_SIZE=300
       - ECG_MAX_DURATION=60
       
       # Processing
@@ -108,14 +108,23 @@ services:
       args:
         - NEXT_PUBLIC_SUPABASE_URL=${SUPABASE_URL:?SUPABASE_URL is required}
         - NEXT_PUBLIC_SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY:?SUPABASE_ANON_KEY is required}
-        - NEXT_PUBLIC_MQTT_WS_URL=${NEXT_PUBLIC_MQTT_WS_URL:-wss://localhost/mqtt}
     container_name: asculticor-frontend
     ports:
       - "3000:3000"
     environment:
       - NEXT_PUBLIC_SUPABASE_URL=${SUPABASE_URL:?SUPABASE_URL is required}
       - NEXT_PUBLIC_SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY:?SUPABASE_ANON_KEY is required}
-      - NEXT_PUBLIC_MQTT_WS_URL=${NEXT_PUBLIC_MQTT_WS_URL:-wss://localhost/mqtt}
+      - SUPABASE_URL=${SUPABASE_URL:?SUPABASE_URL is required}
+      - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY:?SUPABASE_SERVICE_ROLE_KEY is required}
+      - INTERNAL_API_TOKEN=${INTERNAL_API_TOKEN:?INTERNAL_API_TOKEN is required}
+      - LLM_PROVIDER=${LLM_PROVIDER:-demo}
+      - MQTT_USERNAME=${MQTT_USERNAME:?MQTT_USERNAME is required}
+      - MQTT_PASSWORD=${MQTT_PASSWORD:?MQTT_PASSWORD is required}
+      - MQTT_BIND_ADDRESS=${MQTT_BIND_ADDRESS:-127.0.0.1}
+      - DEVICE_BOOTSTRAP_PUBLIC_BASE_URL=${DEVICE_BOOTSTRAP_PUBLIC_BASE_URL:-}
+      - DEVICE_BOOTSTRAP_MQTT_HOST=${DEVICE_BOOTSTRAP_MQTT_HOST:-}
+      - DEVICE_BOOTSTRAP_MQTT_PORT=${DEVICE_BOOTSTRAP_MQTT_PORT:-1883}
+      - DEVICE_BOOTSTRAP_MQTT_TLS=${DEVICE_BOOTSTRAP_MQTT_TLS:-false}
       - NODE_ENV=production
     networks:
       - asculticor-network
@@ -124,7 +133,7 @@ services:
         condition: service_healthy
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/api/health"]
       interval: 30s
       timeout: 10s
       retries: 3

@@ -6,7 +6,7 @@ Quick navigation to all project documentation.
 
 ### Getting Started
 - [README.md](../README.md) - Project overview and quick start
-- [INTEGRATION_GUIDE.md](../INTEGRATION_GUIDE.md) - How to integrate hardware, ML models, and LLM
+- [COMPLETE_IMPLEMENTATION_GUIDE.md](COMPLETE_IMPLEMENTATION_GUIDE.md) - End-to-end setup and architecture
 - [CHANGELOG.md](../CHANGELOG.md) - Version history and changes
 
 ### Security & Legal
@@ -32,9 +32,9 @@ Quick navigation to all project documentation.
 | I want to... | Read this |
 |-------------|-----------|
 | **Set up the project** | [README.md](../README.md) |
-| **Connect ESP32 hardware** | [INTEGRATION_GUIDE.md](../INTEGRATION_GUIDE.md) |
+| **Connect ESP32 hardware** | [HARDWARE_INTEGRATION.md](HARDWARE_INTEGRATION.md) |
 | **Deploy to production** | [CLOUD_DEPLOYMENT.md](CLOUD_DEPLOYMENT.md) |
-| **Add ML models** | [INTEGRATION_GUIDE.md](../INTEGRATION_GUIDE.md) |
+| **Add ML models** | [COMPLETE_IMPLEMENTATION_GUIDE.md](COMPLETE_IMPLEMENTATION_GUIDE.md) |
 | **Secure the application** | [SECURITY.md](../SECURITY.md) |
 | **Troubleshoot issues** | [SUPABASE_REALTIME_WORKAROUNDS.md](SUPABASE_REALTIME_WORKAROUNDS.md) |
 | **Understand architecture** | [COMPLETE_IMPLEMENTATION_GUIDE.md](COMPLETE_IMPLEMENTATION_GUIDE.md) |

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs'
 import { useRouter } from 'next/navigation'
 import { Heart, Mail, Lock, ArrowRight, Activity, Eye, EyeOff, User, CheckCircle } from 'lucide-react'
@@ -17,6 +17,22 @@ export default function LoginPage() {
   const [message, setMessage] = useState<string | null>(null)
   const router = useRouter()
   const supabase = createClientComponentClient()
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const callbackError = params.get('error')
+    const callbackMessage = params.get('message')
+
+    if (!callbackError) return
+
+    const fallbackMessage = {
+      missing_code: 'Authentication could not be completed because the callback code was missing.',
+      auth_callback_failed: 'Authentication could not be completed. Please try again.',
+      profile_setup_failed: 'Your account was created, but the application profile could not be provisioned.',
+    }[callbackError] || 'Authentication could not be completed.'
+
+    setError(callbackMessage || fallbackMessage)
+  }, [])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -50,7 +66,7 @@ export default function LoginPage() {
           password,
         })
         if (signInError) throw signInError
-        router.push('/')
+        router.push('/dashboard')
         router.refresh()
       }
     } catch (err: any) {

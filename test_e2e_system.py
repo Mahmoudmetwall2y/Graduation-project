@@ -44,8 +44,8 @@ from datetime import datetime
 
 MQTT_BROKER  = "localhost"
 MQTT_PORT    = 1883
-MQTT_USER    = os.getenv("MQTT_USERNAME", "asculticor")
-MQTT_PASS    = os.getenv("MQTT_PASSWORD", "asculticor1234")
+MQTT_USER    = "asculticor"
+MQTT_PASS    = "asculticor123"
 
 PROJECT_ROOT = Path(__file__).parent.resolve()
 DATASETS_DIR = PROJECT_ROOT / "datasets"
@@ -97,6 +97,14 @@ def parse_env():
                     k, v = line.strip().split('=', 1)
                     env_vars[k] = v
     return env_vars
+
+
+def get_env_or_file(name: str, default: str | None = None) -> str | None:
+    value = os.getenv(name)
+    if value:
+        return value
+
+    return parse_env().get(name, default)
 
 
 def _supabase_request(url, key, path, method="GET", body=None, params=None):
@@ -238,6 +246,9 @@ def on_message(client, userdata, msg):
 
 
 def create_mqtt_client():
+    mqtt_user = get_env_or_file("MQTT_USERNAME", MQTT_USER)
+    mqtt_pass = get_env_or_file("MQTT_PASSWORD", MQTT_PASS)
+
     try:
         client = mqtt.Client(
             callback_api_version=mqtt.CallbackAPIVersion.VERSION1,
@@ -245,7 +256,7 @@ def create_mqtt_client():
         )
     except (AttributeError, TypeError):
         client = mqtt.Client(client_id=f"e2e-test-{uuid.uuid4().hex[:8]}")
-    client.username_pw_set(MQTT_USER, MQTT_PASS)
+    client.username_pw_set(mqtt_user, mqtt_pass)
     client.on_connect = on_connect
     client.on_message = on_message
     return client
@@ -587,6 +598,7 @@ def check_inference_logs():
 def main():
     banner("AscultiCor - End-to-End Integration Test v2")
     print(f"  MQTT Broker:  {MQTT_BROKER}:{MQTT_PORT}")
+    print(f"  MQTT User:    {get_env_or_file('MQTT_USERNAME', MQTT_USER)}")
     print(f"  Org ID:       {ORG_ID}")
     print(f"  Device ID:    {DEVICE_ID}")
     print(f"  Timestamp:    {datetime.now().isoformat()}")

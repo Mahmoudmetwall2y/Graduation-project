@@ -31,7 +31,10 @@ logs/
 *.pid
 *.seed
 *.pid.lock
-
+.specify/
+.gitnexus/
+.claude/skills/gitnexus/
+.agent/
 # Build outputs
 dist/
 build/
@@ -47,6 +50,7 @@ inference/models/*.pt
 inference/models/*.pth
 !inference/models/.gitkeep
 
+specs/
 # Data
 *.wav
 *.bin

@@ -1,6 +1,7 @@
 'use client'
 
 import Link from 'next/link'
+import Image from 'next/image'
 import { useEffect, useRef, useState } from 'react'
 import {
   Activity,
@@ -23,7 +24,7 @@ import styles from './showcase.module.css'
 /* ── Logo component using actual brand asset ────────────── */
 function AscultiCorLogo({ size = 36 }: { size?: number }) {
   return (
-    <img
+    <Image
       src="/logo.png"
       alt="AscultiCor Logo"
       width={size}
