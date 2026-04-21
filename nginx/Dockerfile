@@ -1,7 +1,7 @@
 FROM nginx:alpine
 
-# Copy NGINX configuration
-COPY nginx.conf /etc/nginx/nginx.conf
+# Copy the envsubst-ready server template
+COPY default.conf.template /etc/nginx/templates/default.conf.template
 
 # Create certs directory for self-signed SSL (mount or generate at build)
 RUN mkdir -p /etc/nginx/certs

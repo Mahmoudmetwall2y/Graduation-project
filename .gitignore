@@ -1,5 +1,6 @@
 # Environment variables
 .env
+.env.cloud
 .env.local
 .env.*.local
 
@@ -60,6 +61,8 @@ recordings/
 
 # Docker
 docker-compose.override.yml
+nginx/certs/*
+!nginx/certs/.gitkeep
 
 # Testing
 .coverage
