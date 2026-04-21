@@ -33,6 +33,11 @@ from .security import SecurityHeadersMiddleware, rate_limit
 mqtt_handler: Optional[MQTTHandler] = None
 
 
+def _parse_csv_env(name: str, default: str) -> list[str]:
+    raw_value = os.getenv(name, default)
+    return [item.strip() for item in raw_value.split(",") if item.strip()]
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifecycle management for FastAPI app."""
@@ -90,15 +95,19 @@ app = FastAPI(
 
 # Security middleware (only in production)
 if os.getenv("SECURITY_HEADERS_ENABLED", "false").lower() == "true":
+    trusted_hosts = _parse_csv_env(
+        "TRUSTED_HOSTS",
+        "*.asculticor.com,localhost,127.0.0.1"
+    )
     app.add_middleware(
         TrustedHostMiddleware,
-        allowed_hosts=["*.asculticor.com", "localhost", "127.0.0.1"]
+        allowed_hosts=trusted_hosts
     )
     app.add_middleware(SecurityHeadersMiddleware)
     logger.info("Security headers middleware enabled")
 
 # CORS middleware
-allowed_origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000").split(",")
+allowed_origins = _parse_csv_env("ALLOWED_ORIGINS", "http://localhost:3000")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
@@ -231,6 +240,8 @@ async def get_config(request: Request):
     
     if not mqtt_handler:
         raise HTTPException(status_code=503, detail="Service not initialized")
+
+    engine = mqtt_handler.inference_engine
     
     return ConfigResponse(
         preprocessing_version=get_preprocessing_version(),
@@ -241,7 +252,7 @@ async def get_config(request: Request):
         ecg_window_size=engine.ecg_preprocessor.window_size,
         ecg_max_duration=float(os.getenv("ECG_MAX_DURATION", 60)),
         stream_timeout_sec=int(os.getenv("STREAM_TIMEOUT_SEC", 10)),
-        metrics_update_hz=float(os.getenv("METRICS_UPDATE_HZ", 2)),
+        metrics_update_hz=float(os.getenv("METRICS_UPDATE_HZ", 10)),
         demo_mode=os.getenv("ENABLE_DEMO_MODE", "true").lower() == "true"
     )
 

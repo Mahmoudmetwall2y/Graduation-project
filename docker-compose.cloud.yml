@@ -1,0 +1,46 @@
+services:
+  nginx:
+    volumes:
+      - ./nginx/certs:/etc/nginx/certs:ro
+
+  n8n:
+    image: docker.n8n.io/n8nio/n8n:stable
+    container_name: asculticor-n8n
+    ports:
+      - "${N8N_BIND_ADDRESS:-127.0.0.1}:${N8N_PORT:-5678}:5678"
+    environment:
+      - N8N_BASIC_AUTH_ACTIVE=true
+      - N8N_BASIC_AUTH_USER=${N8N_USER:?N8N_USER is required}
+      - N8N_BASIC_AUTH_PASSWORD=${N8N_PASSWORD:?N8N_PASSWORD is required}
+      - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY:?N8N_ENCRYPTION_KEY is required}
+      - N8N_PROXY_HOPS=${N8N_PROXY_HOPS:-1}
+      - WEBHOOK_URL=${N8N_WEBHOOK_URL:-}
+      - GENERIC_TIMEZONE=${GENERIC_TIMEZONE:-Africa/Cairo}
+      - TZ=${GENERIC_TIMEZONE:-Africa/Cairo}
+      - ASCULTICOR_APP_URL=http://frontend:3000
+      - ASCULTICOR_INFERENCE_URL=http://inference:8000
+      - ASCULTICOR_INTERNAL_API_TOKEN=${INTERNAL_API_TOKEN:?INTERNAL_API_TOKEN is required}
+      - ASCULTICOR_INFERENCE_TOKEN=${INFERENCE_INTERNAL_TOKEN:?INFERENCE_INTERNAL_TOKEN is required}
+      - SUPABASE_URL=${SUPABASE_URL:?SUPABASE_URL is required}
+      - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY:?SUPABASE_SERVICE_ROLE_KEY is required}
+      - MQTT_HOST=mosquitto
+      - MQTT_PORT=1883
+      - MQTT_USERNAME=${MQTT_USERNAME:?MQTT_USERNAME is required}
+      - MQTT_PASSWORD=${MQTT_PASSWORD:?MQTT_PASSWORD is required}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENAI_MODEL=${OPENAI_MODEL:-}
+    volumes:
+      - n8n_data:/home/node/.n8n
+    networks:
+      - asculticor-network
+    depends_on:
+      frontend:
+        condition: service_started
+      inference:
+        condition: service_started
+      mosquitto:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  n8n_data:
