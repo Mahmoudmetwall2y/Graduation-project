@@ -2,6 +2,34 @@ import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs'
 import { cookies } from 'next/headers'
 import { NextResponse } from 'next/server'
 
+const DEVICE_OFFLINE_THRESHOLD_MS = 90 * 1000
+
+function normalizeDeviceRuntimeStatus<T extends { status?: string | null; last_seen_at?: string | null }>(
+  device: T
+): T {
+  if (!device) return device
+
+  const rawStatus = device.status || 'offline'
+  if (rawStatus === 'error' || rawStatus === 'offline') {
+    return { ...device, status: rawStatus }
+  }
+
+  if (!device.last_seen_at) {
+    return { ...device, status: 'offline' }
+  }
+
+  const lastSeenAt = new Date(device.last_seen_at).getTime()
+  if (!Number.isFinite(lastSeenAt)) {
+    return { ...device, status: 'offline' }
+  }
+
+  const isFresh = Date.now() - lastSeenAt <= DEVICE_OFFLINE_THRESHOLD_MS
+  return {
+    ...device,
+    status: isFresh ? 'online' : 'offline'
+  }
+}
+
 // GET /api/devices/[id] - Get device details
 export async function GET(
   request: Request,
@@ -87,7 +115,7 @@ export async function GET(
     }
 
     return NextResponse.json({
-      device,
+      device: normalizeDeviceRuntimeStatus(device),
       telemetry: telemetry || [],
       summaries: summaries || [],
       alerts: alerts || [],

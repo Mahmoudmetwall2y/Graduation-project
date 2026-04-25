@@ -51,7 +51,20 @@ SET wifi_pass YourPassword
 REBOOT
 ```
 
-After reboot, the firmware will fetch `org_id`, `mqtt_host`, `mqtt_port`, `mqtt_user`, and `mqtt_pass` from the AscultiCor app automatically.
+After reboot, the firmware will fetch `org_id`, `mqtt_host`, `mqtt_port`, `mqtt_user`, and this device's MQTT password from the AscultiCor app automatically.
+
+If your bootstrap URL uses HTTPS, configure one of these trust options before rebooting:
+
+```text
+SET bootstrap_tls_fingerprint AA:BB:CC:DD:...
+SET bootstrap_ca_pem -----BEGIN CERTIFICATE-----|...|-----END CERTIFICATE-----
+```
+
+For local development only, you can explicitly allow insecure HTTPS bootstrap:
+
+```text
+SET bootstrap_insecure true
+```
 
 Legacy manual MQTT flow is still supported:
 
@@ -114,6 +127,9 @@ LO-  → GPIO 35        A/R  → float (default)
 Important keys:
 - `bootstrap_url`: Recommended provisioning endpoint for secure broker bootstrap
 - `device_secret`: Required for bootstrap mode
+- `bootstrap_tls_fingerprint`: SHA-1 fingerprint for HTTPS bootstrap pinning
+- `bootstrap_ca_pem`: PEM certificate stored as a single line with `|` instead of newlines
+- `bootstrap_insecure`: Development-only fallback for insecure HTTPS bootstrap
 - `mqtt_port`: Now stored correctly as an integer in NVS
 
 ## Changelog

@@ -11,6 +11,7 @@ from typing import Dict, Any, Optional
 import logging
 import time
 from pathlib import Path
+from scipy import signal as scipy_signal
 
 from .preprocessing import (
     PCGPreprocessor,
@@ -77,10 +78,25 @@ class InferenceEngine:
             'ecg_bilstm': {'loaded': False, 'error': None},
         }
 
-        # Initialize preprocessors
-        self.pcg_preprocessor = PCGPreprocessor()
-        self.severity_preprocessor = PCGSeverityPreprocessor()
-        self.ecg_preprocessor = ECGPreprocessor()
+        # Initialize preprocessors from environment so deployment config can
+        # tune capture windows without code edits.
+        pcg_sample_rate = int(os.getenv("PCG_SAMPLE_RATE", 22050))
+        pcg_target_duration = float(os.getenv("PCG_TARGET_DURATION", 10))
+        ecg_sample_rate = int(os.getenv("ECG_SAMPLE_RATE", 360))
+        ecg_window_size = int(os.getenv("ECG_WINDOW_SIZE", 300))
+        self.ecg_max_windows = int(os.getenv("ECG_MAX_WINDOWS", 12))
+
+        self.pcg_preprocessor = PCGPreprocessor(
+            sample_rate=pcg_sample_rate,
+            target_duration=pcg_target_duration,
+        )
+        self.severity_preprocessor = PCGSeverityPreprocessor(
+            sample_rate=pcg_sample_rate,
+        )
+        self.ecg_preprocessor = ECGPreprocessor(
+            sample_rate=ecg_sample_rate,
+            window_size=ecg_window_size,
+        )
 
         # Placeholders for models and artifacts
         self.pcg_model = None
@@ -396,29 +412,16 @@ class InferenceEngine:
                     'demo_mode': False,
                 }
 
-            # Preprocess
-            processed = self.ecg_preprocessor.process(ecg, original_sr=sample_rate)
-
-            # BiLSTM expects (batch, timesteps, features)
-            # The training data has shape (N, 300, 2) for 2 ECG leads
-            if processed.ndim == 1:
-                # Single-lead input: convert to (300, 1) then pad with zeroes to (300, 2)
-                processed = processed.reshape(-1, 1)
-                processed = np.pad(processed, ((0,0), (0, 1)), 'constant')
-                processed = np.expand_dims(processed, axis=0) # (1, 300, 2)
-            elif processed.ndim == 2:
-                # Ensure exactly 2 leads
-                if processed.shape[1] == 1:
-                    processed = np.pad(processed, ((0,0), (0, 1)), 'constant')
-                elif processed.shape[1] > 2:
-                    processed = processed[:, :2]
-                processed = np.expand_dims(processed, axis=0)
+            prepared_signal = self._prepare_ecg_signal(ecg, sample_rate)
+            ecg_windows = self._build_ecg_windows(prepared_signal)
+            processed_batch = self._format_ecg_windows(ecg_windows)
 
             # Predict
             if self.demo_mode_active:
                 result = self._demo_ecg_prediction(ecg)
             else:
-                prediction = self.ecg_model.predict(processed)
+                prediction = self.ecg_model.predict(processed_batch, verbose=0)
+                mean_prediction = np.mean(prediction, axis=0)
 
                 # Get beat-type classes from trained label encoder
                 if self.ecg_label_encoder is not None:
@@ -428,19 +431,23 @@ class InferenceEngine:
                         'classes', ['N', 'V', 'L', 'R', 'A', '/', 'F']
                     )
 
-                pred_idx = np.argmax(prediction[0])
+                pred_idx = np.argmax(mean_prediction)
                 beat_type = beat_classes[pred_idx]
 
                 # Raw probabilities per beat type
                 raw_probs = {
-                    bt: float(prediction[0][i])
+                    bt: float(mean_prediction[i])
                     for i, bt in enumerate(beat_classes)
                 }
 
                 # Map to AAMI 5-class scheme
                 aami_label = BEAT_TO_AAMI.get(beat_type, 'Unknown')
-                aami_probs = self._aggregate_aami_probs(prediction[0], beat_classes)
+                aami_probs = self._aggregate_aami_probs(mean_prediction, beat_classes)
                 aami_confidence = float(aami_probs.get(aami_label, 0.0))
+                heart_rate_bpm = self._estimate_heart_rate(
+                    prepared_signal,
+                    self.ecg_preprocessor.sample_rate
+                )
 
                 result = {
                     'prediction': aami_label,
@@ -448,6 +455,8 @@ class InferenceEngine:
                     'confidence': aami_confidence,
                     'probabilities': aami_probs,
                     'raw_probabilities': raw_probs,
+                    'heart_rate_bpm': heart_rate_bpm,
+                    'windows_analyzed': int(processed_batch.shape[0]),
                 }
 
             # Add metadata
@@ -483,6 +492,78 @@ class InferenceEngine:
             aami_class = BEAT_TO_AAMI.get(bt, 'Unknown')
             aami_probs[aami_class] += float(raw_probs[i])
         return aami_probs
+
+    def _prepare_ecg_signal(self, ecg: np.ndarray, original_sr: int) -> np.ndarray:
+        """Apply ECG preprocessing stages while preserving the full recording."""
+        prepared = ecg.astype(np.float32)
+
+        if original_sr and original_sr != self.ecg_preprocessor.sample_rate:
+            prepared = scipy_signal.resample(
+                prepared,
+                int(len(prepared) * self.ecg_preprocessor.sample_rate / original_sr)
+            )
+
+        prepared = self.ecg_preprocessor._bandpass_filter(prepared)
+        prepared = self.ecg_preprocessor._baseline_correction(prepared)
+        prepared = self.ecg_preprocessor._denoise(prepared)
+        return prepared
+
+    def _build_ecg_windows(self, ecg: np.ndarray) -> np.ndarray:
+        """Slice the full ECG into a bounded set of overlapping windows."""
+        window_size = self.ecg_preprocessor.window_size
+        stride = max(1, window_size // 2)
+
+        if ecg.size <= window_size:
+            padded = np.pad(ecg, (0, max(0, window_size - ecg.size)), mode='edge')
+            return np.expand_dims(padded[:window_size], axis=0)
+
+        starts = list(range(0, ecg.size - window_size + 1, stride))
+        if not starts:
+            starts = [0]
+
+        if len(starts) > self.ecg_max_windows:
+            selected = np.linspace(0, len(starts) - 1, self.ecg_max_windows, dtype=int)
+            starts = [starts[idx] for idx in selected]
+
+        windows = [ecg[start:start + window_size] for start in starts]
+        return np.stack(windows, axis=0)
+
+    def _format_ecg_windows(self, ecg_windows: np.ndarray) -> np.ndarray:
+        """Normalize each ECG window and format it for the BiLSTM input."""
+        normalized = []
+        for window in ecg_windows:
+            normalized_window = self.ecg_preprocessor._normalize(window)
+            normalized.append(normalized_window)
+
+        batch = np.stack(normalized, axis=0).astype(np.float32)
+        batch = np.expand_dims(batch, axis=-1)
+        batch = np.pad(batch, ((0, 0), (0, 0), (0, 1)), 'constant')
+        return batch
+
+    def _estimate_heart_rate(self, ecg: np.ndarray, sample_rate: int) -> Optional[float]:
+        """Estimate heart rate from R-peak intervals on the preprocessed ECG."""
+        if ecg.size < sample_rate * 2:
+            return None
+
+        signal_energy = np.abs(ecg)
+        prominence = max(np.std(signal_energy) * 0.8, 0.05)
+        min_distance = max(1, int(sample_rate * 0.3))
+        peaks, _ = scipy_signal.find_peaks(
+            signal_energy,
+            distance=min_distance,
+            prominence=prominence,
+        )
+
+        if peaks.size < 2:
+            return None
+
+        rr_intervals = np.diff(peaks) / float(sample_rate)
+        rr_intervals = rr_intervals[(rr_intervals >= 0.3) & (rr_intervals <= 2.0)]
+        if rr_intervals.size == 0:
+            return None
+
+        bpm = 60.0 / np.median(rr_intervals)
+        return round(float(bpm), 1)
 
     def _parse_head(self, probs: np.ndarray, labels: list) -> Dict[str, Any]:
         """Parse multi-class head output."""
@@ -601,6 +682,8 @@ class InferenceEngine:
                 'prediction': 'VEB',
                 'beat_type': 'V',
                 'confidence': 0.68,
+                'heart_rate_bpm': 96.0,
+                'windows_analyzed': 1,
                 'probabilities': {
                     'Normal': 0.12, 'SVEB': 0.10,
                     'VEB': 0.68, 'Fusion': 0.06,
@@ -613,6 +696,8 @@ class InferenceEngine:
                 'prediction': 'SVEB',
                 'beat_type': 'A',
                 'confidence': 0.62,
+                'heart_rate_bpm': 88.0,
+                'windows_analyzed': 1,
                 'probabilities': {
                     'Normal': 0.20, 'SVEB': 0.62,
                     'VEB': 0.08, 'Fusion': 0.05,
@@ -625,6 +710,8 @@ class InferenceEngine:
                 'prediction': 'Normal',
                 'beat_type': 'N',
                 'confidence': 0.81,
+                'heart_rate_bpm': 72.0,
+                'windows_analyzed': 1,
                 'probabilities': {
                     'Normal': 0.81, 'SVEB': 0.08,
                     'VEB': 0.05, 'Fusion': 0.03,

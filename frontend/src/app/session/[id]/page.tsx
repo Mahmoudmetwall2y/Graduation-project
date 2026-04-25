@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useMemo, useRef } from 'react'
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
@@ -9,15 +9,16 @@ import {
   CheckCircle, AlertTriangle, Loader2, Trash2, Download,
   FileText, Info, FileDown, ClipboardList, Stethoscope, TrendingUp
 } from 'lucide-react'
-import {
-  AreaChart, Area, XAxis, YAxis, CartesianGrid,
-  Tooltip, ResponsiveContainer,
-} from 'recharts'
 import { PageSkeleton } from '../../components/Skeleton'
 import { useToast } from '../../components/Toast'
 import { Model1StateCard } from '../../../components/session/Model1StateCard'
 import { Model2DiagnosticCard } from '../../../components/session/Model2DiagnosticCard'
 import { Model3PrognosisCard } from '../../../components/session/Model3PrognosisCard'
+import {
+  LiveWaveformMonitor,
+  LiveWaveformMonitorHandle,
+  LiveWaveformFrame,
+} from '../../../components/session/LiveWaveformMonitor'
 import { extractHierarchicalReport } from './types'
 
 interface Session {
@@ -55,11 +56,7 @@ type ActiveReportTab = 'model1' | 'model2' | 'model3'
 
 interface LiveMetrics {
   metrics_json: {
-    waveform?: {
-      modality: 'pcg' | 'ecg'
-      sample_rate: number
-      samples: number[]
-    }
+    waveform?: LiveWaveformFrame
     timestamp?: string
   }
   created_at: string
@@ -73,8 +70,28 @@ interface SessionNote {
   author_name?: string | null
 }
 
+interface SessionSummaryResponse {
+  session: Session
+  predictions: Prediction[]
+  notes: SessionNote[]
+  deidentifyExports: boolean
+}
+
+interface LiveWaveformResponse {
+  frames: Array<{
+    created_at: string
+    waveform: LiveWaveformFrame
+  }>
+  cursor: string | null
+  lastLiveAt: string | null
+  sessionStatus: string
+}
+
 // Waveform utilities — shared with dashboard page
-import { generateEcgWaveform, generatePcgWaveform, buildWaveformSeries } from '../../../lib/waveform'
+import {
+  generateEcgWaveformSamples,
+  generatePcgWaveformSamples,
+} from '../../../lib/waveform'
 
 function escapeHtml(value: unknown): string {
   return String(value ?? '')
@@ -100,54 +117,272 @@ export default function SessionDetailPage() {
   const [error, setError] = useState<string | null>(null)
   const [deleting, setDeleting] = useState(false)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
-  const [ecgData, setEcgData] = useState<any[]>([])
-  const [pcgData, setPcgData] = useState<any[]>([])
-  const [replayEcg, setReplayEcg] = useState<Array<{ ts: string; samples: number[]; sampleRate: number }>>([])
-  const [replayPcg, setReplayPcg] = useState<Array<{ ts: string; samples: number[]; sampleRate: number }>>([])
+  const [waveformAvailability, setWaveformAvailability] = useState({
+    ecg: false,
+    pcg: false,
+  })
   const [notes, setNotes] = useState<SessionNote[]>([])
   const [noteDraft, setNoteDraft] = useState('')
   const [savingNote, setSavingNote] = useState(false)
   const [lastLiveAt, setLastLiveAt] = useState<string | null>(null)
   const [deidentifyExports, setDeidentifyExports] = useState(false)
   const [activeReportTab, setActiveReportTab] = useState<ActiveReportTab>('model1')
+  const [uiNow, setUiNow] = useState(() => Date.now())
   const deleteModalRef = useRef<HTMLDivElement | null>(null)
   const deletePrimaryRef = useRef<HTMLButtonElement | null>(null)
-  const lastProcessedTs = useRef<number>(0)
-  const sessionStartTimeRef = useRef<number>(0)
+  const ecgMonitorRef = useRef<LiveWaveformMonitorHandle | null>(null)
+  const pcgMonitorRef = useRef<LiveWaveformMonitorHandle | null>(null)
+  const liveMetricsCursorRef = useRef<string | null>(null)
+  const waveformStreamRef = useRef<EventSource | null>(null)
+  const wasSessionActiveRef = useRef(false)
   const supabase = createClientComponentClient()
   const { showToast } = useToast()
 
-  const fallbackEcg = useMemo(() => generateEcgWaveform(), [])
-  const fallbackPcg = useMemo(() => generatePcgWaveform(), [])
+  const fallbackEcg = useMemo(() => generateEcgWaveformSamples(1800), [])
+  const fallbackPcg = useMemo(() => generatePcgWaveformSamples(2700), [])
+
+  const fetchAppJson = useCallback(async <T,>(input: string): Promise<T> => {
+    const response = await fetch(input, {
+      cache: 'no-store',
+      credentials: 'include',
+    })
+
+    const payload = await response.json().catch(() => ({}))
+    if (!response.ok) {
+      throw new Error(payload?.error || `Request failed with status ${response.status}`)
+    }
+
+    return payload as T
+  }, [])
+
+  const fetchSessionSummary = useCallback(async () => {
+    if (!sessionId) return
+
+    try {
+      setError(null)
+      const payload = await fetchAppJson<SessionSummaryResponse>(`/api/sessions/${sessionId}/summary`)
+      setSession(payload.session)
+      setPredictions(payload.predictions || [])
+      setNotes(payload.notes || [])
+      setDeidentifyExports(Boolean(payload.deidentifyExports))
+    } catch (fetchError) {
+      console.error('Error fetching session summary:', fetchError)
+      setError('Failed to load session data. Please check your connection.')
+    } finally {
+      setLoading(false)
+    }
+  }, [fetchAppJson, sessionId])
+
+  const applyLiveWaveformPayload = useCallback((payload: LiveWaveformResponse) => {
+    liveMetricsCursorRef.current = payload.cursor || liveMetricsCursorRef.current
+    if (payload.lastLiveAt) {
+      setLastLiveAt(payload.lastLiveAt)
+    }
+
+    const payloadSessionIsActive =
+      payload.sessionStatus === 'streaming' || payload.sessionStatus === 'processing'
+
+    if (payload.sessionStatus) {
+      setSession((previous) => {
+        if (!previous || previous.status === payload.sessionStatus) return previous
+        return {
+          ...previous,
+          status: payload.sessionStatus,
+        }
+      })
+    }
+
+    if (!payload.frames?.length) return
+
+    const ecgFrames: LiveWaveformFrame[] = []
+    const pcgFrames: LiveWaveformFrame[] = []
+    let latestEcgFrame: LiveWaveformFrame | null = null
+    let latestPcgFrame: LiveWaveformFrame | null = null
+
+    for (const row of payload.frames) {
+      const waveform = row.waveform
+      if (!waveform?.samples?.length || !waveform.sample_rate) continue
+
+      if (waveform.modality === 'ecg') {
+        if (payloadSessionIsActive) {
+          ecgFrames.push(waveform)
+        } else {
+          latestEcgFrame = waveform
+        }
+      }
+      if (waveform.modality === 'pcg') {
+        if (payloadSessionIsActive) {
+          pcgFrames.push(waveform)
+        } else {
+          latestPcgFrame = waveform
+        }
+      }
+    }
+
+    if (payloadSessionIsActive && ecgFrames.length) {
+      ecgMonitorRef.current?.appendFrames(ecgFrames)
+    }
+
+    if (payloadSessionIsActive && pcgFrames.length) {
+      pcgMonitorRef.current?.appendFrames(pcgFrames)
+    }
+
+    if (!payloadSessionIsActive) {
+      if (latestEcgFrame) {
+        ecgMonitorRef.current?.showSnapshot({
+          samples: latestEcgFrame.samples,
+          sampleRate: latestEcgFrame.sample_rate,
+        })
+      }
+
+      if (latestPcgFrame) {
+        pcgMonitorRef.current?.showSnapshot({
+          samples: latestPcgFrame.samples,
+          sampleRate: latestPcgFrame.sample_rate,
+        })
+      }
+    }
+
+    setWaveformAvailability((previous) => ({
+      ecg: previous.ecg || ecgFrames.length > 0 || Boolean(latestEcgFrame),
+      pcg: previous.pcg || pcgFrames.length > 0 || Boolean(latestPcgFrame),
+    }))
+  }, [])
+
+  const fetchLiveWaveforms = useCallback(async (forceSeed = false) => {
+    if (!sessionId) return
+
+    try {
+      const shouldSeed = forceSeed || !liveMetricsCursorRef.current
+      const search = new URLSearchParams()
+      if (shouldSeed) {
+        search.set('seed', '1')
+      } else if (liveMetricsCursorRef.current) {
+        search.set('cursor', liveMetricsCursorRef.current)
+      }
+
+      const payload = await fetchAppJson<LiveWaveformResponse>(
+        `/api/sessions/${sessionId}/live?${search.toString()}`
+      )
+      applyLiveWaveformPayload(payload)
+    } catch (fetchError) {
+      console.error('Error fetching live waveform data:', fetchError)
+    }
+  }, [applyLiveWaveformPayload, fetchAppJson, sessionId])
+
+  useEffect(() => {
+    const ticker = window.setInterval(() => setUiNow(Date.now()), 250)
+    return () => window.clearInterval(ticker)
+  }, [])
 
   useEffect(() => {
     if (!sessionId) return
-    fetchSessionData()
 
-    const channel = supabase
-      .channel(`session-${sessionId}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'sessions', filter: `id=eq.${sessionId}` }, () => {
-        fetchSessionData()
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'predictions', filter: `session_id=eq.${sessionId}` }, () => {
-        fetchSessionData()
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'session_notes', filter: `session_id=eq.${sessionId}` }, () => {
-        fetchSessionData()
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'live_metrics', filter: `session_id=eq.${sessionId}` }, () => {
-        fetchSessionData()
-      })
-      .subscribe()
+    liveMetricsCursorRef.current = null
+    setWaveformAvailability({ ecg: false, pcg: false })
+    setLastLiveAt(null)
+    ecgMonitorRef.current?.reset()
+    pcgMonitorRef.current?.reset()
+    setLoading(true)
 
-    const interval = setInterval(fetchSessionData, 5000)
+    fetchSessionSummary()
+    fetchLiveWaveforms(true)
+  }, [fetchLiveWaveforms, fetchSessionSummary, sessionId])
+
+  const isSessionActive = Boolean(
+    session && (session.status === 'streaming' || session.status === 'processing')
+  )
+  const ecgVisibleDuration = isSessionActive ? 3.4 : 5.5
+  const pcgVisibleDuration = isSessionActive ? 1.8 : 2.8
+  const ecgPlaybackLatency = isSessionActive ? 95 : 180
+  const pcgPlaybackLatency = isSessionActive ? 80 : 150
+
+  useEffect(() => {
+    if (!sessionId) return
+    const summaryInterval = window.setInterval(
+      fetchSessionSummary,
+      isSessionActive ? 2000 : 5000
+    )
+    return () => window.clearInterval(summaryInterval)
+  }, [fetchSessionSummary, isSessionActive, sessionId])
+
+  useEffect(() => {
+    if (!sessionId || !isSessionActive) return
+
+    const backupInterval = window.setInterval(() => {
+      fetchLiveWaveforms(false)
+    }, 1000)
+
+    return () => window.clearInterval(backupInterval)
+  }, [fetchLiveWaveforms, isSessionActive, sessionId])
+
+  useEffect(() => {
+    if (!sessionId) return
+    if (!isSessionActive) {
+      waveformStreamRef.current?.close()
+      waveformStreamRef.current = null
+      return
+    }
+
+    const stream = new EventSource(`/api/sessions/${sessionId}/stream`, {
+      withCredentials: true,
+    })
+    waveformStreamRef.current = stream
+
+    const handleFrames = (event: MessageEvent<string>) => {
+      try {
+        const payload = JSON.parse(event.data) as LiveWaveformResponse
+        applyLiveWaveformPayload(payload)
+      } catch (parseError) {
+        console.error('Error parsing waveform stream frame payload:', parseError)
+      }
+    }
+
+    const handleTerminal = (event: MessageEvent<string>) => {
+      try {
+        const payload = JSON.parse(event.data) as Pick<LiveWaveformResponse, 'lastLiveAt' | 'sessionStatus'>
+        if (payload.lastLiveAt) {
+          setLastLiveAt(payload.lastLiveAt)
+        }
+        if (payload.sessionStatus) {
+          setSession((previous) => previous ? { ...previous, status: payload.sessionStatus } : previous)
+        }
+      } catch (parseError) {
+        console.error('Error parsing waveform stream terminal payload:', parseError)
+      } finally {
+        stream.close()
+      }
+    }
+
+    const handleError = () => {
+      console.error('Waveform SSE stream interrupted, falling back to one-shot refresh')
+      fetchLiveWaveforms(false)
+    }
+
+    stream.addEventListener('frames', handleFrames as EventListener)
+    stream.addEventListener('terminal', handleTerminal as EventListener)
+    stream.addEventListener('error', handleError as EventListener)
 
     return () => {
-      clearInterval(interval)
-      supabase.removeChannel(channel)
+      stream.removeEventListener('frames', handleFrames as EventListener)
+      stream.removeEventListener('terminal', handleTerminal as EventListener)
+      stream.removeEventListener('error', handleError as EventListener)
+      stream.close()
+      if (waveformStreamRef.current === stream) {
+        waveformStreamRef.current = null
+      }
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sessionId, supabase])
+  }, [applyLiveWaveformPayload, fetchLiveWaveforms, isSessionActive, sessionId])
+
+  useEffect(() => {
+    if (!sessionId) return
+
+    if (wasSessionActiveRef.current && !isSessionActive) {
+      fetchLiveWaveforms(true)
+    }
+
+    wasSessionActiveRef.current = isSessionActive
+  }, [fetchLiveWaveforms, isSessionActive, sessionId])
 
   useEffect(() => {
     if (!showDeleteConfirm) return
@@ -160,97 +395,6 @@ export default function SessionDetailPage() {
     setTimeout(() => deletePrimaryRef.current?.focus(), 0)
     return () => window.removeEventListener('keydown', handleKey)
   }, [showDeleteConfirm])
-
-  const fetchSessionData = async () => {
-    try {
-      setError(null)
-      const { data: sessionData, error: sessionError } = await supabase
-        .from('sessions')
-        .select('*, patient:patients(id, full_name, mrn, dob, sex), device:devices(id, device_name)')
-        .eq('id', sessionId)
-        .single()
-
-      if (sessionError) throw sessionError
-      setSession(sessionData)
-
-      const { data: settingsData } = await supabase
-        .from('org_settings')
-        .select('deidentify_exports')
-        .eq('org_id', sessionData.org_id)
-        .single()
-
-      if (settingsData) {
-        setDeidentifyExports(Boolean(settingsData.deidentify_exports))
-      }
-
-      const { data: predictionsData, error: predError } = await supabase
-        .from('predictions')
-        .select('*')
-        .eq('session_id', sessionId)
-        .order('created_at', { ascending: true })
-
-      if (predError) throw predError
-      setPredictions(predictionsData || [])
-
-      const { data: notesData, error: notesError } = await supabase
-        .from('session_notes')
-        .select('id, note, created_at, author_id')
-        .eq('session_id', sessionId)
-        .order('created_at', { ascending: false })
-
-      if (notesError) throw notesError
-      setNotes(notesData || [])
-
-      const { data: liveData } = await supabase
-        .from('live_metrics')
-        .select('metrics_json, created_at')
-        .eq('session_id', sessionId)
-        .order('created_at', { ascending: false })
-        .limit(10)
-
-      if (liveData && liveData.length > 0) {
-        setLastLiveAt(liveData[0].created_at)
-        const sortedLive = [...liveData].reverse()
-        let newEcg: any[] = []
-        let newPcg: any[] = []
-
-        for (const row of sortedLive as LiveMetrics[]) {
-          const ts = new Date(row.created_at).getTime()
-          if (ts <= lastProcessedTs.current) continue
-          lastProcessedTs.current = ts
-          if (!sessionStartTimeRef.current) sessionStartTimeRef.current = ts
-
-          const offset = (ts - sessionStartTimeRef.current) / 1000
-          const waveform = row.metrics_json?.waveform
-
-          if (waveform?.samples?.length && waveform.sample_rate) {
-            const pts = buildWaveformSeries(waveform.samples, waveform.sample_rate, 80, offset)
-            if (waveform.modality === 'ecg') newEcg.push(...pts)
-            if (waveform.modality === 'pcg') newPcg.push(...pts)
-          }
-        }
-
-        if (newEcg.length > 0) {
-          setEcgData(prev => {
-            const merged = [...prev, ...newEcg]
-            return merged.slice(-150) // Reduced window for faster real-time sweep
-          })
-        }
-
-        if (newPcg.length > 0) {
-          setPcgData(prev => {
-            const merged = [...prev, ...newPcg]
-            return merged.slice(-150) // Reduced window for faster real-time sweep
-          })
-        }
-      }
-    } catch (error) {
-      console.error('Error fetching session data:', error)
-      setError('Failed to load session data. Please check your connection.')
-    } finally {
-      setLoading(false)
-    }
-  }
 
   const timelineItems = useMemo(() => {
     const items: Array<{
@@ -350,21 +494,46 @@ export default function SessionDetailPage() {
     return Array.from(map.values()).sort((a, b) => b.lastSeen.localeCompare(a.lastSeen))
   }, [predictions])
 
-  const liveAgeSeconds = lastLiveAt
-    ? Math.floor((Date.now() - new Date(lastLiveAt).getTime()) / 1000)
+  const hierarchicalReport = useMemo(
+    () => extractHierarchicalReport(predictions),
+    [predictions]
+  )
+
+  const latestModel3 = hierarchicalReport.model3
+  const heartRateBadgeValue = latestModel3?.heart_rate_bpm !== undefined && latestModel3?.heart_rate_bpm !== null
+    ? `${Math.round(latestModel3.heart_rate_bpm)} bpm`
+    : lastLiveAt
+      ? 'Pending analysis'
+      : 'Unavailable'
+
+  const liveAgeMs = lastLiveAt
+    ? Math.max(0, uiNow - new Date(lastLiveAt).getTime())
     : null
 
   const isLiveFresh = Boolean(
-    session &&
-    (session.status === 'streaming' || session.status === 'processing') &&
-    liveAgeSeconds !== null &&
-    liveAgeSeconds <= 10
+    isSessionActive &&
+    liveAgeMs !== null &&
+    liveAgeMs <= 1000
   )
 
   const liveLabel = isLiveFresh
-    ? `Live · ${liveAgeSeconds}s ago`
-    : session && (session.status === 'streaming' || session.status === 'processing')
-      ? 'Stale'
+    ? 'Live sweep'
+    : isSessionActive
+      ? lastLiveAt
+        ? 'Stale'
+        : 'Awaiting signal'
+      : lastLiveAt
+        ? 'Captured'
+        : 'Simulated'
+  const ecgLabel = waveformAvailability.ecg
+    ? (isSessionActive && isLiveFresh ? 'Live sweep' : 'Final trace')
+    : isSessionActive
+      ? 'Awaiting live'
+      : 'Simulated'
+  const pcgLabel = waveformAvailability.pcg
+    ? (isSessionActive && isLiveFresh ? 'Live sweep' : 'Final trace')
+    : isSessionActive
+      ? 'Awaiting live'
       : 'Simulated'
 
   const handleAddNote = async () => {
@@ -396,7 +565,7 @@ export default function SessionDetailPage() {
       })
       if (auditError) console.error('Audit log failed (note_added):', auditError)
       setNoteDraft('')
-      fetchSessionData()
+      fetchSessionSummary()
       showToast('Note added', 'success')
     } catch (err: any) {
       showToast(`Failed to add note: ${err.message}`, 'error')
@@ -730,7 +899,8 @@ export default function SessionDetailPage() {
             <button
               onClick={() => {
                 setLoading(true)
-                fetchSessionData()
+                fetchSessionSummary()
+                fetchLiveWaveforms(true)
               }}
               className="btn-primary"
             >
@@ -857,7 +1027,13 @@ export default function SessionDetailPage() {
             { label: 'Duration', value: durationSeconds ? `${durationSeconds}s` : 'In progress', tone: 'badge-neutral' },
             { label: 'Patient', value: session.patient?.full_name || 'Not linked', tone: 'badge-neutral' },
             { label: 'Predictions', value: `${predictions.length}`, tone: 'badge-info' },
-            { label: 'Heart Rate', value: lastLiveAt ? 'Not calculated' : 'Unavailable', tone: 'badge-warning' },
+            {
+              label: 'Heart Rate',
+              value: heartRateBadgeValue,
+              tone: latestModel3?.heart_rate_bpm !== undefined && latestModel3?.heart_rate_bpm !== null
+                ? 'badge-success'
+                : 'badge-warning',
+            },
           ].map((item) => (
             <div key={item.label} className="rounded-xl border border-border bg-card/70 p-4">
               <p className="text-xs uppercase tracking-wider text-muted-foreground/70">{item.label}</p>
@@ -879,52 +1055,23 @@ export default function SessionDetailPage() {
               </div>
               <span className="badge badge-neutral flex items-center gap-1">
                 <Info className="w-3 h-3" />
-                {liveLabel}
+                {ecgLabel}
               </span>
             </div>
-            <ResponsiveContainer width="100%" height={220}>
-              <AreaChart data={ecgData.length ? ecgData : fallbackEcg}>
-                <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                <XAxis
-                  dataKey="time"
-                  tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }}
-                  tickLine={false}
-                  axisLine={{ stroke: 'hsl(var(--border))' }}
-                  interval={14}
-                />
-                <YAxis
-                  tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }}
-                  tickLine={false}
-                  axisLine={false}
-                  domain={[-0.3, 1.2]}
-                />
-                <Tooltip
-                  contentStyle={{
-                    backgroundColor: 'hsl(var(--card))',
-                    border: '1px solid hsl(var(--border))',
-                    borderRadius: '8px',
-                    fontSize: '12px',
-                    color: 'hsl(var(--foreground))',
-                  }}
-                  formatter={(value: number) => [`${value.toFixed(3)} mV`, 'Amplitude']}
-                />
-                <defs>
-                  <linearGradient id="ecgGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#0d9488" stopOpacity={0.3} />
-                    <stop offset="95%" stopColor="#0d9488" stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <Area
-                  type="monotone"
-                  dataKey="amplitude"
-                  stroke="#0d9488"
-                  strokeWidth={2}
-                  fill="url(#ecgGrad)"
-                  dot={false}
-                  isAnimationActive={false}
-                />
-              </AreaChart>
-            </ResponsiveContainer>
+            <LiveWaveformMonitor
+              ref={ecgMonitorRef}
+              accentColor="#14b8a6"
+              accentGlow="rgba(20, 184, 166, 0.55)"
+              amplitudeRange={[-0.35, 1.15]}
+              fallbackSampleRate={300}
+              fallbackSamples={fallbackEcg}
+              isSessionActive={isSessionActive}
+              playbackLatencyMs={ecgPlaybackLatency}
+              sampleLabel="ECG"
+              staleAfterMs={900}
+              sweepGlowFraction={0.14}
+              visibleDurationSec={ecgVisibleDuration}
+            />
           </div>
 
           {/* PCG Waveform */}
@@ -936,51 +1083,23 @@ export default function SessionDetailPage() {
               </div>
               <span className="badge badge-neutral flex items-center gap-1">
                 <Info className="w-3 h-3" />
-                {liveLabel}
+                {pcgLabel}
               </span>
             </div>
-            <ResponsiveContainer width="100%" height={220}>
-              <AreaChart data={pcgData.length ? pcgData : fallbackPcg}>
-                <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                <XAxis
-                  dataKey="time"
-                  tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }}
-                  tickLine={false}
-                  axisLine={{ stroke: 'hsl(var(--border))' }}
-                  interval={14}
-                />
-                <YAxis
-                  tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }}
-                  tickLine={false}
-                  axisLine={false}
-                  domain={[-0.5, 1]}
-                />
-                <Tooltip
-                  contentStyle={{
-                    backgroundColor: 'hsl(var(--card))',
-                    border: '1px solid hsl(var(--border))',
-                    borderRadius: '8px',
-                    fontSize: '12px',
-                    color: 'hsl(var(--foreground))',
-                  }}
-                />
-                <defs>
-                  <linearGradient id="pcgGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#e11d48" stopOpacity={0.3} />
-                    <stop offset="95%" stopColor="#e11d48" stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <Area
-                  type="monotone"
-                  dataKey="amplitude"
-                  stroke="#e11d48"
-                  strokeWidth={1.5}
-                  fill="url(#pcgGrad)"
-                  dot={false}
-                  isAnimationActive={false}
-                />
-              </AreaChart>
-            </ResponsiveContainer>
+            <LiveWaveformMonitor
+              ref={pcgMonitorRef}
+              accentColor="#f43f5e"
+              accentGlow="rgba(244, 63, 94, 0.55)"
+              amplitudeRange={[-1.0, 1.0]}
+              fallbackSampleRate={900}
+              fallbackSamples={fallbackPcg}
+              isSessionActive={isSessionActive}
+              playbackLatencyMs={pcgPlaybackLatency}
+              sampleLabel="PCG"
+              staleAfterMs={900}
+              sweepGlowFraction={0.1}
+              visibleDurationSec={pcgVisibleDuration}
+            />
           </div>
         </div>
 
@@ -1076,8 +1195,7 @@ export default function SessionDetailPage() {
           {/* Tab content */}
           <div className="p-6">
             {(() => {
-              const hier = extractHierarchicalReport(predictions)
-              const murmurDetected = hier.model1?.label?.toLowerCase() === 'murmur'
+              const murmurDetected = hierarchicalReport.model1?.label?.toLowerCase() === 'murmur'
 
               if (predictions.length === 0 && session.status !== 'done') {
                 return (
@@ -1093,72 +1211,16 @@ export default function SessionDetailPage() {
               }
 
               if (activeReportTab === 'model1') {
-                return <Model1StateCard data={hier.model1} />
+                return <Model1StateCard data={hierarchicalReport.model1} />
               }
               if (activeReportTab === 'model2') {
-                return <Model2DiagnosticCard data={hier.model2} murmurDetected={murmurDetected} />
+                return <Model2DiagnosticCard data={hierarchicalReport.model2} murmurDetected={murmurDetected} />
               }
               if (activeReportTab === 'model3') {
-                return <Model3PrognosisCard data={hier.model3} />
+                return <Model3PrognosisCard data={hierarchicalReport.model3} />
               }
               return null
             })()}
-          </div>
-        </div>
-
-        {/* Session Replay */}
-        <div className="bg-[var(--hud-surface-glass)] border border-[var(--hud-border)] backdrop-blur-md rounded-xl slide-up" style={{ animationDelay: '0.21s', animationFillMode: 'both' }}>
-          <div className="p-6 pb-0">
-            <h3 className="font-semibold text-foreground text-lg">Session Replay</h3>
-            <p className="text-sm text-muted-foreground mt-1">Replay recent waveform snapshots</p>
-          </div>
-          <div className="p-6 grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <div>
-              <div className="flex items-center justify-between mb-3">
-                <h4 className="text-sm font-semibold text-foreground">ECG Snapshots</h4>
-                <span className="text-xs text-muted-foreground">{replayEcg.length} available</span>
-              </div>
-              {replayEcg.length === 0 ? (
-                <div className="text-sm text-muted-foreground bg-muted rounded-lg p-3">
-                  No ECG snapshots yet.
-                </div>
-              ) : (
-                <div className="divide-y divide-border rounded-lg border border-border">
-                  {replayEcg.map((snap) => (
-                    <button
-                      key={snap.ts}
-                      onClick={() => setEcgData(buildWaveformSeries(snap.samples, snap.sampleRate))}
-                      className="w-full text-left px-4 py-3 text-sm hover:bg-accent/50 transition-colors"
-                    >
-                      Replay {new Date(snap.ts).toLocaleString()}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-            <div>
-              <div className="flex items-center justify-between mb-3">
-                <h4 className="text-sm font-semibold text-foreground">PCG Snapshots</h4>
-                <span className="text-xs text-muted-foreground">{replayPcg.length} available</span>
-              </div>
-              {replayPcg.length === 0 ? (
-                <div className="text-sm text-muted-foreground bg-muted rounded-lg p-3">
-                  No PCG snapshots yet.
-                </div>
-              ) : (
-                <div className="divide-y divide-border rounded-lg border border-border">
-                  {replayPcg.map((snap) => (
-                    <button
-                      key={snap.ts}
-                      onClick={() => setPcgData(buildWaveformSeries(snap.samples, snap.sampleRate))}
-                      className="w-full text-left px-4 py-3 text-sm hover:bg-accent/50 transition-colors"
-                    >
-                      Replay {new Date(snap.ts).toLocaleString()}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
           </div>
         </div>
 

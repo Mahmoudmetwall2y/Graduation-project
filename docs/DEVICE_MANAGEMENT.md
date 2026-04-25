@@ -2,7 +2,7 @@
 
 ## Overview
 
-AscultiCor now supports **unlimited ESP32 devices** with individual dashboards, recordings, and LLM reports for each device. This guide explains how to add devices, monitor them, and manage everything from the web interface.
+AscultiCor now supports **unlimited ESP32 devices** with individual dashboards, recordings, and LLM reports for each device. Newly provisioned hardware receives device-scoped MQTT credentials through the bootstrap flow. This guide explains how to add devices, monitor them, and manage everything from the web interface.
 
 ## Architecture
 
@@ -49,7 +49,7 @@ AscultiCor now supports **unlimited ESP32 devices** with individual dashboards, 
 - ✅ Add unlimited ESP32 devices
 - ✅ Individual device dashboards
 - ✅ Device groups for organization
-- ✅ Real-time status monitoring
+- ✅ Polling-based status monitoring on the free-tier-compatible path
 - ✅ Battery and signal strength tracking
 
 ### 2. **Individual Device Dashboards**
@@ -110,7 +110,14 @@ SET wifi_pass YOUR_WIFI_PASSWORD
 REBOOT
 ```
 
-The firmware will fetch `org_id`, `mqtt_host`, `mqtt_port`, `mqtt_user`, and `mqtt_pass` from AscultiCor automatically.
+The firmware will fetch `org_id`, `mqtt_host`, `mqtt_port`, `mqtt_user`, and this device's MQTT password from AscultiCor automatically.
+
+If you use `https://` for bootstrap, configure one of the firmware trust options first:
+
+```text
+SET bootstrap_tls_fingerprint AA:BB:CC:DD:...
+SET bootstrap_ca_pem -----BEGIN CERTIFICATE-----|...|-----END CERTIFICATE-----
+```
 
 Legacy manual MQTT provisioning is still supported:
 
@@ -119,8 +126,8 @@ Legacy manual MQTT provisioning is still supported:
 const char* device_id = "YOUR_DEVICE_ID";
 const char* org_id = "YOUR_ORG_ID";
 const char* mqtt_host = "YOUR_BROKER_HOST";
-const char* mqtt_user = "YOUR_BROKER_USER";
-const char* mqtt_pass = "YOUR_BROKER_PASSWORD";
+const char* mqtt_user = "YOUR_DEVICE_MQTT_USER";
+const char* mqtt_pass = "YOUR_DEVICE_MQTT_PASSWORD";
 
 // MQTT Topics will be:
 // org/{org_id}/device/{device_id}/session/{session_id}/meta

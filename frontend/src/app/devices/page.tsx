@@ -1,7 +1,6 @@
 'use client'
 
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { createClientComponentClient } from '@supabase/auth-helpers-nextjs'
 import Link from 'next/link'
 import {
   Plus, Activity, Battery, Wifi, AlertCircle, CheckCircle,
@@ -71,9 +70,7 @@ export default function DevicesPage() {
   const addFirstFieldRef = useRef<HTMLInputElement | null>(null)
   const deletePrimaryRef = useRef<HTMLButtonElement | null>(null)
 
-  const supabase = createClientComponentClient()
   const { showToast } = useToast()
-  const channelRef = useRef<any>(null)
 
   const fetchDevices = useCallback(async () => {
     try {
@@ -94,25 +91,14 @@ export default function DevicesPage() {
   useEffect(() => {
     fetchDevices()
 
-    // Subscribe to real-time device changes via Supabase Realtime
-    channelRef.current = supabase
-      .channel('devices-realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'devices' }, () => {
-        fetchDevices()
-      })
-      .subscribe()
-
     // Polling remains the supported fallback for device freshness.
     const interval = setInterval(fetchDevices, 30000)
 
     return () => {
       clearInterval(interval)
-      if (channelRef.current) {
-        supabase.removeChannel(channelRef.current)
-      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fetchDevices, supabase])
+  }, [fetchDevices])
 
   useEffect(() => {
     if (!showAddModal) return
@@ -665,7 +651,7 @@ export default function DevicesPage() {
                   <div className="rounded-xl border border-emerald-200 bg-emerald-50/80 p-4 mb-6 text-sm text-emerald-950 dark:border-emerald-900/60 dark:bg-emerald-950/20 dark:text-emerald-100">
                     <p className="font-semibold">Recommended provisioning mode: bootstrap</p>
                     <p className="mt-1 text-xs text-emerald-800 dark:text-emerald-200/80">
-                      The ESP32 only needs its device identity, secret, and the bootstrap URL. It will fetch the MQTT broker settings securely at boot.
+                      The ESP32 only needs its device identity, secret, and the bootstrap URL. It will fetch this device&apos;s scoped MQTT username and password securely at boot.
                     </p>
                   </div>
 
@@ -736,7 +722,10 @@ export default function DevicesPage() {
                       <span className="text-yellow-400 ml-1">Yellow</span> = you need to fill in
                     </p>
                     <p className="text-xs text-gray-500 mt-1">
-                      The firmware will fetch <code className="text-emerald-400">org_id</code>, MQTT host, port, username, and password from the bootstrap endpoint automatically.
+                      The firmware will fetch <code className="text-emerald-400">org_id</code>, MQTT host, port, and this device&apos;s MQTT username and password from the bootstrap endpoint automatically.
+                    </p>
+                    <p className="text-xs text-gray-500 mt-1">
+                      If your bootstrap URL uses <code>https://</code>, configure either <code>bootstrap_tls_fingerprint</code> or <code>bootstrap_ca_pem</code> on the firmware before rebooting.
                     </p>
                     {credentials.bootstrap_requires_host_override && (
                       <p className="text-xs text-amber-300 mt-1">
@@ -747,10 +736,10 @@ export default function DevicesPage() {
 
                   <details className="rounded-xl border border-border bg-background p-4 mb-6">
                     <summary className="cursor-pointer text-sm font-semibold text-foreground">
-                      Legacy manual MQTT provisioning
+                      Manual MQTT provisioning
                     </summary>
                     <p className="text-xs text-muted-foreground mt-3">
-                      Use this only if you intentionally want the ESP32 to store raw broker credentials locally.
+                      Use this only if you intentionally want the ESP32 to store broker credentials locally instead of bootstrapping them.
                     </p>
                     <div className="bg-muted rounded-lg p-3 space-y-2 mt-3 font-mono text-xs">
                       <div className="flex items-center gap-2">

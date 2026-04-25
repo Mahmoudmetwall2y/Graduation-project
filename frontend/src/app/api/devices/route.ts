@@ -3,6 +3,40 @@ import { cookies } from 'next/headers'
 import { NextResponse } from 'next/server'
 import { randomUUID } from 'crypto'
 import bcrypt from 'bcryptjs'
+import { buildDeviceMqttCredentials } from '../../../lib/mqttCredentials'
+
+const DEVICE_OFFLINE_THRESHOLD_MS = 90 * 1000
+
+function isMissingMqttCredentialColumns(error: unknown) {
+  const message = JSON.stringify(error ?? '').toLowerCase()
+  return message.includes('mqtt_username') || message.includes('mqtt_password_hash')
+}
+
+function normalizeDeviceRuntimeStatus<T extends { status?: string | null; last_seen_at?: string | null }>(
+  device: T
+): T {
+  if (!device) return device
+
+  const rawStatus = device.status || 'offline'
+  if (rawStatus === 'error' || rawStatus === 'offline') {
+    return { ...device, status: rawStatus }
+  }
+
+  if (!device.last_seen_at) {
+    return { ...device, status: 'offline' }
+  }
+
+  const lastSeenAt = new Date(device.last_seen_at).getTime()
+  if (!Number.isFinite(lastSeenAt)) {
+    return { ...device, status: 'offline' }
+  }
+
+  const isFresh = Date.now() - lastSeenAt <= DEVICE_OFFLINE_THRESHOLD_MS
+  return {
+    ...device,
+    status: isFresh ? 'online' : 'offline'
+  }
+}
 
 function getRequestOrigin(request: Request) {
   const requestUrl = new URL(request.url)
@@ -76,7 +110,7 @@ export async function GET(request: Request) {
     if (error) throw error
 
     return NextResponse.json({
-      devices: devices || [],
+      devices: (devices || []).map(normalizeDeviceRuntimeStatus),
       current_user_role: profile.role,
       can_create_devices: profile.role === 'admin'
     })
@@ -128,22 +162,22 @@ export async function POST(request: Request) {
       )
     }
 
-    const mqttUser = process.env.MQTT_USERNAME
-    const mqttPass = process.env.MQTT_PASSWORD
-    if (!mqttUser || !mqttPass) {
-      return NextResponse.json(
-        { error: 'Server misconfiguration: MQTT_USERNAME and MQTT_PASSWORD are required for device provisioning' },
-        { status: 500 }
-      )
-    }
-
     // Generate device credentials
     const deviceId = randomUUID()
     const deviceSecret = `asc_${randomUUID().replace(/-/g, '')}`
     const deviceSecretHash = await bcrypt.hash(deviceSecret, 12)
+    const {
+      mqttUsername,
+      mqttPassword,
+      mqttPasswordHash,
+    } = buildDeviceMqttCredentials(deviceId, deviceSecret)
+    const sharedMqttUser = process.env.MQTT_USERNAME
+    const sharedMqttPass = process.env.MQTT_PASSWORD
+    let usesPerDeviceMqtt = true
 
     // Create device
-    const { data: device, error: deviceError } = await supabase
+    let device: any = null
+    let deviceInsert = await supabase
       .from('devices')
       .insert({
         id: deviceId,
@@ -153,6 +187,8 @@ export async function POST(request: Request) {
         device_type,
         device_group_id: device_group_id || null,
         device_secret_hash: deviceSecretHash,
+        mqtt_username: mqttUsername,
+        mqtt_password_hash: mqttPasswordHash,
         notes: notes || null,
         sensor_config: sensor_config || {},
         status: 'offline'
@@ -160,7 +196,35 @@ export async function POST(request: Request) {
       .select()
       .single()
 
-    if (deviceError) throw deviceError
+    if (deviceInsert.error && isMissingMqttCredentialColumns(deviceInsert.error)) {
+      usesPerDeviceMqtt = false
+      deviceInsert = await supabase
+        .from('devices')
+        .insert({
+          id: deviceId,
+          org_id: profile.org_id,
+          owner_user_id: user.id,
+          device_name,
+          device_type,
+          device_group_id: device_group_id || null,
+          device_secret_hash: deviceSecretHash,
+          notes: notes || null,
+          sensor_config: sensor_config || {},
+          status: 'offline'
+        })
+        .select()
+        .single()
+    }
+
+    if (deviceInsert.error) throw deviceInsert.error
+    device = deviceInsert.data
+
+    if (!usesPerDeviceMqtt && (!sharedMqttUser || !sharedMqttPass)) {
+      return NextResponse.json(
+        { error: 'Server misconfiguration: legacy MQTT credentials are required until migration 024 is applied.' },
+        { status: 500 }
+      )
+    }
 
     // Create audit log
     const { error: auditError } = await supabase
@@ -199,8 +263,8 @@ export async function POST(request: Request) {
         mqtt_port: mqttPort,
         mqtt_tls: mqttTls,
         mqtt_lan_exposure_enabled: mqttLanExposureEnabled,
-        mqtt_user: mqttUser,
-        mqtt_pass: mqttPass
+        mqtt_user: usesPerDeviceMqtt ? mqttUsername : sharedMqttUser!,
+        mqtt_pass: usesPerDeviceMqtt ? mqttPassword : sharedMqttPass!
       }
     }, { status: 201 })
   } catch (error: any) {

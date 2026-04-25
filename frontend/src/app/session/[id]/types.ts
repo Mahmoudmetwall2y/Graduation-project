@@ -46,6 +46,8 @@ export interface Model3Data {
   prediction: string
   beat_type?: string
   confidence?: number
+  heart_rate_bpm?: number | null
+  windows_analyzed?: number
   probabilities?: Record<string, number>
   raw_probabilities?: Record<string, number>
   demo_mode?: boolean

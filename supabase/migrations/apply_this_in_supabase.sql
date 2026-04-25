@@ -69,7 +69,17 @@ ALTER TABLE devices ADD COLUMN IF NOT EXISTS signal_strength INTEGER;
 ALTER TABLE devices ADD COLUMN IF NOT EXISTS calibration_data JSONB;
 ALTER TABLE devices ADD COLUMN IF NOT EXISTS sensor_config JSONB DEFAULT '{}'::jsonb;
 ALTER TABLE devices ADD COLUMN IF NOT EXISTS notes TEXT;
+ALTER TABLE devices ADD COLUMN IF NOT EXISTS mqtt_username TEXT;
+ALTER TABLE devices ADD COLUMN IF NOT EXISTS mqtt_password_hash TEXT;
 ALTER TABLE devices ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+CREATE UNIQUE INDEX IF NOT EXISTS idx_devices_mqtt_username ON devices (mqtt_username) WHERE mqtt_username IS NOT NULL;
+ALTER TABLE devices DROP CONSTRAINT IF EXISTS devices_mqtt_credentials_pair_check;
+ALTER TABLE devices ADD CONSTRAINT devices_mqtt_credentials_pair_check
+CHECK (
+    (mqtt_username IS NULL AND mqtt_password_hash IS NULL)
+    OR
+    (mqtt_username IS NOT NULL AND mqtt_password_hash IS NOT NULL)
+);
 
 -- Device configuration/settings
 CREATE TABLE IF NOT EXISTS device_settings (
