@@ -222,6 +222,40 @@ def get_session_status(session_id):
         return None
 
 
+def wait_for_session_status(
+    session_id,
+    *,
+    terminal_statuses=("done", "error"),
+    timeout_sec=25,
+    poll_interval=1.0,
+    stable_reads=2,
+):
+    """Wait for a session to settle into a terminal status.
+
+    A short stability window avoids sampling a transient status too early while
+    inference for the second modality is still completing.
+    """
+    deadline = time.time() + timeout_sec
+    last_info = None
+    consecutive_terminal_reads = 0
+
+    while time.time() < deadline:
+        info = get_session_status(session_id)
+        if info:
+            last_info = info
+            status = info.get("status")
+            if status in terminal_statuses:
+                consecutive_terminal_reads += 1
+                if consecutive_terminal_reads >= stable_reads:
+                    return info
+            else:
+                consecutive_terminal_reads = 0
+
+        time.sleep(poll_interval)
+
+    return last_info
+
+
 # ─── MQTT Client Setup ───────────────────────────────────────────────────────
 
 received_messages = []
@@ -482,11 +516,10 @@ def test_unified_session(client, patient_id):
     client.publish(f"{topic_base}/meta", json.dumps({"type": "end_ecg"}), qos=1).wait_for_publish()
     ok("Published end_ecg — ECG inference triggered")
 
-    step(10, "Waiting for ECG inference (~8s)...")
-    time.sleep(8)
+    step(10, "Waiting for ECG inference to settle (up to 25s)...")
 
     # Final status
-    final = get_session_status(session_id)
+    final = wait_for_session_status(session_id, timeout_sec=25, poll_interval=1.0, stable_reads=2)
     if final:
         status = final.get('status', '?')
         patient_linked = bool(final.get('patient_id'))
@@ -550,10 +583,10 @@ def check_inference_logs():
     banner("INFERENCE LOGS VERIFICATION")
     import subprocess
 
-    step(1, "Fetching last 50 lines of inference logs...")
+    step(1, "Fetching last 120 lines of inference logs...")
     try:
         result = subprocess.run(
-            ["docker", "logs", "--tail", "50", "asculticor-inference"],
+            ["docker", "logs", "--tail", "120", "asculticor-inference"],
             capture_output=True, text=True, timeout=10
         )
         logs = result.stdout + result.stderr
@@ -675,7 +708,7 @@ def main():
         ok("Severity pipeline: PASS — murmur severity analysis triggered")
 
     if session_id:
-        final = get_session_status(session_id)
+        final = wait_for_session_status(session_id, timeout_sec=15, poll_interval=1.0, stable_reads=2)
         if final:
             status = final.get('status', '?')
             print()

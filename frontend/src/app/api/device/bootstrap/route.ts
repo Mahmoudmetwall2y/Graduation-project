@@ -1,6 +1,12 @@
 import bcrypt from 'bcryptjs'
 import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
+import { deriveDeviceMqttPassword } from '../../../../lib/mqttCredentials'
+
+function isMissingMqttCredentialColumns(error: unknown) {
+  const message = JSON.stringify(error ?? '').toLowerCase()
+  return message.includes('mqtt_username') || message.includes('mqtt_password_hash')
+}
 
 function getRequestOrigin(request: Request) {
   const requestUrl = new URL(request.url)
@@ -53,10 +59,7 @@ export async function POST(request: Request) {
 
     const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL
     const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY
-    const mqttUser = process.env.MQTT_USERNAME
-    const mqttPass = process.env.MQTT_PASSWORD
-
-    if (!supabaseUrl || !serviceRoleKey || !mqttUser || !mqttPass) {
+    if (!supabaseUrl || !serviceRoleKey) {
       return NextResponse.json(
         { error: 'Server misconfiguration: device bootstrap is unavailable.' },
         { status: 500 }
@@ -64,11 +67,21 @@ export async function POST(request: Request) {
     }
 
     const serviceClient = createClient(supabaseUrl, serviceRoleKey)
-    const { data: device, error: deviceError } = await serviceClient
+    let deviceResponse = await serviceClient
       .from('devices')
-      .select('id, org_id, device_name, device_secret_hash')
+      .select('id, org_id, device_name, device_secret_hash, mqtt_username, mqtt_password_hash')
       .eq('id', deviceId)
       .single()
+
+    if (deviceResponse.error && isMissingMqttCredentialColumns(deviceResponse.error)) {
+      deviceResponse = await serviceClient
+        .from('devices')
+        .select('id, org_id, device_name, device_secret_hash')
+        .eq('id', deviceId)
+        .single()
+    }
+
+    const { data: device, error: deviceError } = deviceResponse
 
     if (deviceError || !device) {
       return NextResponse.json({ error: 'Invalid device credentials' }, { status: 401 })
@@ -77,6 +90,21 @@ export async function POST(request: Request) {
     const validSecret = await bcrypt.compare(deviceSecret, device.device_secret_hash)
     if (!validSecret) {
       return NextResponse.json({ error: 'Invalid device credentials' }, { status: 401 })
+    }
+
+    const usesPerDeviceMqtt = Boolean(device.mqtt_username && device.mqtt_password_hash)
+    const fallbackMqttUser = process.env.MQTT_USERNAME
+    const fallbackMqttPass = process.env.MQTT_PASSWORD
+    const mqttUser = usesPerDeviceMqtt ? device.mqtt_username : fallbackMqttUser
+    const mqttPass = usesPerDeviceMqtt
+      ? deriveDeviceMqttPassword(device.id, deviceSecret)
+      : fallbackMqttPass
+
+    if (!mqttUser || !mqttPass) {
+      return NextResponse.json(
+        { error: 'Server misconfiguration: broker credentials are unavailable for this device.' },
+        { status: 500 }
+      )
     }
 
     const bootstrapBaseUrl = getBootstrapBaseUrl(request)
@@ -101,6 +129,7 @@ export async function POST(request: Request) {
         mqtt_host: mqttHost,
         mqtt_port: mqttPort,
         mqtt_tls: mqttTls,
+        mqtt_scope: usesPerDeviceMqtt ? 'device_scoped' : 'legacy_shared',
       },
     })
 
@@ -116,7 +145,7 @@ export async function POST(request: Request) {
       bootstrap_url: bootstrapUrl,
       bootstrap_requires_host_override: isLoopbackHost(bootstrapHost),
       mqtt_lan_exposure_enabled: mqttLanExposureEnabled,
-      provisioning_mode: 'bootstrap_recommended',
+      provisioning_mode: usesPerDeviceMqtt ? 'bootstrap_recommended' : 'legacy_manual',
     })
   } catch (error) {
     console.error('Error bootstrapping device credentials:', error)

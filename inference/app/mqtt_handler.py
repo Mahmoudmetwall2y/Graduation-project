@@ -55,6 +55,10 @@ class SessionBuffer:
         self.chunks = []
         self.total_bytes = 0
         self.total_samples = 0
+        self.retained_samples = 0
+        self.buffer_start_sample_index = 0
+        self.published_sample_index = 0
+        self.waveform_sequence = 0
         
         # Timing
         self.started_at = datetime.now(timezone.utc)
@@ -76,6 +80,9 @@ class SessionBuffer:
     # Maximum buffer size: 50 MB (prevents unbounded memory growth)
     MAX_BUFFER_BYTES = 50 * 1024 * 1024
 
+    def _bytes_per_sample(self) -> int:
+        return 2 if 'int16' in self.format or 's16' in self.format else 4
+
     def add_chunk(self, data: bytes):
         """Add binary chunk to buffer, dropping oldest chunks if max size exceeded."""
         self.chunks.append(data)
@@ -83,16 +90,20 @@ class SessionBuffer:
         self.last_chunk_at = datetime.now(timezone.utc)
         
         # Estimate samples (assuming int16 = 2 bytes per sample)
-        bytes_per_sample = 2 if 'int16' in self.format or 's16' in self.format else 1
+        bytes_per_sample = self._bytes_per_sample()
         new_samples = len(data) // bytes_per_sample
         self.total_samples += new_samples
+        self.retained_samples += new_samples
         
         # Enforce max buffer size — drop oldest chunks (FIFO)
         while self.total_bytes > self.MAX_BUFFER_BYTES and len(self.chunks) > 1:
             dropped = self.chunks.pop(0)
             self.total_bytes -= len(dropped)
             dropped_samples = len(dropped) // bytes_per_sample
-            self.total_samples = max(0, self.total_samples - dropped_samples)
+            self.retained_samples = max(0, self.retained_samples - dropped_samples)
+            self.buffer_start_sample_index += dropped_samples
+            if self.published_sample_index < self.buffer_start_sample_index:
+                self.published_sample_index = self.buffer_start_sample_index
             logger.warning(
                 f"Buffer {self.session_id}/{self.modality} exceeded {self.MAX_BUFFER_BYTES // (1024*1024)}MB, "
                 f"dropped oldest chunk ({len(dropped)} bytes)"
@@ -132,7 +143,7 @@ class SessionBuffer:
         if not self.chunks:
             return np.array([], dtype=np.float32)
 
-        bytes_per_sample = 2 if 'int16' in self.format or 's16' in self.format else 4
+        bytes_per_sample = self._bytes_per_sample()
         target_bytes = max_samples * bytes_per_sample
         collected = []
         collected_bytes = 0
@@ -153,6 +164,66 @@ class SessionBuffer:
             signal = signal[-max_samples:]
 
         return signal
+
+    def _extract_signal_range(self, start_sample_index: int, end_sample_index: int) -> np.ndarray:
+        """Extract an absolute sample range from the retained chunk buffer."""
+        if not self.chunks or end_sample_index <= start_sample_index:
+            return np.array([], dtype=np.float32)
+
+        safe_start = max(start_sample_index, self.buffer_start_sample_index)
+        safe_end = min(end_sample_index, self.buffer_start_sample_index + self.retained_samples)
+        if safe_end <= safe_start:
+            return np.array([], dtype=np.float32)
+
+        bytes_per_sample = self._bytes_per_sample()
+        start_byte = (safe_start - self.buffer_start_sample_index) * bytes_per_sample
+        end_byte = (safe_end - self.buffer_start_sample_index) * bytes_per_sample
+
+        pieces = []
+        cursor = 0
+        for chunk in self.chunks:
+            next_cursor = cursor + len(chunk)
+            if next_cursor <= start_byte:
+                cursor = next_cursor
+                continue
+            if cursor >= end_byte:
+                break
+
+            chunk_start = max(0, start_byte - cursor)
+            chunk_end = min(len(chunk), end_byte - cursor)
+            if chunk_start < chunk_end:
+                pieces.append(chunk[chunk_start:chunk_end])
+            cursor = next_cursor
+
+        if not pieces:
+            return np.array([], dtype=np.float32)
+
+        data = b"".join(pieces)
+        if 'int16' in self.format or 's16' in self.format:
+            return np.frombuffer(data, dtype=np.int16).astype(np.float32) / 32768.0
+        return np.frombuffer(data, dtype=np.float32)
+
+    def get_unpublished_live_frame(self) -> Optional[Dict[str, Any]]:
+        """Return only the newly-arrived samples since the previous live frame."""
+        next_start = max(self.published_sample_index, self.buffer_start_sample_index)
+        if self.total_samples <= next_start:
+            return None
+
+        signal = self._extract_signal_range(next_start, self.total_samples)
+        if signal.size == 0:
+            return None
+
+        self.waveform_sequence += 1
+        frame = {
+            "modality": self.modality,
+            "sample_rate": int(self.sample_rate),
+            "sample_start_index": int(next_start),
+            "sample_count": int(signal.size),
+            "sequence": int(self.waveform_sequence),
+            "samples": signal.tolist(),
+        }
+        self.published_sample_index = next_start + int(signal.size)
+        return frame
     
     def get_quality_metrics(self) -> Dict[str, Any]:
         """Compute quality metrics with caching to avoid O(n²) reconstruction."""
@@ -214,7 +285,7 @@ class MQTTHandler:
         self.pcg_max_duration = float(os.getenv("PCG_MAX_DURATION", 15))
         self.ecg_max_duration = float(os.getenv("ECG_MAX_DURATION", 60))
         self.timeout_sec = int(os.getenv("STREAM_TIMEOUT_SEC", 10))
-        self.metrics_update_hz = float(os.getenv("METRICS_UPDATE_HZ", 2))
+        self.metrics_update_hz = float(os.getenv("METRICS_UPDATE_HZ", 10))
         
         # Session timeout configuration
         self.max_session_duration_minutes = int(os.getenv("MAX_SESSION_DURATION_MINUTES", 30))
@@ -403,6 +474,12 @@ class MQTTHandler:
                 self._handle_start_ecg(org_id, device_id, session_id, meta)
             elif msg_type == 'end_ecg':
                 self._schedule_async(self._handle_end_ecg(session_id))
+            elif msg_type == 'preflight_ok':
+                self._handle_preflight_result(org_id, device_id, session_id, meta, passed=True)
+            elif msg_type == 'preflight_failed':
+                self._handle_preflight_result(org_id, device_id, session_id, meta, passed=False)
+            elif msg_type == 'warning_pcg_overflow':
+                self._handle_session_warning(org_id, device_id, session_id, meta)
             
         except Exception as e:
             logger.error(f"Error handling meta message: {e}")
@@ -550,7 +627,95 @@ class MQTTHandler:
             logger.warning(f"Failed to mark PCG session {session_id} as streaming")
         
         logger.info(f"Started PCG streaming for session {session_id}")
-    
+
+    def _handle_preflight_result(
+        self,
+        org_id: str,
+        device_id: str,
+        session_id: str,
+        meta: Dict[str, Any],
+        passed: bool,
+    ):
+        """Persist preflight quality-gate results before streaming begins."""
+        if not self.supabase.ensure_session_exists(session_id, org_id, device_id):
+            logger.error(f"Unable to record preflight result for session {session_id}: session row unavailable")
+            return
+
+        now_iso = datetime.now(timezone.utc).isoformat()
+        metadata = {
+            "passed": passed,
+            "reason": meta.get("reason") or ("ok" if passed else "Signal preflight failed"),
+            "requested_duration_sec": self._coerce_int(meta.get("requested_duration_sec")),
+            "ecg_leads_connected": meta.get("ecg_leads_connected"),
+            "ecg_signal_present": meta.get("ecg_signal_present"),
+            "ecg_peak_to_peak_mv": self._coerce_int(meta.get("ecg_peak_to_peak_mv")),
+            "pcg_signal_present": meta.get("pcg_signal_present"),
+            "pcg_clipping_detected": meta.get("pcg_clipping_detected"),
+            "pcg_mean_abs_counts": self._coerce_int(meta.get("pcg_mean_abs_counts")),
+            "pcg_peak_to_peak_counts": self._coerce_int(meta.get("pcg_peak_to_peak_counts")),
+            "pcg_peak_abs_counts": self._coerce_int(meta.get("pcg_peak_abs_counts")),
+            "recorded_at": now_iso,
+        }
+
+        self._run_sync_in_executor(
+            self.supabase.create_live_metrics,
+            org_id,
+            session_id,
+            {
+                "timestamp": now_iso,
+                "quality_gate": metadata,
+                "event": "preflight_ok" if passed else "preflight_failed",
+            },
+        )
+
+        self._run_sync_in_executor(
+            self.supabase.create_audit_log,
+            org_id,
+            None,
+            "session_preflight_passed" if passed else "session_preflight_failed",
+            "session",
+            session_id,
+            metadata,
+        )
+
+        if not passed:
+            self._run_sync_in_executor(
+                self.supabase.update_session_status,
+                session_id,
+                "error",
+            )
+            logger.warning(
+                f"Session {session_id} rejected during preflight: {metadata['reason']}"
+            )
+
+    def _handle_session_warning(
+        self,
+        org_id: str,
+        device_id: str,
+        session_id: str,
+        meta: Dict[str, Any],
+    ):
+        """Persist non-fatal device warnings such as buffer overflow."""
+        if not self.supabase.ensure_session_exists(session_id, org_id, device_id):
+            logger.error(f"Unable to record session warning for session {session_id}: session row unavailable")
+            return
+
+        warning_metadata = {
+            "type": meta.get("type") or "warning",
+            "dropped_buffers_total": self._coerce_int(meta.get("dropped_buffers_total")),
+            "timestamp_ms": self._coerce_int(meta.get("timestamp_ms")),
+        }
+        self._run_sync_in_executor(
+            self.supabase.create_audit_log,
+            org_id,
+            None,
+            "session_stream_warning",
+            "session",
+            session_id,
+            warning_metadata,
+        )
+        logger.warning(f"Session {session_id} warning: {warning_metadata}")
+
     def _handle_start_ecg(
         self, 
         org_id: str, 
@@ -610,6 +775,20 @@ class MQTTHandler:
                 data = payload
             
             buffer.add_chunk(data)
+
+            unpublished_samples = max(
+                0,
+                buffer.total_samples - max(buffer.published_sample_index, buffer.buffer_start_sample_index)
+            )
+            should_eager_publish = (
+                buffer.waveform_sequence == 0
+                or (
+                    modality == 'ecg'
+                    and unpublished_samples >= max(1, int(buffer.sample_rate * 0.25))
+                )
+            )
+            if should_eager_publish:
+                self._schedule_async(self._flush_buffer_live_metrics(buffer_key, reason='chunk'))
             
             # Check limits
             duration = buffer.get_duration()
@@ -621,6 +800,48 @@ class MQTTHandler:
             
         except Exception as e:
             logger.error(f"Error handling {modality} chunk: {e}")
+
+    async def _flush_buffer_live_metrics(
+        self,
+        buffer_key: str,
+        reason: str = 'periodic',
+        force: bool = False,
+    ) -> bool:
+        """Persist one live waveform delta for a buffer when unpublished samples exist."""
+        buffer = self.buffers.get(buffer_key)
+        if not buffer:
+            return False
+
+        if buffer.ended and not force:
+            return False
+
+        waveform_frame = buffer.get_unpublished_live_frame()
+        if not waveform_frame:
+            return False
+
+        metrics = {
+            'buffer_fill': {
+                f'{buffer.modality}_seconds': buffer.get_duration(),
+                f'{buffer.modality}_samples': buffer.total_samples
+            },
+            'quality': buffer.get_quality_metrics(),
+            'timestamp': datetime.now(timezone.utc).isoformat(),
+            'waveform': waveform_frame,
+        }
+
+        loop = asyncio.get_running_loop()
+        metrics_saved = await loop.run_in_executor(
+            _executor,
+            self.supabase.create_live_metrics,
+            buffer.org_id,
+            buffer.session_id,
+            metrics
+        )
+        if not metrics_saved:
+            logger.warning(
+                f"Failed to persist {reason} live metrics for session {buffer.session_id}"
+            )
+        return metrics_saved
     
     async def _handle_end_pcg(self, session_id: str):
         """Handle end_pcg message - finalize and run inference."""
@@ -636,6 +857,12 @@ class MQTTHandler:
         loop = asyncio.get_running_loop()
         
         try:
+            await self._flush_buffer_live_metrics(
+                buffer_key,
+                reason='finalize',
+                force=True
+            )
+
             # Update status
             processing_ok = await loop.run_in_executor(
                 _executor,
@@ -685,8 +912,13 @@ class MQTTHandler:
             if not recording_id:
                 raise RuntimeError(f"Failed to create PCG recording row for session {session_id}")
             
-            # Run PCG inference
-            pcg_result = self.inference_engine.predict_pcg(audio, buffer.sample_rate)
+            # Run PCG inference off the event loop so ECG/live tasks keep flowing.
+            pcg_result = await loop.run_in_executor(
+                _executor,
+                self.inference_engine.predict_pcg,
+                audio,
+                buffer.sample_rate
+            )
             
             # Store PCG prediction
             prediction_id = await loop.run_in_executor(
@@ -707,8 +939,10 @@ class MQTTHandler:
             # If Murmur detected, run severity analysis
             if pcg_result['label'] == 'Murmur':
                 logger.info("Murmur detected, running severity analysis")
-                severity_result = self.inference_engine.predict_murmur_severity(
-                    audio, 
+                severity_result = await loop.run_in_executor(
+                    _executor,
+                    self.inference_engine.predict_murmur_severity,
+                    audio,
                     buffer.sample_rate
                 )
                 
@@ -794,6 +1028,12 @@ class MQTTHandler:
         loop = asyncio.get_running_loop()
         
         try:
+            await self._flush_buffer_live_metrics(
+                buffer_key,
+                reason='finalize',
+                force=True
+            )
+
             # Update status
             processing_ok = await loop.run_in_executor(
                 _executor,
@@ -839,8 +1079,13 @@ class MQTTHandler:
             if not recording_id:
                 raise RuntimeError(f"Failed to create ECG recording row for session {session_id}")
             
-            # Run ECG inference
-            ecg_result = self.inference_engine.predict_ecg(ecg, buffer.sample_rate)
+            # Run ECG inference off the event loop so timeout/live polling stays responsive.
+            ecg_result = await loop.run_in_executor(
+                _executor,
+                self.inference_engine.predict_ecg,
+                ecg,
+                buffer.sample_rate
+            )
             
             # Store ECG prediction
             prediction_id = await loop.run_in_executor(
@@ -1003,39 +1248,8 @@ class MQTTHandler:
                 for buffer_key, buffer in list(self.buffers.items()):
                     if buffer.ended:
                         continue
-                    
-                    # Compute metrics (uses cache to avoid O(n²) reconstruction)
-                    metrics = {
-                        'buffer_fill': {
-                            f'{buffer.modality}_seconds': buffer.get_duration(),
-                            f'{buffer.modality}_samples': buffer.total_samples
-                        },
-                        'quality': buffer.get_quality_metrics(),
-                        'timestamp': datetime.now(timezone.utc).isoformat()
-                    }
 
-                    # Include a small rolling waveform window for live charts
-                    max_samples = 2000 if buffer.modality == 'pcg' else 800
-                    recent = buffer.get_recent_signal(max_samples)
-                    if recent.size > 0:
-                        metrics['waveform'] = {
-                            'modality': buffer.modality,
-                            'sample_rate': buffer.sample_rate,
-                            'samples': recent.tolist()
-                        }
-                    
-                    # Publish to DB via thread pool
-                    metrics_saved = await loop.run_in_executor(
-                        _executor,
-                        self.supabase.create_live_metrics,
-                        buffer.org_id,
-                        buffer.session_id,
-                        metrics
-                    )
-                    if not metrics_saved:
-                        logger.warning(
-                            f"Failed to persist live metrics for session {buffer.session_id}"
-                        )
+                    await self._flush_buffer_live_metrics(buffer_key)
                     
             except Exception as e:
                 logger.error(f"Error publishing live metrics: {e}")

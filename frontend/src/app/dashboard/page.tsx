@@ -308,28 +308,14 @@ export default function Dashboard() {
   useEffect(() => {
     fetchDashboardData()
 
-    const channel = supabase
-      .channel('dashboard-realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'sessions' }, () => {
-        fetchDashboardData()
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'predictions' }, () => {
-        fetchDashboardData()
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'device_telemetry' }, () => {
-        fetchDashboardData()
-      })
-      .subscribe()
-
     // Polling remains the supported live path because browser MQTT topics are
     // not produced by the backend and Supabase realtime is intentionally limited.
     const interval = setInterval(fetchDashboardData, 5000)
 
     return () => {
       clearInterval(interval)
-      supabase.removeChannel(channel)
     }
-  }, [fetchDashboardData, supabase])
+  }, [fetchDashboardData])
 
   const activeSessions = sessions.filter(s => s.status === 'streaming' || s.status === 'processing').length
   const completedSessions = sessions.filter(s => s.status === 'done').length

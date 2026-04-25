@@ -53,17 +53,17 @@ class PCGPreprocessor:
             if original_sr and original_sr != self.sample_rate:
                 audio = librosa.resample(audio, orig_sr=original_sr, target_sr=self.sample_rate)
                 logger.info(f"Resampled from {original_sr} to {self.sample_rate} Hz")
-            
-            # Standardize duration (pad or truncate)
+
+            # Filter before selecting the analysis window so the centered crop
+            # is taken from a clinically cleaner signal.
+            audio = self._bandpass_filter(audio)
+
+            # Standardize duration (pad or centered crop)
             if len(audio) < self.target_samples:
                 # Pad with zeros
                 audio = np.pad(audio, (0, self.target_samples - len(audio)), mode='constant')
             elif len(audio) > self.target_samples:
-                # Truncate
-                audio = audio[:self.target_samples]
-            
-            # Bandpass filter (20-400 Hz)
-            audio = self._bandpass_filter(audio)
+                audio = self._center_crop(audio, self.target_samples)
             
             # Normalize
             audio = self._normalize(audio)
@@ -77,6 +77,13 @@ class PCGPreprocessor:
         except Exception as e:
             logger.error(f"PCG preprocessing error: {e}")
             raise
+
+    @staticmethod
+    def _center_crop(audio: np.ndarray, target_samples: int) -> np.ndarray:
+        """Crop the stable center of a longer clip to reduce start/end handling noise."""
+        start = max(0, (len(audio) - target_samples) // 2)
+        end = start + target_samples
+        return audio[start:end]
     
     def _bandpass_filter(self, audio: np.ndarray) -> np.ndarray:
         """Apply Butterworth bandpass filter."""
@@ -280,7 +287,8 @@ class PCGSeverityPreprocessor:
                 pad_width = self.target_time_frames - n_time
                 spectrogram = np.pad(spectrogram, ((0, 0), (0, pad_width)), mode='constant', constant_values=spectrogram.min())
             elif n_time > self.target_time_frames:
-                spectrogram = spectrogram[:, :self.target_time_frames]
+                start = max(0, (n_time - self.target_time_frames) // 2)
+                spectrogram = spectrogram[:, start:start + self.target_time_frames]
             
             logger.info(f"Severity preprocessing complete: shape={spectrogram.shape}")
             return spectrogram

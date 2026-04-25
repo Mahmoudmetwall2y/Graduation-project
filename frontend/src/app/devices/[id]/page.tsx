@@ -1,7 +1,6 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { createClientComponentClient } from '@supabase/auth-helpers-nextjs'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import {
@@ -67,35 +66,15 @@ export default function DeviceDetailPage() {
   const [activeTab, setActiveTab] = useState('overview')
   const [generatingReport, setGeneratingReport] = useState<string | null>(null)
 
-  const supabase = createClientComponentClient()
-
   useEffect(() => {
     if (deviceId) {
       fetchDeviceData()
-
-      // Subscribe to real-time device changes
-      const channel = supabase
-        .channel(`device-${deviceId}`)
-        .on('postgres_changes', {
-          event: '*', schema: 'public', table: 'devices',
-          filter: `id=eq.${deviceId}`
-        }, () => {
-          fetchDeviceData()
-        })
-        .on('postgres_changes', {
-          event: 'INSERT', schema: 'public', table: 'device_telemetry',
-          filter: `device_id=eq.${deviceId}`
-        }, () => {
-          fetchDeviceData()
-        })
-        .subscribe()
 
       // Fallback poll every 30s
       const interval = setInterval(fetchDeviceData, 30000)
 
       return () => {
         clearInterval(interval)
-        supabase.removeChannel(channel)
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps

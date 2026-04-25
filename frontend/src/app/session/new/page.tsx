@@ -6,12 +6,15 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { Heart, Cpu, FileText, ArrowRight, ChevronLeft, Activity } from 'lucide-react'
 
+const CAPTURE_DURATION_OPTIONS = [15, 20, 30, 45]
+
 export default function NewSessionPage() {
   const [deviceId, setDeviceId] = useState('')
   const [devices, setDevices] = useState<any[]>([])
   const [patientId, setPatientId] = useState('')
   const [patients, setPatients] = useState<any[]>([])
   const [notes, setNotes] = useState('')
+  const [captureDurationSec, setCaptureDurationSec] = useState(15)
   const [loading, setLoading] = useState(false)
 
   const [error, setError] = useState<string | null>(null)
@@ -21,6 +24,8 @@ export default function NewSessionPage() {
   const [fetchPatientsError, setFetchPatientsError] = useState<string | null>(null)
   const router = useRouter()
   const supabase = createClientComponentClient()
+  const selectedDevice = devices.find((device) => device.id === deviceId)
+  const deviceReady = selectedDevice ? !selectedDevice.status || selectedDevice.status === 'online' : false
 
   const fetchDevices = useCallback(async () => {
     try {
@@ -100,6 +105,25 @@ export default function NewSessionPage() {
         .single()
 
       if (sessionError) throw sessionError
+
+      const startResponse = await fetch(`/api/sessions/${session.id}/start`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          durationSec: captureDurationSec,
+        }),
+      })
+
+      const startResult = await startResponse
+        .json()
+        .catch(() => ({ error: 'Failed to read start-session response.' }))
+
+      if (!startResponse.ok) {
+        throw new Error(startResult.error || 'Hardware did not acknowledge the start command.')
+      }
+
       router.push(`/session/${session.id}`)
     } catch (error: any) {
       setError(error.message)
@@ -182,6 +206,11 @@ export default function NewSessionPage() {
                   <Cpu className="w-3 h-3" />
                   Please <Link href="/devices" className="text-primary underline">register a device</Link> first.
                 </p>
+              ) : selectedDevice ? (
+                <p className={`mt-2 text-xs ${deviceReady ? 'text-emerald-400' : 'text-amber-400'}`}>
+                  Device status: {selectedDevice.status || 'unknown'}
+                  {!deviceReady ? ' — keep the ESP32 powered on and connected before starting.' : ''}
+                </p>
               ) : null}
             </div>
 
@@ -232,6 +261,30 @@ export default function NewSessionPage() {
             </div>
 
             <div>
+              <label htmlFor="capture-duration" className="block text-sm font-medium text-foreground mb-1.5">
+                <span className="flex items-center gap-1.5">
+                  <Activity className="w-3.5 h-3.5 text-muted-foreground" />
+                  Capture Duration
+                </span>
+              </label>
+              <select
+                id="capture-duration"
+                value={captureDurationSec}
+                onChange={(e) => setCaptureDurationSec(Number(e.target.value))}
+                className="input-field"
+              >
+                {CAPTURE_DURATION_OPTIONS.map((duration) => (
+                  <option key={duration} value={duration}>
+                    {duration} seconds
+                  </option>
+                ))}
+              </select>
+              <p className="mt-2 text-xs text-muted-foreground">
+                Longer captures give the models more cardiac cycles to analyze and improve signal stability.
+              </p>
+            </div>
+
+            <div>
               <label htmlFor="notes" className="block text-sm font-medium text-foreground mb-1.5">
                 <span className="flex items-center gap-1.5">
                   <FileText className="w-3.5 h-3.5 text-muted-foreground" />
@@ -258,7 +311,7 @@ export default function NewSessionPage() {
               </button>
               <button
                 type="submit"
-                disabled={loading || devices.length === 0}
+                disabled={loading || devices.length === 0 || !deviceReady}
                 className="flex items-center gap-2 px-6 py-2.5 rounded-lg text-sm font-bold uppercase tracking-widest text-[#00f0ff] bg-[#00f0ff]/10 hover:bg-[#00f0ff]/20 border border-[#00f0ff]/30 shadow-[0_0_15px_rgba(0,240,255,0.15)] transition-all disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {loading ? (
