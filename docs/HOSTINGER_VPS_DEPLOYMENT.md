@@ -27,6 +27,14 @@ nslookup app.example.com
 nslookup n8n.example.com
 ```
 
+If you do **not** have your own domain yet and only want to use the Hostinger VPS hostname, you can still deploy now:
+
+- app on `https://srv1621744.hstgr.cloud`
+- n8n kept private on `127.0.0.1:5678`
+- n8n accessed through an SSH tunnel from your laptop
+
+That is the safest immediate path for your current VPS details.
+
 ## 2. Connect To The VPS
 
 From your local machine:
@@ -124,12 +132,51 @@ Recommended for first deployment:
 - `INFERENCE_BIND_ADDRESS=127.0.0.1`
 - `N8N_BIND_ADDRESS=127.0.0.1`
 
+### Temporary values for your current Hostinger hostname
+
+Because you currently gave me:
+
+- VPS IP: `187.127.224.4`
+- VPS hostname: `srv1621744.hstgr.cloud`
+
+you can deploy immediately with these values:
+
+```env
+APP_DOMAIN=srv1621744.hstgr.cloud
+DEVICE_BOOTSTRAP_PUBLIC_BASE_URL=https://srv1621744.hstgr.cloud
+DEVICE_BOOTSTRAP_MQTT_HOST=srv1621744.hstgr.cloud
+
+NGINX_SERVER_NAME=srv1621744.hstgr.cloud
+ALLOWED_ORIGINS=https://srv1621744.hstgr.cloud
+TRUSTED_HOSTS=srv1621744.hstgr.cloud,localhost,127.0.0.1
+CORS_ORIGIN=https://srv1621744.hstgr.cloud
+
+N8N_BIND_ADDRESS=127.0.0.1
+N8N_DOMAIN=localhost
+N8N_PROTOCOL=http
+N8N_EDITOR_BASE_URL=http://localhost:5678
+N8N_WEBHOOK_URL=http://localhost:5678/
+NGINX_N8N_SERVER_NAME=n8n.localhost
+```
+
+This gives you:
+
+- public app on the Hostinger hostname
+- private n8n on the VPS
+- no public n8n domain required yet
+
 ## 7. Get TLS Certificates
 
 Use one certificate covering both hostnames:
 
 ```bash
 certbot certonly --standalone -d app.example.com -d n8n.example.com
+```
+
+If you are using the Hostinger hostname only for now, use:
+
+```bash
+certbot certonly --standalone -d srv1621744.hstgr.cloud
 ```
 
 After certbot succeeds:
@@ -188,6 +235,16 @@ Login with:
 
 - `N8N_USER`
 - `N8N_PASSWORD`
+
+If you are using the Hostinger hostname-only setup, keep n8n private and access it with an SSH tunnel instead:
+
+```bash
+ssh -L 5678:127.0.0.1:5678 root@187.127.224.4
+```
+
+Then open:
+
+- `http://localhost:5678`
 
 Then create credentials inside n8n for:
 

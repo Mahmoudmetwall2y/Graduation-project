@@ -21,12 +21,12 @@ services:
       - N8N_BASIC_AUTH_USER=${N8N_USER:?N8N_USER is required}
       - N8N_BASIC_AUTH_PASSWORD=${N8N_PASSWORD:?N8N_PASSWORD is required}
       - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY:?N8N_ENCRYPTION_KEY is required}
-      - N8N_HOST=${N8N_DOMAIN:?N8N_DOMAIN is required}
-      - N8N_PROTOCOL=https
+      - N8N_HOST=${N8N_DOMAIN:-localhost}
+      - N8N_PROTOCOL=${N8N_PROTOCOL:-http}
       - N8N_PORT=5678
-      - N8N_EDITOR_BASE_URL=${N8N_EDITOR_BASE_URL:?N8N_EDITOR_BASE_URL is required}
+      - N8N_EDITOR_BASE_URL=${N8N_EDITOR_BASE_URL:-http://localhost:5678}
       - N8N_PROXY_HOPS=${N8N_PROXY_HOPS:-1}
-      - WEBHOOK_URL=${N8N_WEBHOOK_URL:?N8N_WEBHOOK_URL is required}
+      - WEBHOOK_URL=${N8N_WEBHOOK_URL:-http://localhost:5678/}
       - GENERIC_TIMEZONE=${GENERIC_TIMEZONE:-Africa/Cairo}
       - TZ=${GENERIC_TIMEZONE:-Africa/Cairo}
       - ASCULTICOR_APP_URL=http://frontend:3000
