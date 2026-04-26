@@ -1,7 +1,15 @@
 services:
   nginx:
+    environment:
+      - NGINX_N8N_SERVER_NAME=${NGINX_N8N_SERVER_NAME:-n8n.localhost}
+      - NGINX_N8N_SSL_CERT_PATH=${NGINX_N8N_SSL_CERT_PATH:-/etc/nginx/certs/fullchain.pem}
+      - NGINX_N8N_SSL_KEY_PATH=${NGINX_N8N_SSL_KEY_PATH:-/etc/nginx/certs/privkey.pem}
+    depends_on:
+      n8n:
+        condition: service_started
     volumes:
       - ./nginx/certs:/etc/nginx/certs:ro
+      - ./nginx/default.cloud.conf.template:/etc/nginx/templates/default.conf.template:ro
 
   n8n:
     image: docker.n8n.io/n8nio/n8n:stable
@@ -13,8 +21,12 @@ services:
       - N8N_BASIC_AUTH_USER=${N8N_USER:?N8N_USER is required}
       - N8N_BASIC_AUTH_PASSWORD=${N8N_PASSWORD:?N8N_PASSWORD is required}
       - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY:?N8N_ENCRYPTION_KEY is required}
+      - N8N_HOST=${N8N_DOMAIN:?N8N_DOMAIN is required}
+      - N8N_PROTOCOL=https
+      - N8N_PORT=5678
+      - N8N_EDITOR_BASE_URL=${N8N_EDITOR_BASE_URL:?N8N_EDITOR_BASE_URL is required}
       - N8N_PROXY_HOPS=${N8N_PROXY_HOPS:-1}
-      - WEBHOOK_URL=${N8N_WEBHOOK_URL:-}
+      - WEBHOOK_URL=${N8N_WEBHOOK_URL:?N8N_WEBHOOK_URL is required}
       - GENERIC_TIMEZONE=${GENERIC_TIMEZONE:-Africa/Cairo}
       - TZ=${GENERIC_TIMEZONE:-Africa/Cairo}
       - ASCULTICOR_APP_URL=http://frontend:3000

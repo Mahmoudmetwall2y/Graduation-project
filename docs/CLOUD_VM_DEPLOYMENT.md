@@ -24,7 +24,8 @@ It matches the current architecture, so the application code needs only small co
 
 Public:
 
-- `https://staging.example.com` -> NGINX -> frontend
+- `https://app.example.com` -> NGINX -> frontend
+- `https://n8n.example.com` -> NGINX -> n8n
 
 Private/internal only:
 
@@ -59,7 +60,8 @@ Keep these closed to the public internet unless you have a deliberate security d
 
 Create an `A` record:
 
-- `staging.example.com` -> your VM public IP
+- `app.example.com` -> your VM public IP
+- `n8n.example.com` -> your VM public IP
 
 ## 3. Prepare Environment Variables
 
@@ -72,6 +74,7 @@ cp .env.cloud.example .env
 Edit `.env` and set at minimum:
 
 - `APP_DOMAIN`
+- `N8N_DOMAIN`
 - `SUPABASE_URL`
 - `SUPABASE_ANON_KEY`
 - `SUPABASE_SERVICE_ROLE_KEY`
@@ -81,6 +84,7 @@ Edit `.env` and set at minimum:
 - `INTERNAL_API_TOKEN`
 - `INFERENCE_INTERNAL_TOKEN`
 - `NGINX_SERVER_NAME`
+- `NGINX_N8N_SERVER_NAME`
 - `ALLOWED_ORIGINS`
 - `TRUSTED_HOSTS`
 - `CORS_ORIGIN`
@@ -108,16 +112,21 @@ The cloud template expects:
 - `NGINX_SSL_CERT_PATH=/etc/nginx/certs/fullchain.pem`
 - `NGINX_SSL_KEY_PATH=/etc/nginx/certs/privkey.pem`
 
+It also supports a separate n8n certificate if you need one:
+
+- `NGINX_N8N_SSL_CERT_PATH`
+- `NGINX_N8N_SSL_KEY_PATH`
+
 ## 5. Configure Supabase For The Cloud Domain
 
 In Supabase Auth settings, add your real domain:
 
-- Site URL: `https://staging.example.com`
-- Redirect URL: `https://staging.example.com/auth/callback`
+- Site URL: `https://app.example.com`
+- Redirect URL: `https://app.example.com/auth/callback`
 
 Also make sure edge functions use:
 
-- `CORS_ORIGIN=https://staging.example.com`
+- `CORS_ORIGIN=https://app.example.com`
 
 ## 6. Deploy The Stack
 
@@ -150,9 +159,10 @@ docker compose --env-file .env -f docker-compose.yml -f docker-compose.cloud.yml
 Check health endpoints from the VM:
 
 ```bash
-curl -f https://staging.example.com/
+curl -f https://app.example.com/
 curl -f http://127.0.0.1:3000/api/health
 curl -f http://127.0.0.1:8000/health
+curl -f https://n8n.example.com/
 ```
 
 Check internal protected inference endpoints:
@@ -171,7 +181,7 @@ On the ESP32:
 ```text
 SET device_id <device id>
 SET device_secret <device secret>
-SET bootstrap_url https://staging.example.com/api/device/bootstrap
+SET bootstrap_url https://app.example.com/api/device/bootstrap
 SET wifi_ssid <wifi>
 SET wifi_pass <password>
 REBOOT
@@ -204,15 +214,12 @@ Until then, leave:
 
 ## 10. n8n Access Pattern
 
-In the cloud profile, `n8n` binds to loopback by default:
+The cloud profile now assumes the recommended n8n shape:
 
-- `127.0.0.1:5678`
+- app on `app.example.com`
+- n8n on `n8n.example.com`
 
-That is deliberate. Good options for teammate access are:
-
-- SSH tunnel
-- Tailscale / ZeroTier
-- later: an authenticated reverse-proxy route
+This follows current n8n guidance more closely than putting n8n on a subpath behind a reverse proxy.
 
 Inside the Docker network, `n8n` can already reach:
 
