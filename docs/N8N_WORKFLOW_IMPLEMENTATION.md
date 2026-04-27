@@ -17,12 +17,11 @@ CLAUDE_API_KEY=<your AgentRouter Claude key>
 CLAUDE_BASE_URL=https://agentrouter.org
 CLAUDE_MODEL=claude-sonnet-4-5-20250514
 ASCULTICOR_ALERT_EMAIL_TO=<team inbox>
-ASCULTICOR_ALERT_EMAIL_FROM="AscultiCor <alerts@example.com>"
 N8N_BLOCK_ENV_ACCESS_IN_NODE=false
 N8N_PUSH_BACKEND=sse
 ```
 
-Patient-facing report and clinical alert emails use the linked patient's `patients.email` value when present. `ASCULTICOR_ALERT_EMAIL_TO` remains the fallback and the destination for operational workflows such as device health, daily digest, ops monitoring, and escalation.
+Patient-facing report and clinical alert emails use the linked patient's `patients.email` value when present. `ASCULTICOR_ALERT_EMAIL_TO` remains the fallback and the destination for operational workflows such as device health, daily digest, ops monitoring, and escalation. Emails are sent through the n8n Gmail node, so the sender is the Gmail account connected in n8n.
 
 Restart n8n after changing `.env` or `docker-compose.cloud.yml`:
 
@@ -37,13 +36,15 @@ Use `--force-recreate nginx n8n` if you also changed the n8n public URL or proxy
 In n8n:
 
 1. Open the n8n UI.
-2. Select `Import from File`.
-3. Import the JSON files from `n8n/workflows/`.
-4. Open each imported workflow and save it once.
-5. For every `Send Email` node, select or create your SMTP credential.
-6. Keep all workflows inactive until their manual test passes.
+2. Create one Gmail OAuth credential: `Credentials` -> `Create Credential` -> `Gmail OAuth2`.
+3. If Google asks for an OAuth redirect URL, use the redirect URL shown by n8n for that credential. For this VPS it is usually `https://srv1621744.hstgr.cloud:8443/rest/oauth2-credential/callback`.
+4. Select `Import from File`.
+5. Import the JSON files from `n8n/workflows/`.
+6. Open each imported workflow and save it once.
+7. For every `Send Gmail` node, select the Gmail OAuth credential.
+8. Keep all workflows inactive until their manual test passes.
 
-The workflows use environment variables from the n8n container for Supabase, Claude, internal AscultiCor URLs, and alert email addresses.
+The workflows use environment variables from the n8n container for Supabase, Claude, internal AscultiCor URLs, and fallback alert email addresses. Gmail authentication is handled inside n8n credentials, not through SMTP environment variables.
 
 ## 3. Build Order
 
