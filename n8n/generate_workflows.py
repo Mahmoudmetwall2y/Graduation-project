@@ -75,6 +75,35 @@ def gmail_node(name: str = "Send Gmail", x: int = 620, y: int = 80) -> dict:
     }
 
 
+def http_get_node(
+    name: str,
+    url: str,
+    headers: list[tuple[str, str]] | None = None,
+    x: int = 300,
+    y: int = 80,
+    always_output: bool = False,
+) -> dict:
+    node = {
+        "parameters": {
+            "url": url,
+            "options": {},
+        },
+        "id": stable_id(name),
+        "name": name,
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [x, y],
+    }
+    if headers:
+        node["parameters"]["sendHeaders"] = True
+        node["parameters"]["headerParameters"] = {
+            "parameters": [{"name": key, "value": value} for key, value in headers]
+        }
+    if always_output:
+        node["alwaysOutputData"] = True
+    return node
+
+
 def workflow(name: str, nodes: list[dict], connections: dict) -> dict:
     return {
         "name": name,
@@ -197,16 +226,43 @@ async function patientForSession(session) {
 """
 
 
-CONNECTIVITY_JS = COMMON_JS + r"""
-const inference = await fetch(env('ASCULTICOR_INFERENCE_URL', 'http://inference:8000') + '/health');
-if (!inference.ok) throw new Error(`Inference health failed: ${inference.status}`);
-const inferenceBody = await inference.text();
+CONNECTIVITY_JS = r"""
+function env(name, fallback = '') {
+  const value = typeof $env !== 'undefined' ? $env[name] : undefined;
+  return value === undefined || value === null || value === '' ? fallback : value;
+}
 
-const frontend = await fetch(env('ASCULTICOR_APP_URL', 'http://frontend:3000') + '/api/health');
-if (!frontend.ok) throw new Error(`Frontend health failed: ${frontend.status}`);
-const frontendBody = await frontend.text();
+const EMAIL_TO = env('ASCULTICOR_ALERT_EMAIL_TO');
+const EMAIL_FROM = env('ASCULTICOR_ALERT_EMAIL_FROM', 'AscultiCor <alerts@localhost>');
 
-const reports = await supabase('llm_reports?select=id,status,created_at&limit=1');
+function emailItem(subject, text, to = EMAIL_TO) {
+  if (!to) throw new Error('A recipient email is required before sending email');
+  return { json: { emailFrom: EMAIL_FROM, emailTo: to, emailSubject: subject, emailText: text } };
+}
+
+function firstJson(nodeName) {
+  try {
+    return $(nodeName).first().json;
+  } catch (error) {
+    return { unavailable: true, error: error.message };
+  }
+}
+
+function allJson(nodeName) {
+  try {
+    return $(nodeName).all().map((item) => item.json);
+  } catch (error) {
+    return [{ unavailable: true, error: error.message }];
+  }
+}
+
+function preview(value) {
+  return JSON.stringify(value).slice(0, 300);
+}
+
+const inference = firstJson('Inference Health');
+const frontend = firstJson('Frontend Health');
+const reports = allJson('Supabase LLM Report Sample');
 
 return [
   emailItem(
@@ -214,9 +270,9 @@ return [
     [
       'AscultiCor n8n connectivity check passed.',
       '',
-      `Inference: ${inference.status} ${inferenceBody.slice(0, 300)}`,
-      `Frontend: ${frontend.status} ${frontendBody.slice(0, 300)}`,
-      `Supabase llm_reports sample rows: ${(reports || []).length}`,
+      `Inference: ${preview(inference)}`,
+      `Frontend: ${preview(frontend)}`,
+      `Supabase llm_reports sample rows: ${reports.length}`,
       `Checked at: ${new Date().toISOString()}`,
     ].join('\n')
   )
@@ -813,8 +869,42 @@ def write_workflows() -> None:
         (
             "00 - AscultiCor Connectivity Check",
             "00-connectivity-check.json",
-            [manual_node(), code_node("Connectivity Check", CONNECTIVITY_JS), gmail_node()],
-            {"Manual Trigger": {"main": [[{"node": "Connectivity Check", "type": "main", "index": 0}]]}, "Connectivity Check": {"main": [[{"node": "Send Gmail", "type": "main", "index": 0}]]}},
+            [
+                manual_node(),
+                http_get_node(
+                    "Inference Health",
+                    "={{(($env.ASCULTICOR_INFERENCE_URL || 'http://inference:8000').replace(/\\/+$/, '')) + '/health'}}",
+                    x=260,
+                    y=0,
+                ),
+                http_get_node(
+                    "Frontend Health",
+                    "={{(($env.ASCULTICOR_APP_URL || 'http://frontend:3000').replace(/\\/+$/, '')) + '/api/health'}}",
+                    x=520,
+                    y=0,
+                ),
+                http_get_node(
+                    "Supabase LLM Report Sample",
+                    "={{($env.SUPABASE_URL || '').replace(/\\/+$/, '') + '/rest/v1/llm_reports?select=id,status,created_at&limit=1'}}",
+                    headers=[
+                        ("apikey", "={{$env.SUPABASE_SERVICE_ROLE_KEY}}"),
+                        ("Authorization", "={{'Bearer ' + $env.SUPABASE_SERVICE_ROLE_KEY}}"),
+                        ("Content-Type", "application/json"),
+                    ],
+                    x=780,
+                    y=0,
+                    always_output=True,
+                ),
+                code_node("Build Connectivity Email", CONNECTIVITY_JS, x=1040, y=0),
+                gmail_node(x=1300, y=0),
+            ],
+            {
+                "Manual Trigger": {"main": [[{"node": "Inference Health", "type": "main", "index": 0}]]},
+                "Inference Health": {"main": [[{"node": "Frontend Health", "type": "main", "index": 0}]]},
+                "Frontend Health": {"main": [[{"node": "Supabase LLM Report Sample", "type": "main", "index": 0}]]},
+                "Supabase LLM Report Sample": {"main": [[{"node": "Build Connectivity Email", "type": "main", "index": 0}]]},
+                "Build Connectivity Email": {"main": [[{"node": "Send Gmail", "type": "main", "index": 0}]]},
+            },
         ),
         (
             "01 - Process Pending LLM Reports",
