@@ -104,6 +104,21 @@ def http_get_node(
     return node
 
 
+INTERNAL_HOST_HEADER = (
+    "={{$env.ASCULTICOR_INTERNAL_HOST_HEADER || "
+    "($env.ASCULTICOR_PUBLIC_APP_URL || 'https://srv1621744.hstgr.cloud')"
+    ".replace(/^https?:\\/\\//, '').replace(/\\/.*$/, '')}}"
+)
+
+
+def internal_service_headers() -> list[tuple[str, str]]:
+    return [
+        ("Host", INTERNAL_HOST_HEADER),
+        ("X-Forwarded-Host", INTERNAL_HOST_HEADER),
+        ("X-Forwarded-Proto", "https"),
+    ]
+
+
 def workflow(name: str, nodes: list[dict], connections: dict) -> dict:
     return {
         "name": name,
@@ -874,12 +889,14 @@ def write_workflows() -> None:
                 http_get_node(
                     "Inference Health",
                     "={{(($env.ASCULTICOR_INFERENCE_URL || 'http://inference:8000').replace(/\\/+$/, '')) + '/health'}}",
+                    headers=internal_service_headers(),
                     x=260,
                     y=0,
                 ),
                 http_get_node(
                     "Frontend Health",
                     "={{(($env.ASCULTICOR_APP_URL || 'http://frontend:3000').replace(/\\/+$/, '')) + '/api/health'}}",
+                    headers=internal_service_headers(),
                     x=520,
                     y=0,
                 ),
