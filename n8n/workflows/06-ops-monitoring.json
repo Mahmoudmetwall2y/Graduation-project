@@ -34,14 +34,51 @@
     },
     {
       "parameters": {
-        "jsCode": "function env(name, fallback = '') {\n  // n8n 2.x task runners sandbox Code nodes, so Node's process object is not available.\n  const value = typeof $env !== 'undefined' ? $env[name] : undefined;\n  return value === undefined || value === null || value === '' ? fallback : value;\n}\n\nfunction requiredEnv(name) {\n  const value = env(name);\n  if (!value) throw new Error(`${name} is required`);\n  return value;\n}\n\nconst SUPABASE_URL = requiredEnv('SUPABASE_URL').replace(/\\/+$/, '');\nconst SERVICE_KEY = requiredEnv('SUPABASE_SERVICE_ROLE_KEY');\nconst APP_URL = env('ASCULTICOR_PUBLIC_APP_URL', env('DEVICE_BOOTSTRAP_PUBLIC_BASE_URL', 'https://srv1621744.hstgr.cloud')).replace(/\\/+$/, '');\nconst EMAIL_TO = env('ASCULTICOR_ALERT_EMAIL_TO');\nconst EMAIL_FROM = env('ASCULTICOR_ALERT_EMAIL_FROM', 'AscultiCor <alerts@localhost>');\n\nasync function supabase(path, options = {}) {\n  const method = options.method || 'GET';\n  const headers = {\n    apikey: SERVICE_KEY,\n    Authorization: `Bearer ${SERVICE_KEY}`,\n    'Content-Type': 'application/json',\n    ...(options.headers || {}),\n  };\n  if (options.prefer) headers.Prefer = options.prefer;\n  const response = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {\n    method,\n    headers,\n    body: options.body === undefined ? undefined : JSON.stringify(options.body),\n  });\n  const text = await response.text();\n  if (!response.ok) {\n    throw new Error(`${method} ${path} failed: ${response.status} ${text}`);\n  }\n  if (!text) return null;\n  try {\n    return JSON.parse(text);\n  } catch {\n    return text;\n  }\n}\n\nfunction qs(params) {\n  const out = new URLSearchParams();\n  for (const [key, value] of Object.entries(params)) {\n    if (value !== undefined && value !== null) out.append(key, String(value));\n  }\n  return out.toString();\n}\n\nfunction get(obj, path, fallback = undefined) {\n  return path.split('.').reduce((acc, key) => (acc && acc[key] !== undefined ? acc[key] : undefined), obj) ?? fallback;\n}\n\nfunction isoMinutesAgo(minutes) {\n  return new Date(Date.now() - minutes * 60 * 1000).toISOString();\n}\n\nfunction emailItem(subject, text, to = EMAIL_TO) {\n  if (!to) throw new Error('A recipient email is required before sending email');\n  return { json: { emailFrom: EMAIL_FROM, emailTo: to, emailSubject: subject, emailText: text } };\n}\n\nasync function findOpenAlert(deviceId, sessionId, subtype) {\n  const rows = await supabase(`device_alerts?${qs({\n    select: '*',\n    device_id: `eq.${deviceId}`,\n    is_resolved: 'eq.false',\n    order: 'created_at.desc',\n    limit: 100,\n  })}`);\n  return (rows || []).find((row) => {\n    const metadata = row.metadata || {};\n    return metadata.session_id === sessionId && metadata.subtype === subtype;\n  });\n}\n\nasync function insertAlert({ deviceId, orgId, alertType, severity, message, metadata }) {\n  const inserted = await supabase('device_alerts?select=*', {\n    method: 'POST',\n    prefer: 'return=representation',\n    body: {\n      device_id: deviceId,\n      org_id: orgId,\n      alert_type: alertType,\n      severity,\n      message,\n      metadata,\n      is_resolved: false,\n    },\n  });\n  return inserted?.[0];\n}\n\nasync function patientForSession(session) {\n  if (!session?.patient_id) return null;\n  const rows = await supabase(`patients?${qs({ select: 'id,full_name,email', id: `eq.${session.patient_id}`, limit: 1 })}`);\n  return rows?.[0] || null;\n}\n\nconst issues = [];\n\nasync function getJson(url, headers = {}) {\n  const response = await fetch(url, { headers });\n  const text = await response.text();\n  if (!response.ok) throw new Error(`${url} failed: ${response.status} ${text}`);\n  try { return JSON.parse(text); } catch { return text; }\n}\n\ntry {\n  await getJson(env('ASCULTICOR_INFERENCE_URL', 'http://inference:8000') + '/health');\n} catch (error) {\n  issues.push(`Inference health failed: ${error.message}`);\n}\n\ntry {\n  await getJson(env('ASCULTICOR_INFERENCE_URL', 'http://inference:8000') + '/metrics', {\n    'x-internal-token': requiredEnv('ASCULTICOR_INFERENCE_TOKEN'),\n  });\n} catch (error) {\n  issues.push(`Inference metrics failed: ${error.message}`);\n}\n\ntry {\n  const stats = await getJson(env('ASCULTICOR_APP_URL', 'http://frontend:3000') + '/api/llm?action=queue-stats', {\n    'x-internal-token': requiredEnv('ASCULTICOR_INTERNAL_API_TOKEN'),\n  });\n  const queue = stats.queue || {};\n  if ((queue.pending || 0) > 10) issues.push(`LLM pending queue is high: ${queue.pending}`);\n  if (queue.oldest_pending_created_at && Date.now() - Date.parse(queue.oldest_pending_created_at) > 15 * 60 * 1000) {\n    issues.push(`Oldest pending LLM report is older than 15 minutes: ${queue.oldest_pending_created_at}`);\n  }\n  if ((queue.generating || 0) > 5) issues.push(`Many reports are generating: ${queue.generating}`);\n} catch (error) {\n  issues.push(`LLM queue stats failed: ${error.message}`);\n}\n\nif (!issues.length) return [];\nreturn [emailItem('[AscultiCor] Ops Monitoring Alert', ['AscultiCor ops monitor found issues:', '', ...issues].join('\\n'))];\n"
+        "url": "={{(($env.ASCULTICOR_APP_URL || 'http://frontend:3000').replace(/\\/+$/, '')) + '/api/n8n/workflows?action=ops-monitoring'}}",
+        "options": {},
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Host",
+              "value": "={{$env.ASCULTICOR_INTERNAL_HOST_HEADER || ($env.ASCULTICOR_PUBLIC_APP_URL || 'https://srv1621744.hstgr.cloud').replace(/^https?:\\/\\//, '').replace(/\\/.*$/, '')}}"
+            },
+            {
+              "name": "X-Forwarded-Host",
+              "value": "={{$env.ASCULTICOR_INTERNAL_HOST_HEADER || ($env.ASCULTICOR_PUBLIC_APP_URL || 'https://srv1621744.hstgr.cloud').replace(/^https?:\\/\\//, '').replace(/\\/.*$/, '')}}"
+            },
+            {
+              "name": "X-Forwarded-Proto",
+              "value": "https"
+            },
+            {
+              "name": "x-internal-token",
+              "value": "={{$env.ASCULTICOR_INTERNAL_API_TOKEN}}"
+            }
+          ]
+        },
+        "method": "POST"
       },
-      "id": "02f073aa-7455-52d8-a5cc-7f4f470f4417",
-      "name": "Check Ops",
+      "id": "499c88a4-65a8-5a17-88f3-a7c80dd84e7f",
+      "name": "Run Ops Monitoring",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        300,
+        80
+      ],
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const emails = Array.isArray($json.emails) ? $json.emails : [];\n\nreturn emails\n  .filter((item) => item && item.emailTo && item.emailSubject && item.emailText)\n  .map((item) => ({\n    json: {\n      emailFrom: item.emailFrom || '',\n      emailTo: item.emailTo,\n      emailSubject: item.emailSubject,\n      emailText: item.emailText,\n    },\n  }));\n"
+      },
+      "id": "12be4a63-bb81-5009-befd-f890528c9697",
+      "name": "Prepare Ops Emails",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        300,
+        600,
         80
       ]
     },
@@ -60,7 +97,7 @@
       "type": "n8n-nodes-base.gmail",
       "typeVersion": 2.1,
       "position": [
-        620,
+        900,
         80
       ]
     }
@@ -70,7 +107,7 @@
       "main": [
         [
           {
-            "node": "Check Ops",
+            "node": "Run Ops Monitoring",
             "type": "main",
             "index": 0
           }
@@ -81,14 +118,25 @@
       "main": [
         [
           {
-            "node": "Check Ops",
+            "node": "Run Ops Monitoring",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Check Ops": {
+    "Run Ops Monitoring": {
+      "main": [
+        [
+          {
+            "node": "Prepare Ops Emails",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Ops Emails": {
       "main": [
         [
           {

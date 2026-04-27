@@ -267,6 +267,12 @@ async function processPendingReports(request: Request) {
     let processed = 0
     let failed = 0
     let skipped = 0
+    const emails: Array<{
+      emailFrom: string
+      emailTo: string
+      emailSubject: string
+      emailText: string
+    }> = []
 
     for (const pending of readyReports) {
       let activeReport: any = pending
@@ -294,7 +300,8 @@ async function processPendingReports(request: Request) {
             *,
             predictions(*),
             murmur_severity(*),
-            device:devices(device_name)
+            device:devices(device_name),
+            patient:patients(full_name,email)
           `)
           .eq('id', activeReport.session_id)
           .single()
@@ -303,7 +310,26 @@ async function processPendingReports(request: Request) {
           throw new Error('Session not found while processing queued report')
         }
 
-        await generateLLMReport(session, activeReport.id, serviceClient)
+        const generatedReport = await generateLLMReport(session, activeReport.id, serviceClient)
+        const recipient = session.patient?.email || process.env.ASCULTICOR_ALERT_EMAIL_TO
+        if (recipient && generatedReport?.report_text) {
+          emails.push({
+            emailFrom: process.env.ASCULTICOR_ALERT_EMAIL_FROM || 'AscultiCor <alerts@localhost>',
+            emailTo: recipient,
+            emailSubject: '[AscultiCor] Cardiac analysis report ready',
+            emailText: [
+              `Hello${session.patient?.full_name ? ` ${session.patient.full_name}` : ''},`,
+              '',
+              'Your AscultiCor educational cardiac analysis report is ready.',
+              '',
+              generatedReport.report_text,
+              '',
+              `View session: ${(process.env.DEVICE_BOOTSTRAP_PUBLIC_BASE_URL || '').replace(/\/+$/, '')}/session/${session.id}`,
+              '',
+              'Important: This report is for educational and research purposes only. It is not a medical diagnosis. Always consult a qualified healthcare professional for medical advice.',
+            ].join('\n'),
+          })
+        }
         processed += 1
       } catch (err: any) {
         failed += 1
@@ -331,6 +357,7 @@ async function processPendingReports(request: Request) {
       failed,
       skipped,
       total: readyReports.length,
+      emails,
       message: 'Queued report processing completed'
     })
   } catch (error: any) {

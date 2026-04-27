@@ -6,30 +6,36 @@ This guide is for the teammate responsible for n8n automation. It assumes the Ho
 
 Update the VPS with these files from the repo:
 
+- `docker-compose.yml`
 - `docker-compose.cloud.yml`
-- `.env`
+- `frontend/src/app/api/llm/route.ts`
+- `frontend/src/app/api/n8n/workflows/route.ts`
 - `n8n/workflows/*.json`
 
-The n8n container must receive these environment variables:
+The frontend and n8n containers must receive these environment variables:
 
 ```env
 CLAUDE_API_KEY=<your AgentRouter Claude key>
 CLAUDE_BASE_URL=https://agentrouter.org
 CLAUDE_MODEL=claude-sonnet-4-5-20250514
 ASCULTICOR_ALERT_EMAIL_TO=<team inbox>
+ASCULTICOR_ALERT_EMAIL_FROM=AscultiCor <alerts@localhost>
+ASCULTICOR_INTERNAL_HOST_HEADER=srv1621744.hstgr.cloud
 N8N_BLOCK_ENV_ACCESS_IN_NODE=false
 N8N_PUSH_BACKEND=sse
 ```
 
 Patient-facing report and clinical alert emails use the linked patient's `patients.email` value when present. `ASCULTICOR_ALERT_EMAIL_TO` remains the fallback and the destination for operational workflows such as device health, daily digest, ops monitoring, and escalation. Emails are sent through the n8n Gmail node, so the sender is the Gmail account connected in n8n.
 
-Restart n8n after changing `.env` or `docker-compose.cloud.yml`:
+The n8n workflows intentionally do not call Supabase, Claude, or inference directly from Code nodes. n8n calls internal AscultiCor API endpoints with `x-internal-token`, and the frontend backend performs the database/API work safely.
+
+Rebuild the frontend and recreate n8n after pulling these workflow changes:
 
 ```bash
-docker compose --env-file .env -f docker-compose.yml -f docker-compose.cloud.yml up -d --force-recreate n8n
+docker compose --env-file .env -f docker-compose.yml -f docker-compose.cloud.yml up -d --build --force-recreate frontend n8n
 ```
 
-Use `--force-recreate nginx n8n` if you also changed the n8n public URL or proxy config.
+Use `--force-recreate nginx frontend n8n` if you also changed the n8n public URL or proxy config.
 
 ## 2. Import Workflows
 
@@ -44,7 +50,7 @@ In n8n:
 7. For every `Send Gmail` node, select the Gmail OAuth credential.
 8. Keep all workflows inactive until their manual test passes.
 
-The workflows use environment variables from the n8n container for Supabase, Claude, internal AscultiCor URLs, and fallback alert email addresses. Gmail authentication is handled inside n8n credentials, not through SMTP environment variables.
+The workflows use environment variables from the n8n container for internal AscultiCor URLs and fallback alert email addresses. Gmail authentication is handled inside n8n credentials, not through SMTP environment variables.
 
 ## 3. Build Order
 

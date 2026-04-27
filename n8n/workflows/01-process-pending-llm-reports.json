@@ -34,14 +34,51 @@
     },
     {
       "parameters": {
-        "jsCode": "function env(name, fallback = '') {\n  // n8n 2.x task runners sandbox Code nodes, so Node's process object is not available.\n  const value = typeof $env !== 'undefined' ? $env[name] : undefined;\n  return value === undefined || value === null || value === '' ? fallback : value;\n}\n\nfunction requiredEnv(name) {\n  const value = env(name);\n  if (!value) throw new Error(`${name} is required`);\n  return value;\n}\n\nconst SUPABASE_URL = requiredEnv('SUPABASE_URL').replace(/\\/+$/, '');\nconst SERVICE_KEY = requiredEnv('SUPABASE_SERVICE_ROLE_KEY');\nconst APP_URL = env('ASCULTICOR_PUBLIC_APP_URL', env('DEVICE_BOOTSTRAP_PUBLIC_BASE_URL', 'https://srv1621744.hstgr.cloud')).replace(/\\/+$/, '');\nconst EMAIL_TO = env('ASCULTICOR_ALERT_EMAIL_TO');\nconst EMAIL_FROM = env('ASCULTICOR_ALERT_EMAIL_FROM', 'AscultiCor <alerts@localhost>');\n\nasync function supabase(path, options = {}) {\n  const method = options.method || 'GET';\n  const headers = {\n    apikey: SERVICE_KEY,\n    Authorization: `Bearer ${SERVICE_KEY}`,\n    'Content-Type': 'application/json',\n    ...(options.headers || {}),\n  };\n  if (options.prefer) headers.Prefer = options.prefer;\n  const response = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {\n    method,\n    headers,\n    body: options.body === undefined ? undefined : JSON.stringify(options.body),\n  });\n  const text = await response.text();\n  if (!response.ok) {\n    throw new Error(`${method} ${path} failed: ${response.status} ${text}`);\n  }\n  if (!text) return null;\n  try {\n    return JSON.parse(text);\n  } catch {\n    return text;\n  }\n}\n\nfunction qs(params) {\n  const out = new URLSearchParams();\n  for (const [key, value] of Object.entries(params)) {\n    if (value !== undefined && value !== null) out.append(key, String(value));\n  }\n  return out.toString();\n}\n\nfunction get(obj, path, fallback = undefined) {\n  return path.split('.').reduce((acc, key) => (acc && acc[key] !== undefined ? acc[key] : undefined), obj) ?? fallback;\n}\n\nfunction isoMinutesAgo(minutes) {\n  return new Date(Date.now() - minutes * 60 * 1000).toISOString();\n}\n\nfunction emailItem(subject, text, to = EMAIL_TO) {\n  if (!to) throw new Error('A recipient email is required before sending email');\n  return { json: { emailFrom: EMAIL_FROM, emailTo: to, emailSubject: subject, emailText: text } };\n}\n\nasync function findOpenAlert(deviceId, sessionId, subtype) {\n  const rows = await supabase(`device_alerts?${qs({\n    select: '*',\n    device_id: `eq.${deviceId}`,\n    is_resolved: 'eq.false',\n    order: 'created_at.desc',\n    limit: 100,\n  })}`);\n  return (rows || []).find((row) => {\n    const metadata = row.metadata || {};\n    return metadata.session_id === sessionId && metadata.subtype === subtype;\n  });\n}\n\nasync function insertAlert({ deviceId, orgId, alertType, severity, message, metadata }) {\n  const inserted = await supabase('device_alerts?select=*', {\n    method: 'POST',\n    prefer: 'return=representation',\n    body: {\n      device_id: deviceId,\n      org_id: orgId,\n      alert_type: alertType,\n      severity,\n      message,\n      metadata,\n      is_resolved: false,\n    },\n  });\n  return inserted?.[0];\n}\n\nasync function patientForSession(session) {\n  if (!session?.patient_id) return null;\n  const rows = await supabase(`patients?${qs({ select: 'id,full_name,email', id: `eq.${session.patient_id}`, limit: 1 })}`);\n  return rows?.[0] || null;\n}\n\nconst CLAUDE_API_KEY = requiredEnv('CLAUDE_API_KEY');\nconst CLAUDE_BASE_URL = env('CLAUDE_BASE_URL', 'https://agentrouter.org').replace(/\\/+$/, '');\nconst CLAUDE_MODEL = env('CLAUDE_MODEL', 'claude-sonnet-4-5-20250514');\n\nfunction confidenceFromPredictions(predictions) {\n  const values = [];\n  for (const prediction of predictions || []) {\n    const out = prediction.output_json || {};\n    if (prediction.modality === 'pcg' && out.label && out.probabilities?.[out.label] !== undefined) {\n      values.push(Number(out.probabilities[out.label]));\n    }\n    if (prediction.modality === 'ecg' && out.confidence !== undefined) {\n      values.push(Number(out.confidence));\n    }\n  }\n  return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : 0;\n}\n\nfunction buildPrompt(session, predictions, murmurRows, device) {\n  const pcg = (predictions || []).find((p) => p.modality === 'pcg')?.output_json || {};\n  const ecg = (predictions || []).find((p) => p.modality === 'ecg')?.output_json || {};\n  const murmur = (murmurRows || [])[0] || {};\n  return `You are a medical AI assistant analyzing cardiac signal data for educational purposes.\n\nIMPORTANT DISCLAIMER: This analysis is for educational and research purposes only. It is NOT a medical diagnosis. Always consult qualified healthcare professionals for medical advice.\n\nSession Information:\n- Device: ${device?.device_name || 'Unknown'}\n- Date: ${session?.created_at || 'Unknown'}\n- Status: ${session?.status || 'Unknown'}\n\nPCG Analysis:\n- Classification: ${pcg.label || 'N/A'}\n- Confidence: ${pcg.label && pcg.probabilities?.[pcg.label] !== undefined ? Math.round(pcg.probabilities[pcg.label] * 100) + '%' : 'N/A'}\n\nMurmur Severity:\n- Location: ${get(murmur, 'location_json.predicted', 'N/A')}\n- Timing: ${get(murmur, 'timing_json.predicted', 'N/A')}\n- Shape: ${get(murmur, 'shape_json.predicted', 'N/A')}\n- Grading: ${get(murmur, 'grading_json.predicted', 'N/A')}\n- Pitch: ${get(murmur, 'pitch_json.predicted', 'N/A')}\n- Quality: ${get(murmur, 'quality_json.predicted', 'N/A')}\n\nECG Analysis:\n- Prediction: ${ecg.prediction || 'N/A'}\n- Confidence: ${ecg.confidence !== undefined ? Math.round(ecg.confidence * 100) + '%' : 'N/A'}\n\nPlease provide:\n1. A brief educational summary of the findings.\n2. Key observations for clinical review.\n3. Suggested follow-up actions for a healthcare professional.\n4. Limitations and caveats.\n\nEmphasize that this is not a diagnosis.`;\n}\n\nasync function callClaude(prompt) {\n  const response = await fetch(`${CLAUDE_BASE_URL}/v1/messages`, {\n    method: 'POST',\n    headers: {\n      'Content-Type': 'application/json',\n      'x-api-key': CLAUDE_API_KEY,\n      'anthropic-version': '2023-06-01',\n    },\n    body: JSON.stringify({\n      model: CLAUDE_MODEL,\n      max_tokens: 4096,\n      messages: [{ role: 'user', content: prompt }],\n    }),\n  });\n  const text = await response.text();\n  if (!response.ok) throw new Error(`Claude API returned ${response.status}: ${text}`);\n  const data = JSON.parse(text);\n  const blocks = (data.content || []).filter((block) => block.type === 'text').map((block) => block.text);\n  if (!blocks.length) throw new Error('Claude returned no text content');\n  return { text: blocks.join('\\n\\n'), usage: data.usage || null };\n}\n\nconst nowIso = new Date().toISOString();\nconst pending = await supabase(`llm_reports?${qs({\n  select: '*',\n  status: 'eq.pending',\n  order: 'created_at.asc',\n  limit: 3,\n  or: `(next_retry_at.is.null,next_retry_at.lte.${nowIso})`,\n})}`);\n\nconst results = [];\n\nfor (const report of pending || []) {\n  let active = report;\n  const start = Date.now();\n  try {\n    const claimed = await supabase(`llm_reports?${qs({\n      select: '*',\n      id: `eq.${report.id}`,\n      status: 'eq.pending',\n    })}`, {\n      method: 'PATCH',\n      prefer: 'return=representation',\n      body: { status: 'generating', error_message: null },\n    });\n    if (!claimed?.length) {\n      results.push({ id: report.id, status: 'skipped' });\n      continue;\n    }\n    active = claimed[0];\n\n    const [sessions, predictions, murmurRows, devices] = await Promise.all([\n      supabase(`sessions?${qs({ select: '*', id: `eq.${active.session_id}`, limit: 1 })}`),\n      supabase(`predictions?${qs({ select: '*', session_id: `eq.${active.session_id}`, order: 'created_at.asc' })}`),\n      supabase(`murmur_severity?${qs({ select: '*', session_id: `eq.${active.session_id}`, limit: 1 })}`),\n      supabase(`devices?${qs({ select: '*', id: `eq.${active.device_id}`, limit: 1 })}`),\n    ]);\n    const session = sessions?.[0];\n    if (!session) throw new Error(`Session ${active.session_id} not found`);\n    const prompt = active.prompt_text || buildPrompt(session, predictions, murmurRows, devices?.[0]);\n\n    const claude = await callClaude(prompt);\n    const reportText = claude.text;\n    const pcg = (predictions || []).find((p) => p.modality === 'pcg');\n    const ecg = (predictions || []).find((p) => p.modality === 'ecg');\n    const structured = {\n      summary: reportText.split('\\n').slice(0, 4).join('\\n').trim(),\n      findings: [\n        pcg?.output_json?.label ? `PCG: ${pcg.output_json.label}` : null,\n        ecg?.output_json?.prediction ? `ECG: ${ecg.output_json.prediction}` : null,\n      ].filter(Boolean),\n      recommendations: [\n        'Consult a qualified healthcare professional',\n        'Review with a cardiologist when clinically appropriate',\n        'Correlate findings with symptoms and clinical history',\n      ],\n      confidence: {\n        score: confidenceFromPredictions(predictions || []),\n      },\n    };\n\n    await supabase(`llm_reports?${qs({ id: `eq.${active.id}` })}`, {\n      method: 'PATCH',\n      prefer: 'return=representation',\n      body: {\n        status: 'completed',\n        report_text: reportText,\n        report_json: structured,\n        model_name: 'claude',\n        model_version: CLAUDE_MODEL,\n        completed_at: new Date().toISOString(),\n        tokens_used: claude.usage?.output_tokens || Math.ceil(reportText.length / 4),\n        latency_ms: Date.now() - start,\n        confidence_score: structured.confidence.score,\n        error_message: null,\n        retry_count: 0,\n        next_retry_at: null,\n        last_error_at: null,\n      },\n    });\n    const patient = await patientForSession(session);\n    const recipient = patient?.email || EMAIL_TO;\n    if (recipient) {\n      results.push({\n        emailFrom: EMAIL_FROM,\n        emailTo: recipient,\n        emailSubject: '[AscultiCor] Cardiac analysis report ready',\n        emailText: [\n          `Hello${patient?.full_name ? ` ${patient.full_name}` : ''},`,\n          '',\n          'Your AscultiCor educational cardiac analysis report is ready.',\n          '',\n          reportText,\n          '',\n          `View session: ${APP_URL}/session/${session.id}`,\n          '',\n          'Important: This report is for educational and research purposes only. It is not a medical diagnosis. Always consult a qualified healthcare professional for medical advice.',\n        ].join('\\n'),\n      });\n    }\n    results.push({ id: active.id, status: 'completed' });\n  } catch (error) {\n    const retryCount = Number(active.retry_count || 0) + 1;\n    const maxRetries = Number(active.max_retries ?? 3);\n    const shouldRetry = retryCount <= maxRetries;\n    const backoffMinutes = Math.min(60, Math.pow(2, Math.max(1, retryCount)));\n    await supabase(`llm_reports?${qs({ id: `eq.${active.id}` })}`, {\n      method: 'PATCH',\n      prefer: 'return=representation',\n      body: {\n        status: shouldRetry ? 'pending' : 'error',\n        retry_count: retryCount,\n        next_retry_at: shouldRetry ? new Date(Date.now() + backoffMinutes * 60 * 1000).toISOString() : null,\n        last_error_at: new Date().toISOString(),\n        error_message: error.message || 'Failed to process LLM report',\n      },\n    });\n    results.push({ id: active.id, status: shouldRetry ? 'retry_scheduled' : 'error', error: error.message });\n  }\n}\n\nreturn results.filter((item) => item.emailTo).map((item) => ({ json: item }));\n"
+        "url": "={{(($env.ASCULTICOR_APP_URL || 'http://frontend:3000').replace(/\\/+$/, '')) + '/api/llm?action=process-pending'}}",
+        "options": {},
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Host",
+              "value": "={{$env.ASCULTICOR_INTERNAL_HOST_HEADER || ($env.ASCULTICOR_PUBLIC_APP_URL || 'https://srv1621744.hstgr.cloud').replace(/^https?:\\/\\//, '').replace(/\\/.*$/, '')}}"
+            },
+            {
+              "name": "X-Forwarded-Host",
+              "value": "={{$env.ASCULTICOR_INTERNAL_HOST_HEADER || ($env.ASCULTICOR_PUBLIC_APP_URL || 'https://srv1621744.hstgr.cloud').replace(/^https?:\\/\\//, '').replace(/\\/.*$/, '')}}"
+            },
+            {
+              "name": "X-Forwarded-Proto",
+              "value": "https"
+            },
+            {
+              "name": "x-internal-token",
+              "value": "={{$env.ASCULTICOR_INTERNAL_API_TOKEN}}"
+            }
+          ]
+        },
+        "method": "POST"
       },
-      "id": "c9abba62-5e41-53b5-802b-8301e87190b8",
-      "name": "Process Reports",
+      "id": "bc9b22ff-5f38-5cda-9a48-8b0c3d40e5b3",
+      "name": "Process Pending Reports",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        300,
+        80
+      ],
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const emails = Array.isArray($json.emails) ? $json.emails : [];\n\nreturn emails\n  .filter((item) => item && item.emailTo && item.emailSubject && item.emailText)\n  .map((item) => ({\n    json: {\n      emailFrom: item.emailFrom || '',\n      emailTo: item.emailTo,\n      emailSubject: item.emailSubject,\n      emailText: item.emailText,\n    },\n  }));\n"
+      },
+      "id": "6889d1d8-4f24-5535-b871-6d112b5f91dd",
+      "name": "Prepare LLM Report Emails",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        300,
+        600,
         80
       ]
     },
@@ -60,7 +97,7 @@
       "type": "n8n-nodes-base.gmail",
       "typeVersion": 2.1,
       "position": [
-        620,
+        900,
         80
       ]
     }
@@ -70,7 +107,7 @@
       "main": [
         [
           {
-            "node": "Process Reports",
+            "node": "Process Pending Reports",
             "type": "main",
             "index": 0
           }
@@ -81,14 +118,25 @@
       "main": [
         [
           {
-            "node": "Process Reports",
+            "node": "Process Pending Reports",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Process Reports": {
+    "Process Pending Reports": {
+      "main": [
+        [
+          {
+            "node": "Prepare LLM Report Emails",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare LLM Report Emails": {
       "main": [
         [
           {
