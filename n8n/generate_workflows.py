@@ -56,18 +56,20 @@ def code_node(name: str, code: str, x: int = 300, y: int = 80) -> dict:
     }
 
 
-def email_node(name: str = "Send Email", x: int = 620, y: int = 80) -> dict:
+def gmail_node(name: str = "Send Gmail", x: int = 620, y: int = 80) -> dict:
     return {
         "parameters": {
-            "fromEmail": "={{$json.emailFrom}}",
-            "toEmail": "={{$json.emailTo}}",
+            "sendTo": "={{$json.emailTo}}",
             "subject": "={{$json.emailSubject}}",
-            "text": "={{$json.emailText}}",
-            "options": {},
+            "message": "={{$json.emailText}}",
+            "emailType": "text",
+            "options": {
+                "appendAttribution": False,
+            },
         },
         "id": stable_id(name),
         "name": name,
-        "type": "n8n-nodes-base.emailSend",
+        "type": "n8n-nodes-base.gmail",
         "typeVersion": 2.1,
         "position": [x, y],
     }
@@ -809,47 +811,47 @@ def write_workflows() -> None:
         (
             "00 - AscultiCor Connectivity Check",
             "00-connectivity-check.json",
-            [manual_node(), code_node("Connectivity Check", CONNECTIVITY_JS), email_node()],
-            {"Manual Trigger": {"main": [[{"node": "Connectivity Check", "type": "main", "index": 0}]]}, "Connectivity Check": {"main": [[{"node": "Send Email", "type": "main", "index": 0}]]}},
+            [manual_node(), code_node("Connectivity Check", CONNECTIVITY_JS), gmail_node()],
+            {"Manual Trigger": {"main": [[{"node": "Connectivity Check", "type": "main", "index": 0}]]}, "Connectivity Check": {"main": [[{"node": "Send Gmail", "type": "main", "index": 0}]]}},
         ),
         (
             "01 - Process Pending LLM Reports",
             "01-process-pending-llm-reports.json",
-            [manual_node(), schedule_node("Every Minute", minutes=1), code_node("Process Reports", LLM_JS), email_node()],
+            [manual_node(), schedule_node("Every Minute", minutes=1), code_node("Process Reports", LLM_JS), gmail_node()],
             {
                 "Manual Trigger": {"main": [[{"node": "Process Reports", "type": "main", "index": 0}]]},
                 "Every Minute": {"main": [[{"node": "Process Reports", "type": "main", "index": 0}]]},
-                "Process Reports": {"main": [[{"node": "Send Email", "type": "main", "index": 0}]]},
+                "Process Reports": {"main": [[{"node": "Send Gmail", "type": "main", "index": 0}]]},
             },
         ),
         (
             "02 - Clinical Alert Notifications",
             "02-clinical-alert-notifications.json",
-            [manual_node(), schedule_node("Every Minute", minutes=1), code_node("Create Clinical Alerts", CLINICAL_ALERTS_JS), email_node()],
+            [manual_node(), schedule_node("Every Minute", minutes=1), code_node("Create Clinical Alerts", CLINICAL_ALERTS_JS), gmail_node()],
             {
                 "Manual Trigger": {"main": [[{"node": "Create Clinical Alerts", "type": "main", "index": 0}]]},
                 "Every Minute": {"main": [[{"node": "Create Clinical Alerts", "type": "main", "index": 0}]]},
-                "Create Clinical Alerts": {"main": [[{"node": "Send Email", "type": "main", "index": 0}]]},
+                "Create Clinical Alerts": {"main": [[{"node": "Send Gmail", "type": "main", "index": 0}]]},
             },
         ),
         (
             "03 - Device Health Monitoring",
             "03-device-health-monitoring.json",
-            [manual_node(), schedule_node("Every Two Minutes", minutes=2), code_node("Monitor Device Health", DEVICE_HEALTH_JS), email_node()],
+            [manual_node(), schedule_node("Every Two Minutes", minutes=2), code_node("Monitor Device Health", DEVICE_HEALTH_JS), gmail_node()],
             {
                 "Manual Trigger": {"main": [[{"node": "Monitor Device Health", "type": "main", "index": 0}]]},
                 "Every Two Minutes": {"main": [[{"node": "Monitor Device Health", "type": "main", "index": 0}]]},
-                "Monitor Device Health": {"main": [[{"node": "Send Email", "type": "main", "index": 0}]]},
+                "Monitor Device Health": {"main": [[{"node": "Send Gmail", "type": "main", "index": 0}]]},
             },
         ),
         (
             "04 - Daily Digest",
             "04-daily-digest.json",
-            [manual_node(), schedule_node("Daily 09 Cairo", daily_hour=9), code_node("Build Daily Digest", DAILY_DIGEST_JS), email_node()],
+            [manual_node(), schedule_node("Daily 09 Cairo", daily_hour=9), code_node("Build Daily Digest", DAILY_DIGEST_JS), gmail_node()],
             {
                 "Manual Trigger": {"main": [[{"node": "Build Daily Digest", "type": "main", "index": 0}]]},
                 "Daily 09 Cairo": {"main": [[{"node": "Build Daily Digest", "type": "main", "index": 0}]]},
-                "Build Daily Digest": {"main": [[{"node": "Send Email", "type": "main", "index": 0}]]},
+                "Build Daily Digest": {"main": [[{"node": "Send Gmail", "type": "main", "index": 0}]]},
             },
         ),
         (
@@ -864,21 +866,21 @@ def write_workflows() -> None:
         (
             "06 - Ops Monitoring",
             "06-ops-monitoring.json",
-            [manual_node(), schedule_node("Every Five Minutes", minutes=5), code_node("Check Ops", OPS_MONITORING_JS), email_node()],
+            [manual_node(), schedule_node("Every Five Minutes", minutes=5), code_node("Check Ops", OPS_MONITORING_JS), gmail_node()],
             {
                 "Manual Trigger": {"main": [[{"node": "Check Ops", "type": "main", "index": 0}]]},
                 "Every Five Minutes": {"main": [[{"node": "Check Ops", "type": "main", "index": 0}]]},
-                "Check Ops": {"main": [[{"node": "Send Email", "type": "main", "index": 0}]]},
+                "Check Ops": {"main": [[{"node": "Send Gmail", "type": "main", "index": 0}]]},
             },
         ),
         (
             "07 - Alert Escalation",
             "07-alert-escalation.json",
-            [manual_node(), schedule_node("Every Five Minutes", minutes=5), code_node("Escalate Alerts", ESCALATION_JS), email_node()],
+            [manual_node(), schedule_node("Every Five Minutes", minutes=5), code_node("Escalate Alerts", ESCALATION_JS), gmail_node()],
             {
                 "Manual Trigger": {"main": [[{"node": "Escalate Alerts", "type": "main", "index": 0}]]},
                 "Every Five Minutes": {"main": [[{"node": "Escalate Alerts", "type": "main", "index": 0}]]},
-                "Escalate Alerts": {"main": [[{"node": "Send Email", "type": "main", "index": 0}]]},
+                "Escalate Alerts": {"main": [[{"node": "Send Gmail", "type": "main", "index": 0}]]},
             },
         ),
     ]

@@ -27,15 +27,17 @@
     },
     {
       "parameters": {
-        "fromEmail": "={{$json.emailFrom}}",
-        "toEmail": "={{$json.emailTo}}",
+        "sendTo": "={{$json.emailTo}}",
         "subject": "={{$json.emailSubject}}",
-        "text": "={{$json.emailText}}",
-        "options": {}
+        "message": "={{$json.emailText}}",
+        "emailType": "text",
+        "options": {
+          "appendAttribution": false
+        }
       },
-      "id": "8ca66994-493a-5f04-b5ba-1d0cc4a0c845",
-      "name": "Send Email",
-      "type": "n8n-nodes-base.emailSend",
+      "id": "7439a336-acf9-58f0-a13d-d5086c9d46a1",
+      "name": "Send Gmail",
+      "type": "n8n-nodes-base.gmail",
       "typeVersion": 2.1,
       "position": [
         620,
@@ -59,7 +61,7 @@
       "main": [
         [
           {
-            "node": "Send Email",
+            "node": "Send Gmail",
             "type": "main",
             "index": 0
           }
