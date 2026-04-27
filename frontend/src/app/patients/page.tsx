@@ -51,7 +51,6 @@ export default function PatientsPage() {
 
   const [fullName, setFullName] = useState('')
   const [email, setEmail] = useState('')
-  const [mrn, setMrn] = useState('')
   const [dob, setDob] = useState('')
   const [sex, setSex] = useState<'female' | 'male' | 'other' | 'unknown'>('unknown')
   const [notes, setNotes] = useState('')
@@ -118,7 +117,6 @@ export default function PatientsPage() {
   const resetForm = () => {
     setFullName('')
     setEmail('')
-    setMrn('')
     setDob('')
     setSex('unknown')
     setNotes('')
@@ -150,7 +148,6 @@ export default function PatientsPage() {
           created_by: userResp.user.id,
           full_name: fullName.trim(),
           email: email.trim() || null,
-          mrn: mrn.trim() || null,
           dob: dob || null,
           sex,
           notes: notes.trim() || null,
@@ -444,15 +441,18 @@ export default function PatientsPage() {
                   <p className="form-hint mt-1">Used by n8n to send patient notifications and generated reports.</p>
                 </div>
 
-                <div>
-                  <label className="block text-sm font-medium text-foreground mb-1.5">Medical Record Number (Optional)</label>
-                  <input
-                    type="text"
-                    value={mrn}
-                    onChange={(e) => setMrn(e.target.value)}
-                    placeholder="e.g., MRN-10293"
-                    className="input-field"
-                  />
+                <div className="rounded-xl border border-hud-cyan/20 bg-hud-cyan/5 p-3">
+                  <div className="flex items-start gap-3">
+                    <div className="mt-0.5 rounded-lg border border-hud-cyan/20 bg-hud-cyan/10 p-2">
+                      <Hash className="w-4 h-4 text-hud-cyan" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-foreground">Medical Record Number</p>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Generated automatically after the patient is created, so admins do not need to enter it manually.
+                      </p>
+                    </div>
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
