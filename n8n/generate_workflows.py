@@ -104,6 +104,45 @@ def http_get_node(
     return node
 
 
+def http_post_node(
+    name: str,
+    url: str,
+    headers: list[tuple[str, str]] | None = None,
+    x: int = 300,
+    y: int = 80,
+    always_output: bool = True,
+) -> dict:
+    node = http_get_node(name, url, headers=headers, x=x, y=y, always_output=always_output)
+    node["parameters"]["method"] = "POST"
+    return node
+
+
+INTERNAL_HOST_HEADER = (
+    "={{$env.ASCULTICOR_INTERNAL_HOST_HEADER || "
+    "($env.ASCULTICOR_PUBLIC_APP_URL || 'https://srv1621744.hstgr.cloud')"
+    ".replace(/^https?:\\/\\//, '').replace(/\\/.*$/, '')}}"
+)
+
+
+def internal_service_headers() -> list[tuple[str, str]]:
+    return [
+        ("Host", INTERNAL_HOST_HEADER),
+        ("X-Forwarded-Host", INTERNAL_HOST_HEADER),
+        ("X-Forwarded-Proto", "https"),
+    ]
+
+
+def internal_api_headers() -> list[tuple[str, str]]:
+    return [
+        *internal_service_headers(),
+        ("x-internal-token", "={{$env.ASCULTICOR_INTERNAL_API_TOKEN}}"),
+    ]
+
+
+def frontend_action_url(action: str, route: str = "/api/n8n/workflows") -> str:
+    return f"={{{{(($env.ASCULTICOR_APP_URL || 'http://frontend:3000').replace(/\\/+$/, '')) + '{route}?action={action}'}}}}"
+
+
 def workflow(name: str, nodes: list[dict], connections: dict) -> dict:
     return {
         "name": name,
@@ -277,6 +316,22 @@ return [
     ].join('\n')
   )
 ];
+"""
+
+
+EMAILS_FROM_RESULT_JS = r"""
+const emails = Array.isArray($json.emails) ? $json.emails : [];
+
+return emails
+  .filter((item) => item && item.emailTo && item.emailSubject && item.emailText)
+  .map((item) => ({
+    json: {
+      emailFrom: item.emailFrom || '',
+      emailTo: item.emailTo,
+      emailSubject: item.emailSubject,
+      emailText: item.emailText,
+    },
+  }));
 """
 
 
@@ -874,12 +929,14 @@ def write_workflows() -> None:
                 http_get_node(
                     "Inference Health",
                     "={{(($env.ASCULTICOR_INFERENCE_URL || 'http://inference:8000').replace(/\\/+$/, '')) + '/health'}}",
+                    headers=internal_service_headers(),
                     x=260,
                     y=0,
                 ),
                 http_get_node(
                     "Frontend Health",
                     "={{(($env.ASCULTICOR_APP_URL || 'http://frontend:3000').replace(/\\/+$/, '')) + '/api/health'}}",
+                    headers=internal_service_headers(),
                     x=520,
                     y=0,
                 ),
@@ -909,70 +966,116 @@ def write_workflows() -> None:
         (
             "01 - Process Pending LLM Reports",
             "01-process-pending-llm-reports.json",
-            [manual_node(), schedule_node("Every Minute", minutes=1), code_node("Process Reports", LLM_JS), gmail_node()],
+            [
+                manual_node(),
+                schedule_node("Every Minute", minutes=1),
+                http_post_node("Process Pending Reports", frontend_action_url("process-pending", "/api/llm"), headers=internal_api_headers(), x=300, y=80),
+                code_node("Prepare LLM Report Emails", EMAILS_FROM_RESULT_JS, x=600, y=80),
+                gmail_node(x=900, y=80),
+            ],
             {
-                "Manual Trigger": {"main": [[{"node": "Process Reports", "type": "main", "index": 0}]]},
-                "Every Minute": {"main": [[{"node": "Process Reports", "type": "main", "index": 0}]]},
-                "Process Reports": {"main": [[{"node": "Send Gmail", "type": "main", "index": 0}]]},
+                "Manual Trigger": {"main": [[{"node": "Process Pending Reports", "type": "main", "index": 0}]]},
+                "Every Minute": {"main": [[{"node": "Process Pending Reports", "type": "main", "index": 0}]]},
+                "Process Pending Reports": {"main": [[{"node": "Prepare LLM Report Emails", "type": "main", "index": 0}]]},
+                "Prepare LLM Report Emails": {"main": [[{"node": "Send Gmail", "type": "main", "index": 0}]]},
             },
         ),
         (
             "02 - Clinical Alert Notifications",
             "02-clinical-alert-notifications.json",
-            [manual_node(), schedule_node("Every Minute", minutes=1), code_node("Create Clinical Alerts", CLINICAL_ALERTS_JS), gmail_node()],
+            [
+                manual_node(),
+                schedule_node("Every Minute", minutes=1),
+                http_post_node("Run Clinical Alerts", frontend_action_url("clinical-alerts"), headers=internal_api_headers(), x=300, y=80),
+                code_node("Prepare Clinical Alert Emails", EMAILS_FROM_RESULT_JS, x=600, y=80),
+                gmail_node(x=900, y=80),
+            ],
             {
-                "Manual Trigger": {"main": [[{"node": "Create Clinical Alerts", "type": "main", "index": 0}]]},
-                "Every Minute": {"main": [[{"node": "Create Clinical Alerts", "type": "main", "index": 0}]]},
-                "Create Clinical Alerts": {"main": [[{"node": "Send Gmail", "type": "main", "index": 0}]]},
+                "Manual Trigger": {"main": [[{"node": "Run Clinical Alerts", "type": "main", "index": 0}]]},
+                "Every Minute": {"main": [[{"node": "Run Clinical Alerts", "type": "main", "index": 0}]]},
+                "Run Clinical Alerts": {"main": [[{"node": "Prepare Clinical Alert Emails", "type": "main", "index": 0}]]},
+                "Prepare Clinical Alert Emails": {"main": [[{"node": "Send Gmail", "type": "main", "index": 0}]]},
             },
         ),
         (
             "03 - Device Health Monitoring",
             "03-device-health-monitoring.json",
-            [manual_node(), schedule_node("Every Two Minutes", minutes=2), code_node("Monitor Device Health", DEVICE_HEALTH_JS), gmail_node()],
+            [
+                manual_node(),
+                schedule_node("Every Two Minutes", minutes=2),
+                http_post_node("Run Device Health", frontend_action_url("device-health"), headers=internal_api_headers(), x=300, y=80),
+                code_node("Prepare Device Health Emails", EMAILS_FROM_RESULT_JS, x=600, y=80),
+                gmail_node(x=900, y=80),
+            ],
             {
-                "Manual Trigger": {"main": [[{"node": "Monitor Device Health", "type": "main", "index": 0}]]},
-                "Every Two Minutes": {"main": [[{"node": "Monitor Device Health", "type": "main", "index": 0}]]},
-                "Monitor Device Health": {"main": [[{"node": "Send Gmail", "type": "main", "index": 0}]]},
+                "Manual Trigger": {"main": [[{"node": "Run Device Health", "type": "main", "index": 0}]]},
+                "Every Two Minutes": {"main": [[{"node": "Run Device Health", "type": "main", "index": 0}]]},
+                "Run Device Health": {"main": [[{"node": "Prepare Device Health Emails", "type": "main", "index": 0}]]},
+                "Prepare Device Health Emails": {"main": [[{"node": "Send Gmail", "type": "main", "index": 0}]]},
             },
         ),
         (
             "04 - Daily Digest",
             "04-daily-digest.json",
-            [manual_node(), schedule_node("Daily 09 Cairo", daily_hour=9), code_node("Build Daily Digest", DAILY_DIGEST_JS), gmail_node()],
+            [
+                manual_node(),
+                schedule_node("Daily 09 Cairo", daily_hour=9),
+                http_post_node("Run Daily Digest", frontend_action_url("daily-digest"), headers=internal_api_headers(), x=300, y=80),
+                code_node("Prepare Daily Digest Emails", EMAILS_FROM_RESULT_JS, x=600, y=80),
+                gmail_node(x=900, y=80),
+            ],
             {
-                "Manual Trigger": {"main": [[{"node": "Build Daily Digest", "type": "main", "index": 0}]]},
-                "Daily 09 Cairo": {"main": [[{"node": "Build Daily Digest", "type": "main", "index": 0}]]},
-                "Build Daily Digest": {"main": [[{"node": "Send Gmail", "type": "main", "index": 0}]]},
+                "Manual Trigger": {"main": [[{"node": "Run Daily Digest", "type": "main", "index": 0}]]},
+                "Daily 09 Cairo": {"main": [[{"node": "Run Daily Digest", "type": "main", "index": 0}]]},
+                "Run Daily Digest": {"main": [[{"node": "Prepare Daily Digest Emails", "type": "main", "index": 0}]]},
+                "Prepare Daily Digest Emails": {"main": [[{"node": "Send Gmail", "type": "main", "index": 0}]]},
             },
         ),
         (
             "05 - Recording Summary Enrichment",
             "05-recording-summary-enrichment.json",
-            [manual_node(), schedule_node("Every Six Hours", hours=6), code_node("Enrich Summaries", SUMMARY_ENRICHMENT_JS)],
+            [
+                manual_node(),
+                schedule_node("Every Six Hours", hours=6),
+                http_post_node("Run Summary Enrichment", frontend_action_url("summary-enrichment"), headers=internal_api_headers(), x=300, y=80),
+            ],
             {
-                "Manual Trigger": {"main": [[{"node": "Enrich Summaries", "type": "main", "index": 0}]]},
-                "Every Six Hours": {"main": [[{"node": "Enrich Summaries", "type": "main", "index": 0}]]},
+                "Manual Trigger": {"main": [[{"node": "Run Summary Enrichment", "type": "main", "index": 0}]]},
+                "Every Six Hours": {"main": [[{"node": "Run Summary Enrichment", "type": "main", "index": 0}]]},
             },
         ),
         (
             "06 - Ops Monitoring",
             "06-ops-monitoring.json",
-            [manual_node(), schedule_node("Every Five Minutes", minutes=5), code_node("Check Ops", OPS_MONITORING_JS), gmail_node()],
+            [
+                manual_node(),
+                schedule_node("Every Five Minutes", minutes=5),
+                http_post_node("Run Ops Monitoring", frontend_action_url("ops-monitoring"), headers=internal_api_headers(), x=300, y=80),
+                code_node("Prepare Ops Emails", EMAILS_FROM_RESULT_JS, x=600, y=80),
+                gmail_node(x=900, y=80),
+            ],
             {
-                "Manual Trigger": {"main": [[{"node": "Check Ops", "type": "main", "index": 0}]]},
-                "Every Five Minutes": {"main": [[{"node": "Check Ops", "type": "main", "index": 0}]]},
-                "Check Ops": {"main": [[{"node": "Send Gmail", "type": "main", "index": 0}]]},
+                "Manual Trigger": {"main": [[{"node": "Run Ops Monitoring", "type": "main", "index": 0}]]},
+                "Every Five Minutes": {"main": [[{"node": "Run Ops Monitoring", "type": "main", "index": 0}]]},
+                "Run Ops Monitoring": {"main": [[{"node": "Prepare Ops Emails", "type": "main", "index": 0}]]},
+                "Prepare Ops Emails": {"main": [[{"node": "Send Gmail", "type": "main", "index": 0}]]},
             },
         ),
         (
             "07 - Alert Escalation",
             "07-alert-escalation.json",
-            [manual_node(), schedule_node("Every Five Minutes", minutes=5), code_node("Escalate Alerts", ESCALATION_JS), gmail_node()],
+            [
+                manual_node(),
+                schedule_node("Every Five Minutes", minutes=5),
+                http_post_node("Run Alert Escalation", frontend_action_url("alert-escalation"), headers=internal_api_headers(), x=300, y=80),
+                code_node("Prepare Escalation Emails", EMAILS_FROM_RESULT_JS, x=600, y=80),
+                gmail_node(x=900, y=80),
+            ],
             {
-                "Manual Trigger": {"main": [[{"node": "Escalate Alerts", "type": "main", "index": 0}]]},
-                "Every Five Minutes": {"main": [[{"node": "Escalate Alerts", "type": "main", "index": 0}]]},
-                "Escalate Alerts": {"main": [[{"node": "Send Gmail", "type": "main", "index": 0}]]},
+                "Manual Trigger": {"main": [[{"node": "Run Alert Escalation", "type": "main", "index": 0}]]},
+                "Every Five Minutes": {"main": [[{"node": "Run Alert Escalation", "type": "main", "index": 0}]]},
+                "Run Alert Escalation": {"main": [[{"node": "Prepare Escalation Emails", "type": "main", "index": 0}]]},
+                "Prepare Escalation Emails": {"main": [[{"node": "Send Gmail", "type": "main", "index": 0}]]},
             },
         ),
     ]
