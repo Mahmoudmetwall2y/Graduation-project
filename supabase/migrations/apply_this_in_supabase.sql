@@ -516,6 +516,7 @@ CREATE TABLE IF NOT EXISTS patients (
     org_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
     created_by UUID REFERENCES profiles(id) ON DELETE SET NULL,
     full_name TEXT NOT NULL,
+    email TEXT,
     dob DATE,
     sex TEXT CHECK (sex IN ('female', 'male', 'other', 'unknown')) DEFAULT 'unknown',
     mrn TEXT,
@@ -529,6 +530,24 @@ CREATE INDEX IF NOT EXISTS idx_patients_org_created
 CREATE UNIQUE INDEX IF NOT EXISTS ux_patients_org_mrn
     ON patients (org_id, mrn)
     WHERE mrn IS NOT NULL;
+
+ALTER TABLE patients
+    ADD COLUMN IF NOT EXISTS email TEXT;
+
+ALTER TABLE patients
+    DROP CONSTRAINT IF EXISTS patients_email_format_check;
+
+ALTER TABLE patients
+    ADD CONSTRAINT patients_email_format_check
+    CHECK (
+        email IS NULL
+        OR email = ''
+        OR email ~* '^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$'
+    );
+
+CREATE INDEX IF NOT EXISTS idx_patients_org_email
+    ON patients (org_id, lower(email))
+    WHERE email IS NOT NULL;
 
 ALTER TABLE sessions
     ADD COLUMN IF NOT EXISTS patient_id UUID REFERENCES patients(id) ON DELETE SET NULL;

@@ -9,6 +9,7 @@ import {
   UserRound,
   Calendar,
   Hash,
+  Mail,
   FileText,
   X,
   Activity,
@@ -23,6 +24,7 @@ interface Patient {
   id: string
   created_by: string | null
   full_name: string
+  email: string | null
   mrn: string | null
   dob: string | null
   sex: 'female' | 'male' | 'other' | 'unknown' | null
@@ -48,6 +50,7 @@ export default function PatientsPage() {
   const firstFieldRef = useRef<HTMLInputElement | null>(null)
 
   const [fullName, setFullName] = useState('')
+  const [email, setEmail] = useState('')
   const [mrn, setMrn] = useState('')
   const [dob, setDob] = useState('')
   const [sex, setSex] = useState<'female' | 'male' | 'other' | 'unknown'>('unknown')
@@ -114,6 +117,7 @@ export default function PatientsPage() {
 
   const resetForm = () => {
     setFullName('')
+    setEmail('')
     setMrn('')
     setDob('')
     setSex('unknown')
@@ -145,6 +149,7 @@ export default function PatientsPage() {
           org_id: profile.org_id,
           created_by: userResp.user.id,
           full_name: fullName.trim(),
+          email: email.trim() || null,
           mrn: mrn.trim() || null,
           dob: dob || null,
           sex,
@@ -200,6 +205,7 @@ export default function PatientsPage() {
     const q = searchQuery.toLowerCase()
     return (
       patient.full_name.toLowerCase().includes(q) ||
+      (patient.email || '').toLowerCase().includes(q) ||
       (patient.mrn || '').toLowerCase().includes(q) ||
       patient.id.toLowerCase().includes(q)
     )
@@ -242,7 +248,7 @@ export default function PatientsPage() {
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
               <input
                 type="text"
-                placeholder="Search by name, MRN, or ID..."
+                placeholder="Search by name, email, MRN, or ID..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="input-field pl-10 w-full"
@@ -304,6 +310,11 @@ export default function PatientsPage() {
                         <Calendar className="w-3.5 h-3.5 text-hud-cyan/60" />
                         <span>{patient.dob ? new Date(patient.dob).toLocaleDateString() : 'No DOB'}</span>
                       </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 text-sm text-white/60 mb-3">
+                      <Mail className="w-3.5 h-3.5 text-hud-cyan/60" />
+                      <span className="truncate">{patient.email || 'No email'}</span>
                     </div>
 
                     <div className="flex items-center gap-2 text-xs text-white/50 mb-3">
@@ -422,6 +433,18 @@ export default function PatientsPage() {
                 </div>
 
                 <div>
+                  <label className="block text-sm font-medium text-foreground mb-1.5">Email (Optional)</label>
+                  <input
+                    type="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="e.g., patient@example.com"
+                    className="input-field"
+                  />
+                  <p className="form-hint mt-1">Used by n8n to send patient notifications and generated reports.</p>
+                </div>
+
+                <div>
                   <label className="block text-sm font-medium text-foreground mb-1.5">Medical Record Number (Optional)</label>
                   <input
                     type="text"
@@ -443,7 +466,7 @@ export default function PatientsPage() {
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-foreground mb-1.5">Sex</label>
+                    <label className="block text-sm font-medium text-foreground mb-1.5">Gender</label>
                     <select
                       value={sex}
                       onChange={(e) => setSex(e.target.value as any)}

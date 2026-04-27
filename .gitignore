@@ -21,7 +21,7 @@ ENV/
 *.swp
 *.swo
 *~
-
+.playwright-cli/
 # OS
 .DS_Store
 Thumbs.db

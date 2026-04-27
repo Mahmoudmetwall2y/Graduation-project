@@ -39,7 +39,7 @@ export async function GET(
 
     const { data: session, error: sessionError } = await supabase
       .from('sessions')
-      .select('*, patient:patients(id, full_name, mrn, dob, sex), device:devices(id, device_name)')
+      .select('*, patient:patients(id, full_name, email, mrn, dob, sex), device:devices(id, device_name)')
       .eq('id', params.id)
       .eq('org_id', profile.org_id)
       .single()

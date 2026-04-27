@@ -30,8 +30,8 @@ nslookup n8n.example.com
 If you do **not** have your own domain yet and only want to use the Hostinger VPS hostname, you can still deploy now:
 
 - app on `https://srv1621744.hstgr.cloud`
-- n8n kept private on `127.0.0.1:5678`
-- n8n accessed through an SSH tunnel from your laptop
+- n8n either kept private on `127.0.0.1:5678`
+- or exposed separately at `https://srv1621744.hstgr.cloud:8443`
 
 That is the safest immediate path for your current VPS details.
 
@@ -69,6 +69,7 @@ systemctl start docker
 ufw allow OpenSSH
 ufw allow 80/tcp
 ufw allow 443/tcp
+ufw allow 8443/tcp
 ufw --force enable
 ufw status
 ```
@@ -123,6 +124,10 @@ Fill in at minimum:
 - `N8N_ENCRYPTION_KEY`
 - `N8N_EDITOR_BASE_URL=https://n8n.example.com`
 - `N8N_WEBHOOK_URL=https://n8n.example.com/`
+- `N8N_PUSH_BACKEND=sse`
+- `N8N_BLOCK_ENV_ACCESS_IN_NODE=false`
+- `CLAUDE_API_KEY`
+- `ASCULTICOR_ALERT_EMAIL_TO`
 
 Recommended for first deployment:
 
@@ -152,18 +157,25 @@ TRUSTED_HOSTS=srv1621744.hstgr.cloud,localhost,127.0.0.1
 CORS_ORIGIN=https://srv1621744.hstgr.cloud
 
 N8N_BIND_ADDRESS=127.0.0.1
-N8N_DOMAIN=localhost
-N8N_PROTOCOL=http
-N8N_EDITOR_BASE_URL=http://localhost:5678
-N8N_WEBHOOK_URL=http://localhost:5678/
+N8N_DOMAIN=srv1621744.hstgr.cloud
+N8N_PROTOCOL=https
+N8N_EDITOR_BASE_URL=https://srv1621744.hstgr.cloud:8443
+N8N_WEBHOOK_URL=https://srv1621744.hstgr.cloud:8443/
+N8N_PUSH_BACKEND=sse
 NGINX_N8N_SERVER_NAME=n8n.localhost
+NGINX_N8N_ALT_SERVER_NAME=srv1621744.hstgr.cloud
+NGINX_N8N_ALT_HTTP_BIND_ADDRESS=127.0.0.1
+NGINX_N8N_ALT_HTTP_PORT=8081
+NGINX_N8N_ALT_HTTPS_BIND_ADDRESS=0.0.0.0
+NGINX_N8N_ALT_HTTPS_PORT=8443
 ```
 
 This gives you:
 
 - public app on the Hostinger hostname
-- private n8n on the VPS
-- no public n8n domain required yet
+- public n8n on the same hostname but its own HTTPS port
+- no separate n8n domain required yet
+- your teammate can open `https://srv1621744.hstgr.cloud:8443`
 
 ## 7. Get TLS Certificates
 
@@ -218,6 +230,13 @@ curl -f https://app.example.com/api/health
 curl -f https://n8n.example.com
 ```
 
+If you are using the Hostinger hostname-only deployment with the separate n8n link:
+
+```bash
+curl -vk https://srv1621744.hstgr.cloud
+curl -vk https://srv1621744.hstgr.cloud:8443
+```
+
 Check protected inference endpoints:
 
 ```bash
@@ -236,7 +255,7 @@ Login with:
 - `N8N_USER`
 - `N8N_PASSWORD`
 
-If you are using the Hostinger hostname-only setup, keep n8n private and access it with an SSH tunnel instead:
+If you prefer to keep n8n private even on the Hostinger hostname-only setup, access it with an SSH tunnel instead:
 
 ```bash
 ssh -L 5678:127.0.0.1:5678 root@187.127.224.4
@@ -249,8 +268,12 @@ Then open:
 Then create credentials inside n8n for:
 
 - Supabase
-- OpenAI
-- Slack or email
+- Claude or AgentRouter HTTP access if you prefer credentials over environment variables
+- Email
+
+For the AscultiCor workflow templates and test steps, follow:
+
+- [N8N_WORKFLOW_IMPLEMENTATION.md](/d:/cardiosense-project/cardiosense/docs/N8N_WORKFLOW_IMPLEMENTATION.md:1)
 
 ## 12. First Workflow To Build
 

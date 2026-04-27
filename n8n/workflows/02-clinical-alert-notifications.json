@@ -1,0 +1,110 @@
+{
+  "name": "02 - Clinical Alert Notifications",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "9e2e1210-5211-569b-b85c-cc3aca5617fe",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 1
+            }
+          ]
+        }
+      },
+      "id": "2a782283-1af5-5ebc-93e6-3f0dad4f48f1",
+      "name": "Every Minute",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "function env(name, fallback = '') {\n  return process.env[name] || fallback;\n}\n\nfunction requiredEnv(name) {\n  const value = env(name);\n  if (!value) throw new Error(`${name} is required`);\n  return value;\n}\n\nconst SUPABASE_URL = requiredEnv('SUPABASE_URL').replace(/\\/+$/, '');\nconst SERVICE_KEY = requiredEnv('SUPABASE_SERVICE_ROLE_KEY');\nconst APP_URL = env('ASCULTICOR_PUBLIC_APP_URL', env('DEVICE_BOOTSTRAP_PUBLIC_BASE_URL', 'https://srv1621744.hstgr.cloud')).replace(/\\/+$/, '');\nconst EMAIL_TO = env('ASCULTICOR_ALERT_EMAIL_TO');\nconst EMAIL_FROM = env('ASCULTICOR_ALERT_EMAIL_FROM', 'AscultiCor <alerts@localhost>');\n\nasync function supabase(path, options = {}) {\n  const method = options.method || 'GET';\n  const headers = {\n    apikey: SERVICE_KEY,\n    Authorization: `Bearer ${SERVICE_KEY}`,\n    'Content-Type': 'application/json',\n    ...(options.headers || {}),\n  };\n  if (options.prefer) headers.Prefer = options.prefer;\n  const response = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {\n    method,\n    headers,\n    body: options.body === undefined ? undefined : JSON.stringify(options.body),\n  });\n  const text = await response.text();\n  if (!response.ok) {\n    throw new Error(`${method} ${path} failed: ${response.status} ${text}`);\n  }\n  if (!text) return null;\n  try {\n    return JSON.parse(text);\n  } catch {\n    return text;\n  }\n}\n\nfunction qs(params) {\n  const out = new URLSearchParams();\n  for (const [key, value] of Object.entries(params)) {\n    if (value !== undefined && value !== null) out.append(key, String(value));\n  }\n  return out.toString();\n}\n\nfunction get(obj, path, fallback = undefined) {\n  return path.split('.').reduce((acc, key) => (acc && acc[key] !== undefined ? acc[key] : undefined), obj) ?? fallback;\n}\n\nfunction isoMinutesAgo(minutes) {\n  return new Date(Date.now() - minutes * 60 * 1000).toISOString();\n}\n\nfunction emailItem(subject, text, to = EMAIL_TO) {\n  if (!to) throw new Error('A recipient email is required before sending email');\n  return { json: { emailFrom: EMAIL_FROM, emailTo: to, emailSubject: subject, emailText: text } };\n}\n\nasync function findOpenAlert(deviceId, sessionId, subtype) {\n  const rows = await supabase(`device_alerts?${qs({\n    select: '*',\n    device_id: `eq.${deviceId}`,\n    is_resolved: 'eq.false',\n    order: 'created_at.desc',\n    limit: 100,\n  })}`);\n  return (rows || []).find((row) => {\n    const metadata = row.metadata || {};\n    return metadata.session_id === sessionId && metadata.subtype === subtype;\n  });\n}\n\nasync function insertAlert({ deviceId, orgId, alertType, severity, message, metadata }) {\n  const inserted = await supabase('device_alerts?select=*', {\n    method: 'POST',\n    prefer: 'return=representation',\n    body: {\n      device_id: deviceId,\n      org_id: orgId,\n      alert_type: alertType,\n      severity,\n      message,\n      metadata,\n      is_resolved: false,\n    },\n  });\n  return inserted?.[0];\n}\n\nasync function patientForSession(session) {\n  if (!session?.patient_id) return null;\n  const rows = await supabase(`patients?${qs({ select: 'id,full_name,email', id: `eq.${session.patient_id}`, limit: 1 })}`);\n  return rows?.[0] || null;\n}\n\nconst since = isoMinutesAgo(10);\nconst emails = [];\n\nasync function deviceName(deviceId) {\n  const rows = await supabase(`devices?${qs({ select: 'device_name', id: `eq.${deviceId}`, limit: 1 })}`);\n  return rows?.[0]?.device_name || deviceId;\n}\n\nasync function createClinicalAlert({ session, prediction, subtype, title, message, confidence }) {\n  const existing = await findOpenAlert(session.device_id, session.id, subtype);\n  if (existing) return;\n  const inserted = await insertAlert({\n    deviceId: session.device_id,\n    orgId: session.org_id,\n    alertType: subtype === 'session_error' ? 'error' : 'anomaly_detected',\n    severity: subtype === 'session_error' ? 'critical' : 'warning',\n    message,\n    metadata: {\n      session_id: session.id,\n      prediction_id: prediction?.id || null,\n      subtype,\n      modality: prediction?.modality || null,\n      confidence,\n      source: 'n8n-clinical-alerts',\n    },\n  });\n  if (!inserted) return;\n  const name = await deviceName(session.device_id);\n  const patient = await patientForSession(session);\n  const recipient = patient?.email || EMAIL_TO;\n  if (!recipient) return;\n  emails.push(emailItem(\n    `[AscultiCor] ${title}`,\n    [\n      `Hello${patient?.full_name ? ` ${patient.full_name}` : ''},`,\n      '',\n      title,\n      '',\n      `Device: ${name}`,\n      `Session: ${session.id}`,\n      `Confidence: ${confidence === null || confidence === undefined ? 'N/A' : Math.round(confidence * 100) + '%'}`,\n      `Session link: ${APP_URL}/session/${session.id}`,\n      '',\n      'This notification is for workflow review and is not a medical diagnosis.',\n    ].join('\\n'),\n    recipient\n  ));\n}\n\nconst predictions = await supabase(`predictions?${qs({ select: '*', created_at: `gte.${since}`, order: 'created_at.desc', limit: 100 })}`);\nfor (const prediction of predictions || []) {\n  const sessions = await supabase(`sessions?${qs({ select: '*', id: `eq.${prediction.session_id}`, limit: 1 })}`);\n  const session = sessions?.[0];\n  if (!session) continue;\n  const output = prediction.output_json || {};\n  if (prediction.modality === 'pcg' && output.label === 'Murmur') {\n    await createClinicalAlert({\n      session,\n      prediction,\n      subtype: 'pcg_murmur',\n      title: 'Warning: Murmur detected',\n      message: `Murmur detected for session ${session.id}`,\n      confidence: output.probabilities?.Murmur ?? output.probabilities?.[output.label] ?? null,\n    });\n  }\n  if (prediction.modality === 'ecg' && output.prediction === 'Abnormal') {\n    await createClinicalAlert({\n      session,\n      prediction,\n      subtype: 'ecg_abnormal',\n      title: 'Warning: Abnormal ECG',\n      message: `Abnormal ECG detected for session ${session.id}`,\n      confidence: output.confidence ?? null,\n    });\n  }\n}\n\nconst errorSessions = await supabase(`sessions?${qs({ select: '*', status: 'eq.error', created_at: `gte.${since}`, order: 'created_at.desc', limit: 50 })}`);\nfor (const session of errorSessions || []) {\n  await createClinicalAlert({\n    session,\n    prediction: null,\n    subtype: 'session_error',\n    title: 'Critical: Session error',\n    message: `Session ${session.id} entered error state`,\n    confidence: null,\n  });\n}\n\nreturn emails;\n"
+      },
+      "id": "f8f60355-b314-5303-b4bc-9e768e7658df",
+      "name": "Create Clinical Alerts",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        300,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "fromEmail": "={{$json.emailFrom}}",
+        "toEmail": "={{$json.emailTo}}",
+        "subject": "={{$json.emailSubject}}",
+        "text": "={{$json.emailText}}",
+        "options": {}
+      },
+      "id": "8ca66994-493a-5f04-b5ba-1d0cc4a0c845",
+      "name": "Send Email",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        620,
+        80
+      ]
+    }
+  ],
+  "connections": {
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Create Clinical Alerts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Every Minute": {
+      "main": [
+        [
+          {
+            "node": "Create Clinical Alerts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Clinical Alerts": {
+      "main": [
+        [
+          {
+            "node": "Send Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Africa/Cairo"
+  },
+  "staticData": null,
+  "active": false,
+  "versionId": "40ea07d0-ef71-53d1-9ba4-c42d15517a21",
+  "id": ""
+}

@@ -36,6 +36,7 @@ interface Session {
   patient?: {
     id: string
     full_name: string
+    email: string | null
     mrn: string | null
     dob: string | null
     sex: string | null
