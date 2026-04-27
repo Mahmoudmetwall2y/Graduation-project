@@ -94,7 +94,9 @@ def workflow(name: str, nodes: list[dict], connections: dict) -> dict:
 
 COMMON_JS = r"""
 function env(name, fallback = '') {
-  return process.env[name] || fallback;
+  // n8n 2.x task runners sandbox Code nodes, so Node's process object is not available.
+  const value = typeof $env !== 'undefined' ? $env[name] : undefined;
+  return value === undefined || value === null || value === '' ? fallback : value;
 }
 
 function requiredEnv(name) {
