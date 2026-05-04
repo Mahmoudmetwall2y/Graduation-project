@@ -1,6 +1,0 @@
-- generic [active] [ref=e1]:
-  - alert [ref=e2]
-  - main [ref=e4]:
-    - generic [ref=e7]:
-      - heading "404" [level=1] [ref=e8]
-      - heading "This page could not be found." [level=2] [ref=e10]
