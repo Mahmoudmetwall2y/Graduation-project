@@ -24,9 +24,9 @@ import styles from './showcase.module.css'
 /* ── Logo component using actual brand asset ────────────── */
 function AscultiCorLogo({ size = 36 }: { size?: number }) {
   return (
-    <Image
+    <img
       src="/logo.png"
-      alt="AscultiCor Logo"
+      alt=""
       width={size}
       height={size}
       style={{ objectFit: 'contain' }}
@@ -167,8 +167,8 @@ export default function LandingPage() {
             <a href="#team" className={styles.navLink}>Team</a>
           </div>
 
-          <Link href="/dashboard" className={styles.navCta}>
-            Launch Dashboard
+          <Link href="/auth/login" className={styles.primaryBtn}>
+            Sign In
             <ArrowRight className="w-4 h-4" />
           </Link>
         </nav>
@@ -193,19 +193,10 @@ export default function LandingPage() {
               </p>
 
               <div className={`${styles.heroActions} ${styles.reveal} ${styles.d3}`} data-reveal>
-                <Link href="/dashboard" className={styles.primaryBtn}>
-                  Launch Dashboard
+                <Link href="/auth/login" className={styles.primaryBtn}>
+                  Sign In
                   <ArrowRight className="w-4 h-4" />
                 </Link>
-                <a
-                  href="https://github.com/Mahmoudmetwall2y/Graduation-project"
-                  target="_blank"
-                  rel="noreferrer"
-                  className={styles.secondaryBtn}
-                >
-                  <Github className="w-4 h-4" />
-                  View Source
-                </a>
               </div>
             </div>
 
@@ -342,26 +333,7 @@ export default function LandingPage() {
           </div>
         </section>
 
-        {/* ═══ CTA Banner ═══ */}
-        <section className={`${styles.ctaBanner} ${styles.reveal}`} data-reveal>
-          <h2 className={styles.ctaTitle}>Ready to explore cardiac intelligence?</h2>
-          <p className={styles.ctaSubtitle}>Launch the dashboard and experience real-time AI-powered cardiac analysis.</p>
-          <div className={styles.heroActions} style={{ justifyContent: 'center' }}>
-            <Link href="/dashboard" className={styles.primaryBtn}>
-              Launch Dashboard
-              <ArrowRight className="w-4 h-4" />
-            </Link>
-            <a
-              href="https://github.com/Mahmoudmetwall2y/Graduation-project"
-              target="_blank"
-              rel="noreferrer"
-              className={styles.secondaryBtn}
-            >
-              <Github className="w-4 h-4" />
-              View on GitHub
-            </a>
-          </div>
-        </section>
+
 
         {/* ═══ Footer ═══ */}
         <footer className={styles.footer}>
