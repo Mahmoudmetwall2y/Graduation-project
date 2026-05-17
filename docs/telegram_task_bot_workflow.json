@@ -1,0 +1,437 @@
+{
+  "name": "Telegram Task Manager Bot",
+  "nodes": [
+    {
+      "parameters": {
+        "updates": [
+          "message"
+        ],
+        "additionalFields": {}
+      },
+      "id": "telegram-trigger",
+      "name": "Telegram Trigger",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        160,
+        420
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "REPLACE_WITH_YOUR_TELEGRAM_CREDENTIAL_ID",
+          "name": "Telegram Bot Token"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "options": {
+          "systemMessage": "You are a Telegram personal calendar assistant.\n\nReturn ONLY valid compact JSON. Do not use Markdown. Do not write extra text outside JSON.\n\nInput is a JSON object with currentCairoTime, timezone, and telegramMessage. Use currentCairoTime as the true current date/time. Do not use your training-date memory.\n\nOutput schema for creating an event:\n{\"action\":\"create_event\",\"summary\":\"...\",\"start\":\"YYYY-MM-DDTHH:mm:ss+03:00\",\"end\":\"YYYY-MM-DDTHH:mm:ss+03:00\",\"description\":\"...\",\"source\":\"source URL or source name\",\"originalRequest\":\"...\"}\n\nOutput schema for replying without creating:\n{\"action\":\"reply\",\"replyText\":\"...\"}\n\nRules:\n1. Treat every normal Telegram text message as a possible calendar/reminder request.\n2. If the user gives a clear date/time, calculate the exact future start/end in Africa/Cairo.\n3. If the user sends a public-event request such as \"Liverpool match\", \"Al Ahly game\", \"Apple event\", or \"Egypt exam result\", use Web Search to find the next relevant upcoming date/time after currentCairoTime.\n4. For sports, search for the next fixture/kickoff. Prefer official club, league, broadcaster, or reputable sports sites. For \"Liverpool match\", assume Liverpool FC first team unless the user clearly means something else.\n5. Include the current year in web searches and use words like next/upcoming/fixture. Ignore old articles, old fixture pages, match reports, and past dates.\n6. NEVER output action=create_event if start is earlier than currentCairoTime. If all found dates are past, output action=reply and explain that you found only old dates.\n7. If exact time is unavailable, output action=reply and ask one concise clarification question.\n8. Convert found times to Africa/Cairo and output ISO 8601 with +03:00.\n9. Default duration is 1 hour. Default football/sports match duration is 2 hours.\n10. If the user asks about schedule/calendar/reminders, use Google Calendar Get Events and return action=reply with a concise summary.\n11. If the user asks to delete, remove, or cancel an existing calendar event, return action=reply and say calendar deletion is disabled in this workflow.\n12. Understand English and Arabic, including Egyptian dialect. Reply in the user's language for action=reply."
+        },
+        "promptType": "define",
+        "text": "={{ JSON.stringify({ currentCairoTime: $now.toISO(), timezone: 'Africa/Cairo', telegramMessage: $json.message.text || $json.message.caption || '' }) }}"
+      },
+      "id": "ai-agent",
+      "name": "AI Agent - Extract Event JSON",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.7,
+      "position": [
+        460,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "model": "openai/gpt-4o-mini",
+        "options": {
+          "temperature": 0.1
+        }
+      },
+      "id": "openrouter-chat-model",
+      "name": "OpenRouter Chat Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+      "typeVersion": 1,
+      "position": [
+        240,
+        700
+      ],
+      "credentials": {
+        "openRouterApi": {
+          "id": "REPLACE_WITH_YOUR_OPENROUTER_CREDENTIAL_ID",
+          "name": "OpenRouter API Key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sessionIdType": "customKey",
+        "sessionKey": "={{ $('Telegram Trigger').item.json.message.chat.id }}",
+        "contextWindowLength": 12
+      },
+      "id": "memory-buffer",
+      "name": "Window Buffer Memory",
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1.3,
+      "position": [
+        440,
+        700
+      ]
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "web-search-serpapi",
+      "name": "Web Search",
+      "type": "@n8n/n8n-nodes-langchain.toolSerpApi",
+      "typeVersion": 1,
+      "position": [
+        640,
+        700
+      ],
+      "credentials": {
+        "serpApi": {
+          "id": "REPLACE_WITH_YOUR_SERPAPI_CREDENTIAL_ID",
+          "name": "SerpAPI Key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "event",
+        "operation": "getAll",
+        "calendar": {
+          "__rl": true,
+          "mode": "id",
+          "value": "primary"
+        },
+        "returnAll": false,
+        "limit": 10,
+        "options": {
+          "timeMin": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('after', 'Start of the date/time range to search in ISO 8601 with Cairo offset +03:00', 'string') }}",
+          "timeMax": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('before', 'End of the date/time range to search in ISO 8601 with Cairo offset +03:00', 'string') }}",
+          "singleEvents": true,
+          "orderBy": "startTime"
+        },
+        "descriptionType": "manual",
+        "toolDescription": "Retrieve upcoming Google Calendar events when the user asks about their schedule or existing reminders. This tool is read-only."
+      },
+      "id": "google-calendar-get-events",
+      "name": "Google Calendar - Get Events",
+      "type": "n8n-nodes-base.googleCalendarTool",
+      "typeVersion": 1.3,
+      "position": [
+        840,
+        700
+      ],
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "REPLACE_WITH_YOUR_GOOGLE_CREDENTIAL_ID",
+          "name": "Google Calendar OAuth2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "function extractJson(value) {\n  const text = String(value ?? '').trim();\n  if (!text) return null;\n  const jsonFence = text.match(/\\`\\`\\`(?:json)?\\s*([\\s\\S]*?)\\`\\`\\`/i);\n  const candidate = jsonFence ? jsonFence[1].trim() : text;\n  try {\n    return JSON.parse(candidate);\n  } catch (error) {}\n  const first = candidate.indexOf('{');\n  const last = candidate.lastIndexOf('}');\n  if (first !== -1 && last > first) {\n    try {\n      return JSON.parse(candidate.slice(first, last + 1));\n    } catch (error) {}\n  }\n  return null;\n}\n\nfunction pad(value) {\n  return String(value).padStart(2, '0');\n}\n\nfunction cairoIso(date) {\n  const fixedCairo = new Date(date.getTime() + 3 * 60 * 60 * 1000);\n  return fixedCairo.getUTCFullYear() + '-' + pad(fixedCairo.getUTCMonth() + 1) + '-' + pad(fixedCairo.getUTCDate()) + 'T' + pad(fixedCairo.getUTCHours()) + ':' + pad(fixedCairo.getUTCMinutes()) + ':' + pad(fixedCairo.getUTCSeconds()) + '+03:00';\n}\n\nfunction formatCairo(value) {\n  const date = new Date(value);\n  if (Number.isNaN(date.getTime())) return String(value ?? '');\n  const iso = cairoIso(date);\n  return iso.slice(0, 10) + ' ' + iso.slice(11, 16) + ' \\u0628\\u062a\\u0648\\u0642\\u064a\\u062a \\u0627\\u0644\\u0642\\u0627\\u0647\\u0631\\u0629';\n}\n\nconst parsed = extractJson($json.output);\nconst originalOutput = String($json.output ?? '').trim();\n\nif (!parsed) {\n  return [{\n    json: {\n      readyToCreate: false,\n      replyText: originalOutput || '\\u0644\\u0645 \\u0623\\u0633\\u062a\\u0637\\u0639 \\u0641\\u0647\\u0645 \\u0627\\u0644\\u0631\\u0633\\u0627\\u0644\\u0629. \\u0627\\u0643\\u062a\\u0628 \\u0627\\u0644\\u0645\\u0648\\u0639\\u062f \\u0623\\u0648 \\u0627\\u0633\\u0645 \\u0627\\u0644\\u062d\\u062f\\u062b \\u0645\\u0631\\u0629 \\u0623\\u062e\\u0631\\u0649.',\n    },\n  }];\n}\n\nif (parsed.action !== 'create_event') {\n  return [{\n    json: {\n      readyToCreate: false,\n      replyText: parsed.replyText || parsed.message || '\\u0645\\u062d\\u062a\\u0627\\u062c \\u062a\\u0627\\u0631\\u064a\\u062e \\u0648\\u0648\\u0642\\u062a \\u0648\\u0627\\u0636\\u062d\\u064a\\u0646 \\u0642\\u0628\\u0644 \\u0625\\u0636\\u0627\\u0641\\u0629 \\u0627\\u0644\\u062d\\u062f\\u062b.',\n    },\n  }];\n}\n\nconst summary = String(parsed.summary || '').trim();\nconst startDate = new Date(parsed.start);\nlet endDate = new Date(parsed.end);\nconst now = new Date();\n\nif (!summary || !parsed.start || Number.isNaN(startDate.getTime())) {\n  return [{\n    json: {\n      readyToCreate: false,\n      replyText: '\\u0645\\u062d\\u062a\\u0627\\u062c \\u0639\\u0646\\u0648\\u0627\\u0646 \\u0648\\u0645\\u064a\\u0639\\u0627\\u062f \\u0648\\u0627\\u0636\\u062d\\u064a\\u0646 \\u0642\\u0628\\u0644 \\u0645\\u0627 \\u0623\\u0636\\u064a\\u0641 \\u0627\\u0644\\u062d\\u062f\\u062b \\u0644\\u0644\\u062a\\u0642\\u0648\\u064a\\u0645.',\n    },\n  }];\n}\n\nif (startDate <= now) {\n  return [{\n    json: {\n      readyToCreate: false,\n      replyText: '\\u0627\\u0644\\u062a\\u0627\\u0631\\u064a\\u062e \\u0627\\u0644\\u0630\\u064a \\u0648\\u062c\\u062f\\u062a\\u0647 \\u0642\\u062f\\u064a\\u0645 (' + formatCairo(parsed.start) + ')\\u060c \\u0644\\u0630\\u0644\\u0643 \\u0644\\u0645 \\u0623\\u0636\\u0641\\u0647 \\u0644\\u0644\\u062a\\u0642\\u0648\\u064a\\u0645. \\u0627\\u0628\\u0639\\u062a\\u0644\\u064a \\u0627\\u0633\\u0645 \\u0627\\u0644\\u062d\\u062f\\u062b \\u0645\\u0639 \\u0643\\u0644\\u0645\\u0629 \"\\u0627\\u0644\\u0642\\u0627\\u062f\\u0645\" \\u0623\\u0648 \\u062a\\u0627\\u0631\\u064a\\u062e \\u0645\\u062d\\u062f\\u062f \\u0648\\u0633\\u0623\\u0628\\u062d\\u062b \\u0639\\u0646\\u0647 \\u0645\\u0646 \\u062c\\u062f\\u064a\\u062f.',\n      rejectedStart: parsed.start,\n      checkedAt: cairoIso(now),\n    },\n  }];\n}\n\nif (!parsed.end || Number.isNaN(endDate.getTime()) || endDate <= startDate) {\n  const minutes = Number(parsed.defaultDurationMinutes || 60);\n  endDate = new Date(startDate.getTime() + Math.max(minutes, 15) * 60 * 1000);\n}\n\nconst descriptionParts = [\n  parsed.description,\n  parsed.source ? 'Source: ' + parsed.source : '',\n  parsed.originalRequest ? 'Original request: ' + parsed.originalRequest : '',\n].filter(Boolean);\n\nreturn [{\n  json: {\n    readyToCreate: true,\n    summary,\n    start: cairoIso(startDate),\n    end: cairoIso(endDate),\n    description: descriptionParts.join('\\n') || 'Created from Telegram request: ' + summary,\n  },\n}];\n"
+      },
+      "id": "validate-event",
+      "name": "Validate Future Event",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        760,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "if (!$json.readyToCreate) return [];\nreturn [{ json: $json }];\n"
+      },
+      "id": "prepare-calendar-event",
+      "name": "Prepare Calendar Event",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1020,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "if ($json.readyToCreate) return [];\nreturn [{\n  json: {\n    replyText: $json.replyText || '\\u0645\\u062d\\u062a\\u0627\\u062c \\u062a\\u0641\\u0627\\u0635\\u064a\\u0644 \\u0623\\u0643\\u062b\\u0631 \\u0642\\u0628\\u0644 \\u0645\\u0627 \\u0623\\u0636\\u064a\\u0641 \\u0627\\u0644\\u062d\\u062f\\u062b \\u0644\\u0644\\u062a\\u0642\\u0648\\u064a\\u0645.',\n  },\n}];\n"
+      },
+      "id": "prepare-direct-reply",
+      "name": "Prepare Direct Reply",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1800,
+        560
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "event",
+        "operation": "create",
+        "calendar": {
+          "__rl": true,
+          "mode": "id",
+          "value": "primary"
+        },
+        "start": "={{ $json.start }}",
+        "end": "={{ $json.end }}",
+        "useDefaultReminders": false,
+        "additionalFields": {
+          "summary": "={{ $json.summary }}",
+          "description": "={{ $json.description }}"
+        },
+        "remindersUi": {
+          "remindersValues": [
+            {
+              "method": "popup",
+              "minutes": 60
+            },
+            {
+              "method": "popup",
+              "minutes": 15
+            }
+          ]
+        }
+      },
+      "id": "google-calendar-create",
+      "name": "Google Calendar - Create Event",
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1.3,
+      "position": [
+        1280,
+        320
+      ],
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "REPLACE_WITH_YOUR_GOOGLE_CREDENTIAL_ID",
+          "name": "Google Calendar OAuth2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "function pad(value) {\n  return String(value).padStart(2, '0');\n}\n\nfunction cairoIso(date) {\n  const fixedCairo = new Date(date.getTime() + 3 * 60 * 60 * 1000);\n  return `${fixedCairo.getUTCFullYear()}-${pad(fixedCairo.getUTCMonth() + 1)}-${pad(fixedCairo.getUTCDate())}T${pad(fixedCairo.getUTCHours())}:${pad(fixedCairo.getUTCMinutes())}:${pad(fixedCairo.getUTCSeconds())}+03:00`;\n}\n\nfunction formatCairo(value) {\n  const date = new Date(value);\n  if (Number.isNaN(date.getTime())) return String(value ?? '');\n  const iso = cairoIso(date);\n  return `${iso.slice(0, 10)} ${iso.slice(11, 16)} بتوقيت القاهرة`;\n}\n\nconst summary = $json.summary || 'الحدث';\nconst start = $json.start?.dateTime || $json.start;\nconst link = $json.htmlLink ? `\\nرابط الحدث: ${$json.htmlLink}` : '';\n\nreturn [{\n  json: {\n    replyText: `تم إنشاء الحدث في التقويم.\\n\\n- العنوان: ${summary}\\n- الموعد: ${formatCairo(start)}\\n- التنبيه: قبل الحدث بـ 60 دقيقة و15 دقيقة${link}`,\n  },\n}];\n"
+      },
+      "id": "format-created-message",
+      "name": "Format Created Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1540,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Telegram Trigger').item.json.message.chat.id }}",
+        "text": "={{ $json.replyText }}",
+        "additionalFields": {}
+      },
+      "id": "telegram-send-created",
+      "name": "Send Telegram Created Message",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1800,
+        320
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "REPLACE_WITH_YOUR_TELEGRAM_CREDENTIAL_ID",
+          "name": "Telegram Bot Token"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Telegram Trigger').item.json.message.chat.id }}",
+        "text": "={{ $json.replyText }}",
+        "additionalFields": {}
+      },
+      "id": "telegram-send-direct",
+      "name": "Send Telegram Direct Reply",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        2060,
+        560
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "REPLACE_WITH_YOUR_TELEGRAM_CREDENTIAL_ID",
+          "name": "Telegram Bot Token"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Telegram Trigger": {
+      "main": [
+        [
+          {
+            "node": "AI Agent - Extract Event JSON",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent - Extract Event JSON": {
+      "main": [
+        [
+          {
+            "node": "Validate Future Event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenRouter Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent - Extract Event JSON",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Window Buffer Memory": {
+      "ai_memory": [
+        [
+          {
+            "node": "AI Agent - Extract Event JSON",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Web Search": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent - Extract Event JSON",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Calendar - Get Events": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent - Extract Event JSON",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Future Event": {
+      "main": [
+        [
+          {
+            "node": "Prepare Calendar Event",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Prepare Direct Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Calendar Event": {
+      "main": [
+        [
+          {
+            "node": "Google Calendar - Create Event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Direct Reply": {
+      "main": [
+        [
+          {
+            "node": "Send Telegram Direct Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Calendar - Create Event": {
+      "main": [
+        [
+          {
+            "node": "Format Created Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Created Message": {
+      "main": [
+        [
+          {
+            "node": "Send Telegram Created Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Africa/Cairo"
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "name": "Telegram",
+      "createdAt": "2026-05-06T00:00:00.000Z",
+      "updatedAt": "2026-05-06T00:00:00.000Z"
+    },
+    {
+      "name": "AI",
+      "createdAt": "2026-05-06T00:00:00.000Z",
+      "updatedAt": "2026-05-06T00:00:00.000Z"
+    },
+    {
+      "name": "Calendar",
+      "createdAt": "2026-05-06T00:00:00.000Z",
+      "updatedAt": "2026-05-06T00:00:00.000Z"
+    },
+    {
+      "name": "OpenRouter",
+      "createdAt": "2026-05-09T00:00:00.000Z",
+      "updatedAt": "2026-05-09T00:00:00.000Z"
+    },
+    {
+      "name": "Search",
+      "createdAt": "2026-05-09T00:00:00.000Z",
+      "updatedAt": "2026-05-09T00:00:00.000Z"
+    }
+  ],
+  "triggerCount": 1,
+  "updatedAt": "2026-05-09T00:00:00.000Z",
+  "versionId": "10"
+}
