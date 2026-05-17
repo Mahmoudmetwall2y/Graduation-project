@@ -347,16 +347,21 @@ export default function ReportsPage() {
                                         let aiLabel = 'Pending / None'
                                         let aiColor = 'text-white/40'
 
-                                        if (session.predictions && session.predictions.length > 0) {
-                                            const p = session.predictions[0].output_json
-                                            aiLabel = p.label
+                                        const pred = session.predictions?.[0]?.output_json
 
-                                            // Color coding
-                                            if (aiLabel.includes('Normal')) aiColor = 'text-emerald-400'
-                                            else if (aiLabel !== 'uninterpretable') aiColor = 'text-hud-red'
-                                            else aiColor = 'text-amber-400'
+                                        if (pred?.label) {
+                                            const label = pred.label
+                                            const confidence = pred.confidence ?? 0
 
-                                            aiLabel = `${aiLabel} (${(p.confidence * 100).toFixed(0)}%)`
+                                            aiLabel = `${label} (${(confidence * 100).toFixed(0)}%)`
+
+                                            if (label.includes('Normal')) {
+                                                aiColor = 'text-emerald-400'
+                                            } else if (label !== 'uninterpretable') {
+                                                aiColor = 'text-hud-red'
+                                            } else {
+                                                aiColor = 'text-amber-400'
+                                            }
                                         }
 
                                         const isGenerating = generatingPdfId === session.id

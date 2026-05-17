@@ -1,7 +1,6 @@
 'use client'
 
 import React, { useEffect, useMemo, useState } from 'react'
-import { useTheme } from '../../app/components/ThemeProvider'
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs'
 import {
   Moon,
@@ -34,7 +33,6 @@ const isActivePath = (pathname: string, href: string) => {
 }
 
 export function TopBar() {
-  const { theme, toggleTheme } = useTheme()
   const [userEmail, setUserEmail] = useState<string | null>(null)
   const [signingOut, setSigningOut] = useState(false)
   const [timeLabel, setTimeLabel] = useState('')
@@ -99,9 +97,7 @@ export function TopBar() {
             {timeLabel || 'Live'}
           </div>
 
-          <button onClick={toggleTheme} className="topbar-action" title="Toggle Theme" aria-label="Toggle Theme">
-            {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
-          </button>
+
 
           <Link href="/alerts" className="topbar-action" title="Alerts" aria-label="Alerts">
             <Bell className="w-4 h-4" />

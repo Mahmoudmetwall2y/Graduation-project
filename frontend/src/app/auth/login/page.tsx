@@ -4,6 +4,8 @@ import { useEffect, useState } from 'react'
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs'
 import { useRouter } from 'next/navigation'
 import { Heart, Mail, Lock, ArrowRight, Activity, Eye, EyeOff, User, CheckCircle } from 'lucide-react'
+import Link from 'next/link'
+import { ArrowLeft } from 'lucide-react'
 
 export default function LoginPage() {
   const [email, setEmail] = useState('')
@@ -97,6 +99,13 @@ export default function LoginPage() {
 
   return (
     <div className="min-h-screen flex">
+      <Link
+        href="/"
+        className="absolute top-6 left-6 inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-white/5 backdrop-blur border border-white/10 text-sm text-white/70 hover:text-white hover:bg-white/10 transition-all z-50"
+      >
+        <ArrowLeft className="w-4 h-4" />
+        Back to Home
+      </Link>
       {/* Left side — Hero */}
       <div className="hidden lg:flex lg:w-1/2 relative overflow-hidden items-center justify-center"
         style={{ background: 'var(--gradient-hero)' }}>

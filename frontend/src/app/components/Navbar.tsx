@@ -3,15 +3,12 @@
 import Link from 'next/link'
 import { useRouter, usePathname } from 'next/navigation'
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs'
-import { useTheme } from './ThemeProvider'
 import {
     LayoutDashboard,
     Cpu,
     PlusCircle,
     Shield,
     LogOut,
-    Moon,
-    Sun,
     Menu,
     X,
     Heart,
@@ -37,7 +34,6 @@ export default function Navbar({ showBackLink, backHref = '/', backLabel = '<- B
     const router = useRouter()
     const pathname = usePathname()
     const supabase = createClientComponentClient()
-    const { theme, toggleTheme } = useTheme()
     const [mobileOpen, setMobileOpen] = useState(false)
     const [isCollapsed, setIsCollapsed] = useState(false)
     const [userEmail, setUserEmail] = useState<string | null>(null)
@@ -267,15 +263,7 @@ export default function Navbar({ showBackLink, backHref = '/', backLabel = '<- B
                         )}
                     </div>
 
-                    <button
-                        onClick={toggleTheme}
-                        className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-accent transition-all duration-200 ${isCollapsed ? 'justify-center' : ''}`}
-                        aria-label="Toggle theme"
-                        title={isCollapsed ? 'Theme' : undefined}
-                    >
-                        {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
-                        {!isCollapsed && 'Theme'}
-                    </button>
+                    
                     <button
                         onClick={handleSignOut}
                         className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-white/50 hover:text-hud-red hover:bg-hud-red/10 hover:shadow-[0_0_15px_rgba(255,51,51,0.2)] transition-all duration-300 ${isCollapsed ? 'justify-center' : ''}`}
@@ -374,13 +362,7 @@ export default function Navbar({ showBackLink, backHref = '/', backLabel = '<- B
                                     <p className="text-xs text-white/60 truncate">{userEmail || 'Connected'}</p>
                                 </div>
                             </div>
-                            <button
-                                onClick={toggleTheme}
-                                className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-white/50 hover:text-white hover:bg-hud-cyan/5 transition-all duration-300 border border-transparent"
-                            >
-                                {theme === 'dark' ? <Sun className="w-5 h-5 text-hud-cyan" /> : <Moon className="w-5 h-5 text-hud-cyan" />}
-                                Theme
-                            </button>
+                            
                             <button
                                 onClick={handleSignOut}
                                 className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-white/50 hover:text-hud-red hover:bg-hud-red/10 hover:shadow-[0_0_15px_rgba(255,51,51,0.2)] transition-all duration-300 border border-transparent"
