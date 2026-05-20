@@ -1,107 +1,303 @@
 'use client'
 
-import Link from 'next/link'
 import Image from 'next/image'
+import Link from 'next/link'
 import { useEffect, useRef, useState } from 'react'
+import type { LucideIcon } from 'lucide-react'
 import {
   Activity,
   ArrowRight,
   BarChart3,
   Brain,
-  FileText,
-  Github,
-  HeartPulse,
-  Stethoscope,
-  Waves,
   Cpu,
   Database,
+  FileText,
+  HeartPulse,
   Radio,
+  Server,
   ShieldCheck,
+  Stethoscope,
   Users,
+  Waves,
 } from 'lucide-react'
 import styles from './showcase.module.css'
 
-/* ── Logo component using actual brand asset ────────────── */
-function AscultiCorLogo({ size = 36 }: { size?: number }) {
+type IconItem = {
+  icon: LucideIcon
+  title: string
+  description: string
+}
+
+const navItems = [
+  { label: 'Architecture', href: '#architecture' },
+  { label: 'Capabilities', href: '#capabilities' },
+  { label: 'Demo Flow', href: '#demo-flow' },
+  { label: 'Technology', href: '#technology' },
+]
+
+const architectureNodes: Array<IconItem & { detail: string }> = [
+  {
+    icon: Cpu,
+    title: 'ESP32 Device',
+    detail: 'ECG / PCG acquisition',
+    description: 'Embedded hardware captures biomedical signals and device telemetry.',
+  },
+  {
+    icon: Radio,
+    title: 'MQTT Broker',
+    detail: 'Mosquitto messaging',
+    description: 'Signal packets and health events move through a lightweight telemetry channel.',
+  },
+  {
+    icon: Server,
+    title: 'FastAPI Inference',
+    detail: 'Python model service',
+    description: 'Preprocessing and model execution transform buffered signals into demo classifications.',
+  },
+  {
+    icon: Database,
+    title: 'Supabase',
+    detail: 'PostgreSQL + RLS',
+    description: 'Authentication, database policies, sessions, devices, and report metadata are centralized.',
+  },
+  {
+    icon: BarChart3,
+    title: 'Next.js Dashboard',
+    detail: 'Clinical operations UI',
+    description: 'Supervisors can inspect sessions, telemetry, waveforms, and model outputs.',
+  },
+  {
+    icon: FileText,
+    title: 'Clinical Report',
+    detail: 'Draft report workflow',
+    description: 'LLM-assisted summaries remain positioned as reviewable project reports.',
+  },
+]
+
+const capabilities: IconItem[] = [
+  {
+    icon: Activity,
+    title: 'Real-time ECG monitoring',
+    description: 'Streaming electrocardiogram views designed for session review and signal inspection.',
+  },
+  {
+    icon: Stethoscope,
+    title: 'PCG heart-sound classification',
+    description: 'Phonocardiogram processing that supports supervised normal, murmur, and abnormal demo states.',
+  },
+  {
+    icon: Brain,
+    title: 'AI inference pipeline',
+    description: 'A FastAPI model service coordinates preprocessing, classification, confidence display, and state storage.',
+  },
+  {
+    icon: Cpu,
+    title: 'Device telemetry',
+    description: 'ESP32 device health, online status, stream activity, and acquisition metadata remain visible.',
+  },
+  {
+    icon: ShieldCheck,
+    title: 'Supabase-secured clinical data',
+    description: 'Auth, PostgreSQL, and row-level security organize access to project data and workflow records.',
+  },
+  {
+    icon: FileText,
+    title: 'Report generation',
+    description: 'Draft clinical-style reports summarize sessions for demonstration and supervisor review.',
+  },
+]
+
+const demoFlow: Array<IconItem & { step: string }> = [
+  {
+    step: '01',
+    icon: Cpu,
+    title: 'Register device',
+    description: 'Provision the ESP32 endpoint and associate telemetry with the platform workspace.',
+  },
+  {
+    step: '02',
+    icon: HeartPulse,
+    title: 'Start session',
+    description: 'Open a monitored recording window for synchronized ECG and PCG capture.',
+  },
+  {
+    step: '03',
+    icon: Waves,
+    title: 'Stream ECG/PCG',
+    description: 'Route waveform buffers through MQTT while preserving session context.',
+  },
+  {
+    step: '04',
+    icon: Brain,
+    title: 'Run AI inference',
+    description: 'Apply preprocessing and model classification through the backend inference service.',
+  },
+  {
+    step: '05',
+    icon: FileText,
+    title: 'Review insights',
+    description: 'Inspect dashboard signals, model state, telemetry, and generated report drafts.',
+  },
+]
+
+const techGroups = [
+  {
+    icon: BarChart3,
+    title: 'Frontend',
+    items: ['Next.js', 'React', 'TypeScript', 'Recharts', 'Three.js'],
+  },
+  {
+    icon: Server,
+    title: 'Backend',
+    items: ['FastAPI', 'Python'],
+  },
+  {
+    icon: Brain,
+    title: 'AI / Signal Processing',
+    items: ['TensorFlow', 'XGBoost', 'SciPy', 'Librosa'],
+  },
+  {
+    icon: Radio,
+    title: 'Infrastructure',
+    items: ['Docker Compose', 'Mosquitto', 'NGINX'],
+  },
+  {
+    icon: Database,
+    title: 'Data / Auth',
+    items: ['Supabase', 'PostgreSQL', 'RLS'],
+  },
+]
+
+const academicCards: IconItem[] = [
+  {
+    icon: FileText,
+    title: 'Graduation Project',
+    description: 'A complete biomedical AI-IoT platform built for technical demonstration and evaluation.',
+  },
+  {
+    icon: Stethoscope,
+    title: 'Biomedical Engineering',
+    description: 'Focused on cardiac auscultation, ECG/PCG signal workflows, and supervised clinical review.',
+  },
+  {
+    icon: Users,
+    title: 'AscultiCor Team',
+    description: 'Integrated hardware, backend inference, secure data, dashboard UX, and reporting into one system.',
+  },
+]
+
+function AscultiCorLogo({
+  width = 170,
+  height = 56,
+}: {
+  width?: number
+  height?: number
+}) {
   return (
-    <img
-      src="/logo.png"
-      alt=""
-      width={size}
-      height={size}
-      style={{ objectFit: 'contain' }}
+    <Image
+      src="/asculticor-logo-wordmark.png"
+      alt="AscultiCor logo"
+      width={width}
+      height={height}
+      className={styles.logoImage}
+      priority={width >= 150}
+      unoptimized
     />
   )
 }
 
-/* ── Data ──────────────────────────────────────────────────── */
-const features = [
-  {
-    icon: HeartPulse,
-    title: 'Real-time ECG',
-    desc: 'Live electrocardiogram monitoring with beat-by-beat analysis and arrhythmia detection.',
-    accent: '#3de7c7',
-  },
-  {
-    icon: Waves,
-    title: 'PCG Classification',
-    desc: 'AI-powered heart sound analysis classifying normal, murmur, and abnormal phonocardiograms.',
-    accent: '#59c7ff',
-  },
-  {
-    icon: Brain,
-    title: 'AI Predictions',
-    desc: 'Deep learning models delivering confidence-scored classifications in near real-time.',
-    accent: '#ff8b3d',
-  },
-  {
-    icon: FileText,
-    title: 'Clinical Reports',
-    desc: 'Auto-generated PDF reports with session data, AI findings, and clinical recommendations.',
-    accent: '#a78bfa',
-  },
-]
+function SignalWaveform({ variant }: { variant: 'ecg' | 'pcg' }) {
+  const path =
+    variant === 'ecg'
+      ? 'M0 62 L42 62 L54 62 L62 48 L73 82 L86 18 L99 88 L112 62 L154 62 L166 62 L176 50 L186 78 L199 24 L213 84 L226 62 L272 62 L284 62 L294 47 L305 80 L318 20 L331 86 L344 62 L390 62 L402 62 L412 51 L424 76 L436 28 L448 82 L462 62 L520 62'
+      : 'M0 64 C15 50 28 50 42 64 C55 78 67 78 80 64 C96 44 116 44 132 64 C149 84 168 84 186 64 C202 48 220 48 236 64 C252 80 268 80 284 64 C302 38 330 38 348 64 C365 89 390 88 408 64 C426 46 448 46 466 64 C484 80 502 80 520 64'
 
-const steps = [
-  { num: '1', title: 'Record', desc: 'Capture ECG & PCG signals through connected IoT devices in real-time.' },
-  { num: '2', title: 'Analyze', desc: 'AI models process waveforms, classify heart sounds, and detect anomalies.' },
-  { num: '3', title: 'Report', desc: 'Generate clinical-grade reports with predictions & recommendations.' },
-]
+  return (
+    <svg className={`${styles.signalSvg} ${variant === 'ecg' ? styles.ecgSignal : styles.pcgSignal}`} viewBox="0 0 520 120" preserveAspectRatio="none" aria-hidden="true">
+      <path d={path} className={styles.signalGlow} pathLength={1} />
+      <path d={path} className={styles.signalLine} pathLength={1} />
+    </svg>
+  )
+}
 
-const techItems = [
-  { name: 'Next.js', emoji: '⚡' },
-  { name: 'React', emoji: '⚛️' },
-  { name: 'TypeScript', emoji: '🔷' },
-  { name: 'Supabase', emoji: '🟢' },
-  { name: 'TensorFlow', emoji: '🧠' },
-  { name: 'MQTT', emoji: '📡' },
-  { name: 'Python', emoji: '🐍' },
-  { name: 'Docker', emoji: '🐳' },
-  { name: 'PostgreSQL', emoji: '🐘' },
-  { name: 'Tailwind CSS', emoji: '🎨' },
-]
+function LiveSystemSnapshot() {
+  return (
+    <section id="snapshot" className={`${styles.snapshotPanel} ${styles.reveal} ${styles.d2}`} data-reveal aria-labelledby="snapshot-title">
+      <div className={styles.panelChrome}>
+        <span />
+        <span />
+        <span />
+      </div>
 
-const teamMembers = [
-  { name: 'Mahmoud Metwally', initials: 'MM', role: 'Full Stack Developer' },
-  { name: 'Team Member 2', initials: 'T2', role: 'ML Engineer' },
-  { name: 'Team Member 3', initials: 'T3', role: 'Hardware Engineer' },
-  { name: 'Team Member 4', initials: 'T4', role: 'Backend Developer' },
-]
+      <div className={styles.snapshotHeader}>
+        <div>
+          <p className={styles.panelEyebrow}>Synthetic demo stream</p>
+          <h2 id="snapshot-title" className={styles.snapshotTitle}>Live System Snapshot</h2>
+        </div>
+        <div className={styles.onlineBadge}>
+          <span className={styles.onlineDot} aria-hidden="true" />
+          Online
+        </div>
+      </div>
 
-/* ── ECG Path Data ─────────────────────────────────────────── */
-const ecgPath = 'M0,150 L80,150 L100,150 L120,148 L140,152 L170,150 L190,150 L210,145 L215,80 L225,200 L235,60 L245,190 L260,120 L275,150 L300,150 L340,150 L360,148 L380,152 L400,150 L420,150 L440,145 L445,90 L455,195 L465,65 L475,185 L490,125 L505,150 L530,150 L570,150 L590,148 L610,152 L640,150 L660,150 L680,145 L685,85 L695,198 L705,62 L715,188 L730,122 L745,150 L770,150 L800,150'
+      <div className={styles.diagnosticStage} aria-hidden="true">
+        <div className={styles.scanColumn}>
+          <span>ECG</span>
+          <SignalWaveform variant="ecg" />
+        </div>
+        <div className={styles.heartScanner}>
+          <svg viewBox="0 0 120 120" className={styles.heartGlyph}>
+            <path d="M60 101 C23 75 15 51 24 34 C31 20 49 19 60 34 C71 19 89 20 96 34 C105 51 97 75 60 101Z" />
+            <path d="M18 62 H38 L45 48 L55 78 L66 36 L76 66 H102" />
+          </svg>
+          <span className={styles.scanBeam} />
+        </div>
+        <div className={styles.scanColumn}>
+          <span>PCG</span>
+          <SignalWaveform variant="pcg" />
+        </div>
+      </div>
 
-/* ── Component ─────────────────────────────────────────────── */
+      <dl className={styles.snapshotReadouts}>
+        <div className={styles.readout}>
+          <dt>Device status</dt>
+          <dd><span className={styles.inlineStatusDot} aria-hidden="true" />Online</dd>
+        </div>
+        <div className={styles.readout}>
+          <dt>AI confidence value</dt>
+          <dd>0.86 demo score</dd>
+        </div>
+        <div className={styles.readout}>
+          <dt>Latest prediction state</dt>
+          <dd>Review candidate</dd>
+        </div>
+        <div className={styles.readout}>
+          <dt>Report queue status</dt>
+          <dd>2 drafts pending</dd>
+        </div>
+      </dl>
+
+      <p className={styles.snapshotNotice}>Demo visualization only. No real patient data is shown.</p>
+    </section>
+  )
+}
+
 export default function LandingPage() {
   const rootRef = useRef<HTMLDivElement | null>(null)
   const [scrollProgress, setScrollProgress] = useState(0)
   const [scrolled, setScrolled] = useState(false)
 
-  /* Scroll reveal observer */
   useEffect(() => {
-    if (!rootRef.current) return
-    const nodes = Array.from(rootRef.current.querySelectorAll<HTMLElement>('[data-reveal]'))
-    if (nodes.length === 0) return
+    const root = rootRef.current
+    if (!root) return
+
+    const scrollRoot = root.closest('.app-main') as HTMLElement | null
+    const nodes = Array.from(root.querySelectorAll<HTMLElement>('[data-reveal]'))
+
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      nodes.forEach((node) => node.classList.add(styles.inView))
+      return
+    }
 
     const observer = new IntersectionObserver(
       (entries) => {
@@ -112,244 +308,258 @@ export default function LandingPage() {
           }
         }
       },
-      { threshold: 0.15, rootMargin: '0px 0px -5% 0px' }
+      { root: scrollRoot, threshold: 0.14, rootMargin: '0px 0px -8% 0px' }
     )
 
     nodes.forEach((node) => observer.observe(node))
     return () => observer.disconnect()
   }, [])
 
-  /* Scroll progress + navbar state */
   useEffect(() => {
+    const root = rootRef.current
+    const scrollRoot = root?.closest('.app-main') as HTMLElement | null
+
     const update = () => {
+      if (scrollRoot) {
+        const total = scrollRoot.scrollHeight - scrollRoot.clientHeight
+        const current = scrollRoot.scrollTop
+        setScrollProgress(total <= 0 ? 0 : Math.min(Math.max(current / total, 0), 1))
+        setScrolled(current > 32)
+        return
+      }
+
       const total = document.documentElement.scrollHeight - window.innerHeight
       setScrollProgress(total <= 0 ? 0 : Math.min(Math.max(window.scrollY / total, 0), 1))
-      setScrolled(window.scrollY > 50)
+      setScrolled(window.scrollY > 32)
     }
+
     update()
-    window.addEventListener('scroll', update, { passive: true })
+    const target: HTMLElement | Window = scrollRoot ?? window
+    target.addEventListener('scroll', update, { passive: true })
     window.addEventListener('resize', update)
+
     return () => {
-      window.removeEventListener('scroll', update)
+      target.removeEventListener('scroll', update)
       window.removeEventListener('resize', update)
     }
   }, [])
 
   return (
     <div ref={rootRef} className={styles.root}>
-      {/* Ambient orbs */}
-      <div className={styles.ambientOrb1} />
-      <div className={styles.ambientOrb2} />
-      <div className={styles.ambientOrb3} />
-
-      {/* Progress bar */}
-      <div className={styles.progressRail}>
+      <div className={styles.progressRail} aria-hidden="true">
         <span className={styles.progressFill} style={{ transform: `scaleX(${scrollProgress})` }} />
       </div>
 
-      <div className={styles.shell}>
-        {/* ═══ Navbar ═══ */}
-        <nav className={`${styles.navbar} ${scrolled ? styles.scrolled : ''}`}>
-          <Link href="/" className={styles.navBrand}>
-            <span className={styles.navLogoMark}>
-              <AscultiCorLogo size={36} />
-            </span>
-            <span className={styles.navBrandText}>
-              <span className={styles.navBrandTitle}>AscultiCor</span>
-              <span className={styles.navBrandSub}>Pulse Intelligence</span>
-            </span>
-          </Link>
+      <nav className={`${styles.navbar} ${scrolled ? styles.scrolled : ''}`} aria-label="Landing page">
+        <Link href="/" className={styles.navBrand}>
+          <span className={styles.navLogoWordmark}>
+            <AscultiCorLogo />
+          </span>
+        </Link>
 
-          <div className={styles.navLinks}>
-            <a href="#features" className={styles.navLink}>Features</a>
-            <a href="#how-it-works" className={styles.navLink}>How It Works</a>
-            <a href="#tech" className={styles.navLink}>Technology</a>
-            <a href="#team" className={styles.navLink}>Team</a>
+        <div className={styles.navLinks}>
+          {navItems.map((item) => (
+            <a key={item.href} href={item.href} className={styles.navLink}>
+              {item.label}
+            </a>
+          ))}
+        </div>
+
+        <Link href="/auth/login" className={styles.navCta}>
+          Login
+          <ArrowRight className={styles.linkIcon} aria-hidden="true" />
+        </Link>
+      </nav>
+
+      <main className={styles.main}>
+        <section className={styles.hero} aria-labelledby="hero-title">
+          <div className={styles.heroContent}>
+            <p className={`${styles.heroBadge} ${styles.reveal}`} data-reveal>
+              <span className={styles.badgePulse} aria-hidden="true" />
+              Medical AI-IoT Command Center
+            </p>
+
+            <h1 id="hero-title" className={`${styles.heroTitle} ${styles.reveal} ${styles.d1}`} data-reveal>
+              <span>AscultiCor</span>
+              <span>AI-Powered Cardiac Auscultation &amp; Monitoring</span>
+            </h1>
+
+            <p className={`${styles.heroSubtitle} ${styles.reveal} ${styles.d2}`} data-reveal>
+              Real-time ECG and PCG acquisition, ML classification, device telemetry, and clinical reporting in one integrated platform.
+            </p>
+
+            <div className={`${styles.heroPillars} ${styles.reveal} ${styles.d3}`} data-reveal aria-label="Platform pillars">
+              <span><Cpu aria-hidden="true" />ESP32 acquisition</span>
+              <span><Radio aria-hidden="true" />MQTT telemetry</span>
+              <span><Brain aria-hidden="true" />AI inference</span>
+              <span><BarChart3 aria-hidden="true" />Next.js dashboard</span>
+            </div>
+
+            <div className={`${styles.heroActions} ${styles.reveal} ${styles.d4}`} data-reveal>
+              <Link href="/auth/login" className={styles.primaryBtn}>
+                Enter Dashboard
+                <ArrowRight className={styles.linkIcon} aria-hidden="true" />
+              </Link>
+              <a href="#architecture" className={styles.secondaryBtn}>
+                View Architecture
+              </a>
+              <a href="#demo-flow" className={styles.ghostBtn}>
+                Demo Flow
+              </a>
+            </div>
           </div>
 
-          <Link href="/auth/login" className={styles.primaryBtn}>
-            Sign In
-            <ArrowRight className="w-4 h-4" />
-          </Link>
-        </nav>
+          <LiveSystemSnapshot />
+        </section>
 
-        {/* ═══ Hero ═══ */}
-        <section className={styles.hero}>
-          <div className={styles.heroInner}>
-            <div className={styles.heroContent}>
-              <div className={`${styles.heroBadge} ${styles.reveal}`} data-reveal>
-                <span className={styles.heroBadgeDot} />
-                AI-Powered Cardiac Platform
-              </div>
+        <section id="architecture" className={styles.section} aria-labelledby="architecture-title">
+          <div className={styles.sectionHeader}>
+            <p className={`${styles.sectionEyebrow} ${styles.reveal}`} data-reveal>System Architecture</p>
+            <h2 id="architecture-title" className={`${styles.sectionTitle} ${styles.reveal} ${styles.d1}`} data-reveal>
+              From embedded cardiac signals to reviewable dashboard intelligence.
+            </h2>
+            <p className={`${styles.sectionSubtitle} ${styles.reveal} ${styles.d2}`} data-reveal>
+              The platform connects acquisition hardware, MQTT messaging, inference services, secure data storage, and clinical reporting into one project pipeline.
+            </p>
+          </div>
 
-              <h1 className={`${styles.heroTitle} ${styles.reveal} ${styles.d1}`} data-reveal>
-                <span className={styles.heroTitleLine1}>Intelligent</span>
-                <span className={styles.heroTitleLine2}>Cardiac Auscultation</span>
-              </h1>
-
-              <p className={`${styles.heroSubtitle} ${styles.reveal} ${styles.d2}`} data-reveal>
-                Monitor, analyze, and classify heart sounds in real-time using AI.
-                From ECG waveforms to PCG phonocardiograms — clinical intelligence at your fingertips.
-              </p>
-
-              <div className={`${styles.heroActions} ${styles.reveal} ${styles.d3}`} data-reveal>
-                <Link href="/auth/login" className={styles.primaryBtn}>
-                  Sign In
-                  <ArrowRight className="w-4 h-4" />
-                </Link>
-              </div>
-            </div>
-
-            {/* ECG Waveform visual */}
-            <div className={`${styles.heroVisual} ${styles.reveal} ${styles.d2}`} data-reveal>
-              <div className={styles.ecgContainer}>
-                <svg viewBox="0 0 800 300" className={styles.ecgSvg} preserveAspectRatio="none">
-                  <defs>
-                    <linearGradient id="ecgGrad" x1="0%" y1="0%" x2="100%" y2="0%">
-                      <stop offset="0%" stopColor="#3de7c7" />
-                      <stop offset="50%" stopColor="#59c7ff" />
-                      <stop offset="100%" stopColor="#ff8b3d" />
-                    </linearGradient>
-                  </defs>
-                  <path d={ecgPath} className={styles.ecgGlow} />
-                  <path d={ecgPath} className={styles.ecgLine} />
-                  <circle cx="745" cy="150" className={styles.ecgPulse} />
-                </svg>
-
-
-              </div>
-            </div>
+          <div className={`${styles.architectureFlow} ${styles.reveal} ${styles.d3}`} data-reveal>
+            {architectureNodes.map((node, index) => {
+              const Icon = node.icon
+              return (
+                <div className={styles.architectureItem} key={node.title}>
+                  <article className={styles.architectureNode}>
+                    <div className={styles.nodeIcon}>
+                      <Icon aria-hidden="true" />
+                    </div>
+                    <div>
+                      <h3>{node.title}</h3>
+                      <p className={styles.nodeDetail}>{node.detail}</p>
+                      <p>{node.description}</p>
+                    </div>
+                  </article>
+                  {index < architectureNodes.length - 1 && (
+                    <ArrowRight className={styles.architectureArrow} aria-hidden="true" />
+                  )}
+                </div>
+              )
+            })}
           </div>
         </section>
 
-        {/* ═══ Features ═══ */}
-        <section id="features" className={styles.features}>
-          <p className={`${styles.sectionEyebrow} ${styles.reveal}`} data-reveal>
-            <span className={styles.sectionEyebrowLine} />
-            Core Capabilities
-          </p>
-          <h2 className={`${styles.sectionTitle} ${styles.reveal} ${styles.d1}`} data-reveal>
-            Everything you need for cardiac signal intelligence
-          </h2>
-          <p className={`${styles.sectionSubtitle} ${styles.reveal} ${styles.d2}`} data-reveal>
-            A complete pipeline from signal capture to clinical report — powered by deep learning and real-time IoT.
-          </p>
+        <section id="capabilities" className={styles.section} aria-labelledby="capabilities-title">
+          <div className={styles.sectionHeader}>
+            <p className={`${styles.sectionEyebrow} ${styles.reveal}`} data-reveal>Capabilities</p>
+            <h2 id="capabilities-title" className={`${styles.sectionTitle} ${styles.reveal} ${styles.d1}`} data-reveal>
+              Built to demonstrate biomedical depth and production discipline.
+            </h2>
+          </div>
 
-          <div className={styles.featuresGrid}>
-            {features.map((feat, index) => {
-              const Icon = feat.icon
+          <div className={styles.capabilityGrid}>
+            {capabilities.map((capability, index) => {
+              const Icon = capability.icon
+              const delayClass = styles[`d${(index % 6) + 1}` as keyof typeof styles]
               return (
-                <article
-                  key={feat.title}
-                  className={`${styles.featureCard} ${styles.reveal} ${styles[`d${index + 1}` as keyof typeof styles]}`}
-                  data-reveal
-                  style={{ '--card-accent': feat.accent } as React.CSSProperties}
-                >
-                  <div className={styles.featureIcon}>
-                    <Icon className="w-5 h-5" />
-                  </div>
-                  <h3 className={styles.featureTitle}>{feat.title}</h3>
-                  <p className={styles.featureDesc}>{feat.desc}</p>
+                <article key={capability.title} className={`${styles.capabilityCard} ${styles.reveal} ${delayClass}`} data-reveal>
+                  <Icon className={styles.cardIcon} aria-hidden="true" />
+                  <h3>{capability.title}</h3>
+                  <p>{capability.description}</p>
                 </article>
               )
             })}
           </div>
         </section>
 
-        {/* ═══ How It Works ═══ */}
-        <section id="how-it-works" className={styles.howItWorks}>
-          <p className={`${styles.sectionEyebrow} ${styles.reveal}`} data-reveal style={{ justifyContent: 'center' }}>
-            <span className={styles.sectionEyebrowLine} />
-            How It Works
-          </p>
-          <h2 className={`${styles.sectionTitle} ${styles.reveal} ${styles.d1}`} data-reveal style={{ marginInline: 'auto' }}>
-            From signal to insight in seconds
-          </h2>
-          <p className={`${styles.sectionSubtitle} ${styles.reveal} ${styles.d2}`} data-reveal style={{ marginInline: 'auto' }}>
-            Three simple steps to transform raw cardiac signals into actionable clinical intelligence.
-          </p>
-
-          <div className={styles.stepsGrid}>
-            {steps.map((step, index) => (
-              <div
-                key={step.num}
-                className={`${styles.stepCard} ${styles.reveal} ${styles[`d${index + 1}` as keyof typeof styles]}`}
-                data-reveal
-              >
-                <div className={styles.stepNumber}>{step.num}</div>
-                <h3 className={styles.stepTitle}>{step.title}</h3>
-                <p className={styles.stepDesc}>{step.desc}</p>
-              </div>
-            ))}
-          </div>
-        </section>
-
-        {/* ═══ Tech Stack ═══ */}
-        <section id="tech" className={styles.techStack}>
-          <div style={{ textAlign: 'center' }}>
-            <p className={`${styles.sectionEyebrow} ${styles.reveal}`} data-reveal style={{ justifyContent: 'center' }}>
-              <span className={styles.sectionEyebrowLine} />
-              Technology Stack
-            </p>
-            <h2 className={`${styles.sectionTitle} ${styles.reveal} ${styles.d1}`} data-reveal style={{ marginInline: 'auto' }}>
-              Built with modern technologies
+        <section id="demo-flow" className={styles.section} aria-labelledby="demo-flow-title">
+          <div className={styles.sectionHeader}>
+            <p className={`${styles.sectionEyebrow} ${styles.reveal}`} data-reveal>Demo Flow</p>
+            <h2 id="demo-flow-title" className={`${styles.sectionTitle} ${styles.reveal} ${styles.d1}`} data-reveal>
+              A clear project journey from registered device to reviewed insights.
             </h2>
-            <p className={`${styles.sectionSubtitle} ${styles.reveal} ${styles.d2}`} data-reveal style={{ marginInline: 'auto' }}>
-              A robust full-stack architecture combining web, AI, and IoT technologies.
-            </p>
           </div>
 
-          <div className={`${styles.techGrid} ${styles.reveal} ${styles.d3}`} data-reveal>
-            {techItems.map((tech) => (
-              <span key={tech.name} className={styles.techChip}>
-                <span className={styles.techChipIcon}>{tech.emoji}</span>
-                {tech.name}
-              </span>
-            ))}
-          </div>
-        </section>
-
-        {/* ═══ Team ═══ */}
-        <section id="team" className={styles.team}>
-          <p className={`${styles.sectionEyebrow} ${styles.reveal}`} data-reveal style={{ justifyContent: 'center' }}>
-            <span className={styles.sectionEyebrowLine} />
-            The Team
-          </p>
-          <h2 className={`${styles.sectionTitle} ${styles.reveal} ${styles.d1}`} data-reveal style={{ marginInline: 'auto' }}>
-            Graduation Project Team
-          </h2>
-          <p className={`${styles.teamSubtitle} ${styles.reveal} ${styles.d2}`} data-reveal>
-            Faculty of Engineering — Biomedical Engineering Department
-          </p>
-
-          <div className={`${styles.teamGrid} ${styles.reveal} ${styles.d3}`} data-reveal>
-            {teamMembers.map((member) => (
-              <div key={member.name} className={styles.teamCard}>
-                <div className={styles.teamAvatar}>{member.initials}</div>
-                <h3 className={styles.teamName}>{member.name}</h3>
-                <p className={styles.teamRole}>{member.role}</p>
-              </div>
-            ))}
+          <div className={styles.demoTimeline}>
+            {demoFlow.map((step, index) => {
+              const Icon = step.icon
+              const delayClass = styles[`d${(index % 5) + 1}` as keyof typeof styles]
+              return (
+                <article key={step.step} className={`${styles.demoStep} ${styles.reveal} ${delayClass}`} data-reveal>
+                  <span className={styles.stepNumber}>{step.step}</span>
+                  <div className={styles.stepIcon}>
+                    <Icon aria-hidden="true" />
+                  </div>
+                  <h3>{step.title}</h3>
+                  <p>{step.description}</p>
+                </article>
+              )
+            })}
           </div>
         </section>
 
-
-
-        {/* ═══ Footer ═══ */}
-        <footer className={styles.footer}>
-          <div className={styles.footerContent}>
-            <div className={styles.footerBrand}>
-              <AscultiCorLogo size={24} />
-              <span className={styles.footerBrandText}>AscultiCor</span>
-            </div>
-            <p className={styles.footerSub}>
-              Made with <span className={styles.footerHeart}>❤</span> — Graduation Project 2026
-              <br />
-              Faculty of Engineering • Biomedical Engineering Department
-            </p>
+        <section id="technology" className={styles.section} aria-labelledby="technology-title">
+          <div className={styles.sectionHeader}>
+            <p className={`${styles.sectionEyebrow} ${styles.reveal}`} data-reveal>Technology</p>
+            <h2 id="technology-title" className={`${styles.sectionTitle} ${styles.reveal} ${styles.d1}`} data-reveal>
+              Stack groups that mirror the actual system boundaries.
+            </h2>
           </div>
-        </footer>
-      </div>
+
+          <div className={styles.techGrid}>
+            {techGroups.map((group, index) => {
+              const Icon = group.icon
+              const delayClass = styles[`d${(index % 5) + 1}` as keyof typeof styles]
+              return (
+                <article key={group.title} className={`${styles.techGroup} ${styles.reveal} ${delayClass}`} data-reveal>
+                  <div className={styles.techHeader}>
+                    <Icon aria-hidden="true" />
+                    <h3>{group.title}</h3>
+                  </div>
+                  <ul>
+                    {group.items.map((item) => (
+                      <li key={item}>{item}</li>
+                    ))}
+                  </ul>
+                </article>
+              )
+            })}
+          </div>
+        </section>
+
+        <section id="academic" className={styles.academicSection} aria-labelledby="academic-title">
+          <div className={styles.sectionHeader}>
+            <p className={`${styles.sectionEyebrow} ${styles.reveal}`} data-reveal>Academic Context</p>
+            <h2 id="academic-title" className={`${styles.sectionTitle} ${styles.reveal} ${styles.d1}`} data-reveal>
+              Graduation Project | Biomedical Engineering | AscultiCor Team
+            </h2>
+          </div>
+
+          <div className={styles.academicGrid}>
+            {academicCards.map((card, index) => {
+              const Icon = card.icon
+              const delayClass = styles[`d${(index % 3) + 1}` as keyof typeof styles]
+              return (
+                <article key={card.title} className={`${styles.academicCard} ${styles.reveal} ${delayClass}`} data-reveal>
+                  <Icon aria-hidden="true" />
+                  <h3>{card.title}</h3>
+                  <p>{card.description}</p>
+                </article>
+              )
+            })}
+          </div>
+        </section>
+      </main>
+
+      <footer className={styles.footer}>
+        <div className={styles.footerInner}>
+          <div className={styles.footerBrand}>
+            <span className={styles.footerLogoWordmark}>
+              <AscultiCorLogo width={132} height={44} />
+            </span>
+            <span>AscultiCor — AI-Powered Cardiac Monitoring Platform</span>
+          </div>
+          <p>Graduation Project 2026</p>
+        </div>
+      </footer>
     </div>
   )
 }

@@ -3,7 +3,8 @@
 import { useEffect, useState } from 'react'
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs'
 import { useRouter } from 'next/navigation'
-import { Heart, Mail, Lock, ArrowRight, Activity, Eye, EyeOff, User, CheckCircle } from 'lucide-react'
+import { Mail, Lock, ArrowRight, Activity, Eye, EyeOff, User, CheckCircle } from 'lucide-react'
+import Image from 'next/image'
 import Link from 'next/link'
 import { ArrowLeft } from 'lucide-react'
 
@@ -128,17 +129,15 @@ export default function LoginPage() {
         </svg>
 
         <div className="relative z-10 text-center px-12 max-w-lg">
-          <div className="flex items-center justify-center mb-8">
-              <div className="relative flex items-center justify-center w-20 h-20 rounded-2xl bg-gradient-to-br from-teal-400 to-teal-600 shadow-2xl">
-              <svg viewBox="0 0 32 32" className="logo-mark" aria-hidden="true">
-                <path d="M3 16h6l2.2-6.2 3.6 12.4 2.8-7.2 1.8 1.8H29" fill="none" stroke="white" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-              <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 rounded-full border-2 border-white/20 animate-pulse" />
-            </div>
-          </div>
-          <h1 className="text-4xl font-bold text-white mb-4 tracking-tight">
-            Asculti<span className="text-teal-300">Cor</span>
-          </h1>
+          <Image
+            src="/asculticor-logo-wordmark.png"
+            alt="AscultiCor"
+            width={360}
+            height={78}
+            className="mx-auto mb-8 h-auto w-80 max-w-full object-contain"
+            priority
+            unoptimized
+          />
           <p className="text-lg text-teal-200/80 leading-relaxed">
             AI-Powered Cardiac Auscultation and Prediction
           </p>
@@ -162,14 +161,15 @@ export default function LoginPage() {
         <div className="max-w-sm w-full space-y-8 surface-card bg-card/85 p-8 backdrop-blur">
           {/* Mobile logo */}
           <div className="text-center lg:hidden">
-            <div className="flex items-center justify-center gap-2.5 mb-2">
-              <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-gradient-to-br from-teal-500 to-teal-700 shadow-lg">
-                <svg viewBox="0 0 32 32" className="logo-mark" aria-hidden="true">
-                  <path d="M3 16h6l2.2-6.2 3.6 12.4 2.8-7.2 1.8 1.8H29" fill="none" stroke="white" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-              </div>
-              <span className="text-2xl font-bold text-foreground tracking-tight">AscultiCor</span>
-            </div>
+            <Image
+              src="/asculticor-logo-wordmark.png"
+              alt="AscultiCor"
+              width={240}
+              height={52}
+              className="mx-auto mb-3 h-auto w-52 object-contain"
+              priority
+              unoptimized
+            />
             <p className="text-sm text-muted-foreground">AI-Powered Cardiac Auscultation</p>
           </div>
 

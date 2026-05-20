@@ -2,9 +2,15 @@ import { createMiddlewareClient } from '@supabase/auth-helpers-nextjs'
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 
+const PUBLIC_FILE = /\.(?:png|jpe?g|gif|webp|svg|ico)$/i
+
 export async function middleware(req: NextRequest) {
   const res = NextResponse.next()
   const supabase = createMiddlewareClient({ req, res })
+
+  if (PUBLIC_FILE.test(req.nextUrl.pathname)) {
+    return res
+  }
 
   const {
     data: { session },

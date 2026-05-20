@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
+import Image from 'next/image'
 import {
   Activity,
   Cpu,
@@ -408,11 +409,15 @@ export default function Dashboard() {
       <div className="page-wrapper">
         <div className="page-content">
           <div className="max-w-2xl mx-auto text-center py-16 fade-in">
-            <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-teal-500 to-teal-700 flex items-center justify-center mx-auto mb-6 shadow-xl">
-              <svg viewBox="0 0 32 32" className="logo-mark" aria-hidden="true">
-                <path d="M3 16h6l2.2-6.2 3.6 12.4 2.8-7.2 1.8 1.8H29" fill="none" stroke="white" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-            </div>
+            <Image
+              src="/asculticor-logo-wordmark.png"
+              alt="AscultiCor"
+              width={300}
+              height={65}
+              className="mx-auto mb-6 h-auto w-72 max-w-full object-contain"
+              priority
+              unoptimized
+            />
             <h1 className="text-3xl font-bold text-foreground tracking-tight mb-3">
               Welcome to <span className="gradient-text">AscultiCor</span>
             </h1>
