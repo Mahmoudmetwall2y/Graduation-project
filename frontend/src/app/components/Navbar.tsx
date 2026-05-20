@@ -182,10 +182,9 @@ export default function Navbar({ showBackLink, backHref = '/', backLabel = '<- B
                             />
                         )}
                     </Link>
-                    {/* Demo Mode Indicator */}
-                    <div className={`mt-2 px-2 py-1 rounded-md bg-amber-100 dark:bg-amber-900/30 ${isCollapsed ? 'mx-auto w-fit' : ''}`} title="Demo Mode - Using simulated ML predictions">
-                        <span className="text-[10px] font-semibold text-amber-700 dark:text-amber-400 uppercase tracking-wide">
-                            {isCollapsed ? 'DEMO' : 'Demo Mode'}
+                    <div className={`mt-2 px-2 py-1 rounded-md bg-emerald-100 dark:bg-emerald-900/30 ${isCollapsed ? 'mx-auto w-fit' : ''}`} title="Real hardware workflow">
+                        <span className="text-[10px] font-semibold text-emerald-700 dark:text-emerald-400 uppercase tracking-wide">
+                            {isCollapsed ? 'HW' : 'Hardware Mode'}
                         </span>
                     </div>
                 </div>
@@ -397,4 +396,3 @@ export default function Navbar({ showBackLink, backHref = '/', backLabel = '<- B
         </>
     )
 }
-

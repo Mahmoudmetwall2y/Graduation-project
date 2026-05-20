@@ -18,7 +18,7 @@ httpx==0.24.1
 # ML & Signal Processing
 numpy>=2.0.0,<3.0.0
 scipy>=1.13.0,<2.0.0
-scikit-learn>=1.6.0,<2.0.0
+scikit-learn==1.6.1
 xgboost>=2.0.2,<3.0.0
 tensorflow>=2.18.0,<2.20.0
 librosa==0.10.1

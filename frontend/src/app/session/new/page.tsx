@@ -25,19 +25,18 @@ export default function NewSessionPage() {
   const router = useRouter()
   const supabase = createClientComponentClient()
   const selectedDevice = devices.find((device) => device.id === deviceId)
-  const deviceReady = selectedDevice ? !selectedDevice.status || selectedDevice.status === 'online' : false
+  const deviceReady = selectedDevice ? selectedDevice.status === 'online' : false
 
   const fetchDevices = useCallback(async () => {
     try {
-      const { data, error } = await supabase
-        .from('devices')
-        .select('*')
-        .order('created_at', { ascending: false })
+      const response = await fetch('/api/devices', { cache: 'no-store' })
+      const payload = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(payload.error || 'Failed to load devices')
 
-      if (error) throw error
-      setDevices(data || [])
-      if (data && data.length > 0) {
-        setDeviceId(data[0].id)
+      const nextDevices = payload.devices || []
+      setDevices(nextDevices)
+      if (nextDevices.length > 0) {
+        setDeviceId(nextDevices[0].id)
       }
       setFetchError(null)
     } catch (error) {
@@ -46,7 +45,7 @@ export default function NewSessionPage() {
     } finally {
       setLoadingDevices(false)
     }
-  }, [supabase])
+  }, [])
 
   const fetchPatients = useCallback(async () => {
     try {

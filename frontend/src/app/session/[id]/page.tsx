@@ -71,10 +71,18 @@ interface SessionNote {
   author_name?: string | null
 }
 
+interface SessionEvent {
+  id: string
+  action: string
+  metadata: any
+  created_at: string
+}
+
 interface SessionSummaryResponse {
   session: Session
   predictions: Prediction[]
   notes: SessionNote[]
+  events: SessionEvent[]
   deidentifyExports: boolean
 }
 
@@ -87,12 +95,6 @@ interface LiveWaveformResponse {
   lastLiveAt: string | null
   sessionStatus: string
 }
-
-// Waveform utilities — shared with dashboard page
-import {
-  generateEcgWaveformSamples,
-  generatePcgWaveformSamples,
-} from '../../../lib/waveform'
 
 function escapeHtml(value: unknown): string {
   return String(value ?? '')
@@ -123,6 +125,7 @@ export default function SessionDetailPage() {
     pcg: false,
   })
   const [notes, setNotes] = useState<SessionNote[]>([])
+  const [sessionEvents, setSessionEvents] = useState<SessionEvent[]>([])
   const [noteDraft, setNoteDraft] = useState('')
   const [savingNote, setSavingNote] = useState(false)
   const [lastLiveAt, setLastLiveAt] = useState<string | null>(null)
@@ -138,9 +141,6 @@ export default function SessionDetailPage() {
   const wasSessionActiveRef = useRef(false)
   const supabase = createClientComponentClient()
   const { showToast } = useToast()
-
-  const fallbackEcg = useMemo(() => generateEcgWaveformSamples(1800), [])
-  const fallbackPcg = useMemo(() => generatePcgWaveformSamples(2700), [])
 
   const fetchAppJson = useCallback(async <T,>(input: string): Promise<T> => {
     const response = await fetch(input, {
@@ -165,6 +165,7 @@ export default function SessionDetailPage() {
       setSession(payload.session)
       setPredictions(payload.predictions || [])
       setNotes(payload.notes || [])
+      setSessionEvents(payload.events || [])
       setDeidentifyExports(Boolean(payload.deidentifyExports))
     } catch (fetchError) {
       console.error('Error fetching session summary:', fetchError)
@@ -457,6 +458,47 @@ export default function SessionDetailPage() {
       })
     })
 
+    sessionEvents.forEach((event) => {
+      const metadata = event.metadata || {}
+      const actionLabels: Record<string, string> = {
+        session_preflight_passed: 'Signal preflight passed',
+        session_preflight_failed: 'Signal preflight failed',
+        session_stream_warning: 'Device stream warning',
+        session_timeout: 'Session stream timeout',
+        session_timeout_db: 'Session timeout',
+        pcg_inference_completed: 'PCG inference completed',
+        pcg_inference_failed: 'PCG inference failed',
+        ecg_inference_completed: 'ECG inference completed',
+        ecg_inference_failed: 'ECG inference failed',
+        note_added: 'Clinical note added',
+      }
+      const warningActions = new Set([
+        'session_preflight_failed',
+        'session_stream_warning',
+        'session_timeout',
+        'session_timeout_db',
+        'pcg_inference_failed',
+        'ecg_inference_failed',
+      ])
+      const successActions = new Set([
+        'session_preflight_passed',
+        'pcg_inference_completed',
+        'ecg_inference_completed',
+      ])
+
+      items.push({
+        id: `event-${event.id}`,
+        time: event.created_at,
+        title: actionLabels[event.action] || event.action.replace(/_/g, ' '),
+        description: metadata.reason || metadata.error || metadata.type || metadata.result,
+        tone: warningActions.has(event.action)
+          ? 'warning'
+          : successActions.has(event.action)
+            ? 'success'
+            : 'info',
+      })
+    })
+
     notes.forEach((note) => {
       items.push({
         id: `note-${note.id}`,
@@ -470,7 +512,7 @@ export default function SessionDetailPage() {
     return items
       .sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime())
       .slice(0, 12)
-  }, [session, predictions, notes, lastLiveAt])
+  }, [session, predictions, notes, sessionEvents, lastLiveAt])
 
   const modelSummary = useMemo(() => {
     const map = new Map<string, { name: string; version: string; modality: string; count: number; lastSeen: string }>()
@@ -521,21 +563,21 @@ export default function SessionDetailPage() {
     ? 'Live sweep'
     : isSessionActive
       ? lastLiveAt
-        ? 'Stale'
-        : 'Awaiting signal'
+        ? 'Signal stale'
+        : 'Waiting for ESP32 signal'
       : lastLiveAt
         ? 'Captured'
-        : 'Simulated'
+        : 'No capture yet'
   const ecgLabel = waveformAvailability.ecg
     ? (isSessionActive && isLiveFresh ? 'Live sweep' : 'Final trace')
     : isSessionActive
-      ? 'Awaiting live'
-      : 'Simulated'
+      ? 'Waiting for ESP32 signal'
+      : 'Captured trace unavailable'
   const pcgLabel = waveformAvailability.pcg
     ? (isSessionActive && isLiveFresh ? 'Live sweep' : 'Final trace')
     : isSessionActive
-      ? 'Awaiting live'
-      : 'Simulated'
+      ? 'Waiting for ESP32 signal'
+      : 'Captured trace unavailable'
 
   const handleAddNote = async () => {
     if (!noteDraft.trim()) return
@@ -1045,6 +1087,14 @@ export default function SessionDetailPage() {
           ))}
         </div>
 
+        {isSessionActive && !isLiveFresh && (
+          <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200 slide-up">
+            {lastLiveAt
+              ? 'Live data is stale. Keep the ESP32 powered on, confirm Wi-Fi/MQTT connection, and check the Serial Monitor for stream warnings.'
+              : 'Waiting for the ESP32 to send live ECG/PCG frames. Confirm the device is online and the start command was acknowledged.'}
+          </div>
+        )}
+
         {/* Signal Visualizations */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* ECG Waveform */}
@@ -1065,7 +1115,6 @@ export default function SessionDetailPage() {
               accentGlow="rgba(20, 184, 166, 0.55)"
               amplitudeRange={[-0.35, 1.15]}
               fallbackSampleRate={300}
-              fallbackSamples={fallbackEcg}
               isSessionActive={isSessionActive}
               playbackLatencyMs={ecgPlaybackLatency}
               sampleLabel="ECG"
@@ -1093,7 +1142,6 @@ export default function SessionDetailPage() {
               accentGlow="rgba(244, 63, 94, 0.55)"
               amplitudeRange={[-1.0, 1.0]}
               fallbackSampleRate={900}
-              fallbackSamples={fallbackPcg}
               isSessionActive={isSessionActive}
               playbackLatencyMs={pcgPlaybackLatency}
               sampleLabel="PCG"

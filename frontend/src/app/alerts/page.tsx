@@ -16,6 +16,11 @@ interface AlertRow {
   is_resolved: boolean
   created_at: string
   resolved_at: string | null
+  device?: {
+    device_name: string | null
+    status: string | null
+    last_seen_at: string | null
+  } | null
 }
 
 export default function AlertsPage() {
@@ -28,11 +33,14 @@ export default function AlertsPage() {
   const fetchAlerts = useCallback(async () => {
     const { data, error } = await supabase
       .from('device_alerts')
-      .select('id, device_id, alert_type, severity, message, metadata, is_resolved, created_at, resolved_at')
+      .select('id, device_id, alert_type, severity, message, metadata, is_resolved, created_at, resolved_at, device:devices(device_name, status, last_seen_at)')
       .order('created_at', { ascending: false })
 
     if (!error) {
-      setAlerts(data || [])
+      setAlerts((data || []).map((row: any) => ({
+        ...row,
+        device: Array.isArray(row.device) ? row.device[0] : row.device,
+      })))
     }
     setLoading(false)
   }, [supabase])
@@ -120,7 +128,7 @@ export default function AlertsPage() {
 
         {filtered.length === 0 ? (
           <div className="text-sm text-hud-cyan/60 bg-hud-cyan/5 border border-hud-cyan/20 rounded-xl p-8 text-center slide-up mt-6">
-            No alerts match your filters.
+            No real-device alerts match your filters.
           </div>
         ) : (
           <div className="slide-up mt-6" style={{ animationDelay: '0.1s', animationFillMode: 'both' }}>
@@ -145,8 +153,14 @@ export default function AlertsPage() {
                       <div>
                         <p className="text-sm font-medium text-white/90">{alert.message}</p>
                         <p className="text-xs text-hud-cyan/60 font-mono mt-0.5 uppercase tracking-wider">
-                          {alert.alert_type} • DEVICE {alert.device_id.slice(0, 8)}
+                          {alert.alert_type} • {alert.device?.device_name || `DEVICE ${alert.device_id.slice(0, 8)}`}
                         </p>
+                        {alert.metadata?.subtype && (
+                          <p className="text-[11px] text-white/35 mt-1">
+                            {alert.metadata.subtype}
+                            {alert.device?.status ? ` · Device ${alert.device.status}` : ''}
+                          </p>
+                        )}
                       </div>
                     </div>
                   </DataListCell>
@@ -161,17 +175,33 @@ export default function AlertsPage() {
                     </span>
                   </DataListCell>
                   <DataListCell isLast>
-                    {!alert.is_resolved ? (
-                      <button
-                        onClick={() => resolveAlert(alert.id)}
-                        className="inline-flex items-center gap-1.5 text-xs font-mono tracking-widest text-[#00f0ff] hover:text-white transition-all bg-[#00f0ff]/10 hover:bg-[#00f0ff]/20 px-3 py-1.5 rounded-lg border border-[#00f0ff]/30 shadow-[0_0_10px_rgba(0,240,255,0.1)] justify-center min-w-[100px]"
+                    <div className="flex flex-wrap justify-end gap-2">
+                      {alert.metadata?.session_id && (
+                        <a
+                          href={`/session/${alert.metadata.session_id}`}
+                          className="inline-flex items-center justify-center text-xs font-mono tracking-widest text-white/60 hover:text-white transition-all bg-white/5 hover:bg-white/10 px-3 py-1.5 rounded-lg border border-white/10 min-w-[92px]"
+                        >
+                          SESSION
+                        </a>
+                      )}
+                      <a
+                        href={`/devices/${alert.device_id}`}
+                        className="inline-flex items-center justify-center text-xs font-mono tracking-widest text-white/60 hover:text-white transition-all bg-white/5 hover:bg-white/10 px-3 py-1.5 rounded-lg border border-white/10 min-w-[92px]"
                       >
-                        <CheckCircle className="w-3.5 h-3.5" />
-                        RESOLVE
-                      </button>
-                    ) : (
-                      <span className="text-xs text-white/30 font-mono inline-block text-center min-w-[100px] tracking-widest">RESOLVED</span>
-                    )}
+                        DEVICE
+                      </a>
+                      {!alert.is_resolved ? (
+                        <button
+                          onClick={() => resolveAlert(alert.id)}
+                          className="inline-flex items-center gap-1.5 text-xs font-mono tracking-widest text-[#00f0ff] hover:text-white transition-all bg-[#00f0ff]/10 hover:bg-[#00f0ff]/20 px-3 py-1.5 rounded-lg border border-[#00f0ff]/30 shadow-[0_0_10px_rgba(0,240,255,0.1)] justify-center min-w-[100px]"
+                        >
+                          <CheckCircle className="w-3.5 h-3.5" />
+                          RESOLVE
+                        </button>
+                      ) : (
+                        <span className="text-xs text-white/30 font-mono inline-block text-center min-w-[100px] tracking-widest">RESOLVED</span>
+                      )}
+                    </div>
                   </DataListCell>
                 </DataListRow>
               ))}

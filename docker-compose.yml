@@ -93,7 +93,7 @@ services:
       - LOG_LEVEL=INFO
       - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:3001}
       - SECURITY_HEADERS_ENABLED=${SECURITY_HEADERS_ENABLED:-true}
-      - TRUSTED_HOSTS=${TRUSTED_HOSTS:-*.asculticor.com,localhost,127.0.0.1}
+      - TRUSTED_HOSTS=${TRUSTED_HOSTS:-*.asculticor.com,localhost,127.0.0.1},inference,asculticor-inference
       - INFERENCE_INTERNAL_TOKEN=${INFERENCE_INTERNAL_TOKEN:?INFERENCE_INTERNAL_TOKEN is required}
       - MODELS_DIR=/app/models
     volumes:

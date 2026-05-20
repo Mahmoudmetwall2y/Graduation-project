@@ -128,7 +128,7 @@ export function Model2DiagnosticCard({ data, murmurDetected, isPrintMode }: Mode
 
       {data.demo_mode && (
         <p className="text-xs text-amber-600 dark:text-amber-400 italic">
-          ⚠ Demo Mode — Using simulated severity predictions.
+          Warning: fallback prediction mode is active for severity output.
         </p>
       )}
     </div>
