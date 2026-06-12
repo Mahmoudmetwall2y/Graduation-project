@@ -61,7 +61,7 @@ function serviceClient() {
 }
 
 function publicAppUrl() {
-  return env('ASCULTICOR_PUBLIC_APP_URL', env('DEVICE_BOOTSTRAP_PUBLIC_BASE_URL', 'https://srv1621744.hstgr.cloud')).replace(/\/+$/, '')
+  return env('ASCULTICOR_PUBLIC_APP_URL', env('DEVICE_BOOTSTRAP_PUBLIC_BASE_URL')).replace(/\/+$/, '')
 }
 
 function fallbackEmail() {
@@ -505,7 +505,7 @@ function internalHostHeaders(extra: Record<string, string> = {}) {
     try {
       host = new URL(publicAppUrl()).host
     } catch {
-      host = 'srv1621744.hstgr.cloud'
+      host = 'frontend:3000'
     }
   }
   return {

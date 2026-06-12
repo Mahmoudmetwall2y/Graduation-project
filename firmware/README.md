@@ -42,6 +42,11 @@ Add ESP32 board support:
 
 Recommended bootstrap flow:
 
+The AscultiCor Devices page now provides a guided setup wizard after you create a device.
+Use **Connect ESP32 & Provision** in Chrome/Edge to send the commands over USB automatically.
+The QR payload is generated locally in the browser for field setup/reference. Manual Serial
+Monitor commands are still available as a fallback.
+
 ```
 SET device_id xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
 SET device_secret asc_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx

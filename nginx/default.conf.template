@@ -15,6 +15,11 @@ upstream inference_api {
     server inference:8000;
 }
 
+# Security headers macro applied to all HTTPS responses
+map ${DOLLAR}sent_http_content_type ${DOLLAR}csp_header {
+    default "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' https://*.supabase.co wss://*.supabase.co ws: wss:;";
+}
+
 server {
     listen 80;
     server_name ${NGINX_SERVER_NAME};
@@ -34,6 +39,19 @@ server {
     ssl_session_cache shared:SSL:10m;
     ssl_protocols TLSv1.2 TLSv1.3;
     ssl_prefer_server_ciphers off;
+
+    # Limit upload size to 5MB (large enough for audio chunks, prevents unbounded uploads)
+    client_max_body_size 5m;
+
+    # Security headers for all frontend responses
+    add_header X-Content-Type-Options    "nosniff"                          always;
+    add_header X-Frame-Options           "DENY"                             always;
+    add_header Referrer-Policy           "strict-origin-when-cross-origin"  always;
+    add_header Permissions-Policy        "geolocation=(), microphone=(), camera=()" always;
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    # Note: X-XSS-Protection is intentionally omitted (deprecated; use CSP)
+    # Note: CSP is complex for Next.js apps with inline scripts — set a suitable policy here
+    # add_header Content-Security-Policy "${DOLLAR}csp_header" always;
 
     location / {
         proxy_pass http://frontend;
@@ -57,12 +75,6 @@ server {
     }
 
     location /api/inference/ {
-        proxy_pass http://inference_api/;
-        proxy_http_version 1.1;
-        proxy_set_header Host ${DOLLAR}host;
-        proxy_set_header X-Real-IP ${DOLLAR}remote_addr;
-        proxy_set_header X-Forwarded-For ${DOLLAR}proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Host ${DOLLAR}host;
-        proxy_set_header X-Forwarded-Proto ${DOLLAR}scheme;
+        return 404;
     }
 }

@@ -223,6 +223,10 @@ async function queueReport(request: Request) {
 
 async function processPendingReports(request: Request) {
   try {
+    const url = new URL(request.url)
+    const includeEmailPayloads =
+      process.env.N8N_EMAIL_PAYLOAD_EXPORT_ENABLED === 'true' &&
+      url.searchParams.get('include_email_payloads') === '1'
     const internalToken = process.env.INTERNAL_API_TOKEN
     if (!internalToken) {
       return NextResponse.json({ error: 'INTERNAL_API_TOKEN is not configured' }, { status: 500 })
@@ -357,7 +361,8 @@ async function processPendingReports(request: Request) {
       failed,
       skipped,
       total: readyReports.length,
-      emails,
+      email_count: emails.length,
+      emails: includeEmailPayloads ? emails : [],
       message: 'Queued report processing completed'
     })
   } catch (error: any) {

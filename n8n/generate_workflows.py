@@ -119,7 +119,7 @@ def http_post_node(
 
 INTERNAL_HOST_HEADER = (
     "={{$env.ASCULTICOR_INTERNAL_HOST_HEADER || "
-    "($env.ASCULTICOR_PUBLIC_APP_URL || 'https://srv1621744.hstgr.cloud')"
+    "($env.ASCULTICOR_PUBLIC_APP_URL || 'http://frontend:3000')"
     ".replace(/^https?:\\/\\//, '').replace(/\\/.*$/, '')}}"
 )
 
@@ -175,7 +175,7 @@ function requiredEnv(name) {
 
 const SUPABASE_URL = requiredEnv('SUPABASE_URL').replace(/\/+$/, '');
 const SERVICE_KEY = requiredEnv('SUPABASE_SERVICE_ROLE_KEY');
-const APP_URL = env('ASCULTICOR_PUBLIC_APP_URL', env('DEVICE_BOOTSTRAP_PUBLIC_BASE_URL', 'https://srv1621744.hstgr.cloud')).replace(/\/+$/, '');
+const APP_URL = env('ASCULTICOR_PUBLIC_APP_URL', env('DEVICE_BOOTSTRAP_PUBLIC_BASE_URL', 'http://localhost:3000')).replace(/\/+$/, '');
 const EMAIL_TO = env('ASCULTICOR_ALERT_EMAIL_TO');
 const EMAIL_FROM = env('ASCULTICOR_ALERT_EMAIL_FROM', 'AscultiCor <alerts@localhost>');
 
@@ -969,7 +969,13 @@ def write_workflows() -> None:
             [
                 manual_node(),
                 schedule_node("Every Minute", minutes=1),
-                http_post_node("Process Pending Reports", frontend_action_url("process-pending", "/api/llm"), headers=internal_api_headers(), x=300, y=80),
+                http_post_node(
+                    "Process Pending Reports",
+                    frontend_action_url("process-pending&include_email_payloads=1", "/api/llm"),
+                    headers=internal_api_headers(),
+                    x=300,
+                    y=80,
+                ),
                 code_node("Prepare LLM Report Emails", EMAILS_FROM_RESULT_JS, x=600, y=80),
                 gmail_node(x=900, y=80),
             ],

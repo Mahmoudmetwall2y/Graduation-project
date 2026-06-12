@@ -148,7 +148,6 @@ export default function Navbar({ showBackLink, backHref = '/', backLabel = '<- B
             items: [
                 { href: '/admin', label: 'Admin', icon: Shield },
                 { href: '/admin/audit', label: 'Audit Logs', icon: ShieldAlert },
-                { href: '/debug', label: 'Debug', icon: Activity },
                 { href: '/settings', label: 'Settings', icon: Settings },
             ],
         },

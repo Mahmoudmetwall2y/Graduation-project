@@ -160,9 +160,10 @@ def require_internal_token(request: Request):
     """Protect internal operational endpoints with a shared token."""
     configured = os.getenv("INFERENCE_INTERNAL_TOKEN")
     if not configured:
+        # Return 503 (not 500) to avoid leaking that the variable is missing
         raise HTTPException(
-            status_code=500,
-            detail="INFERENCE_INTERNAL_TOKEN is not configured"
+            status_code=503,
+            detail="Internal token not configured"
         )
 
     provided = request.headers.get("x-internal-token")
@@ -293,23 +294,14 @@ async def get_metrics(request: Request):
 @app.post("/simulate")
 async def simulate_inference(request: Request):
     """
-    Optional endpoint to test inference pipeline without MQTT.
-    For debugging and testing.
+    Simulation endpoint — NOT YET IMPLEMENTED.
+    Use the demo_publisher.py script in the tools/ directory for full pipeline simulation.
     """
     require_internal_token(request)
-
-    global mqtt_handler
-    
-    if not mqtt_handler:
-        raise HTTPException(status_code=503, detail="Service not initialized")
-    
-    # This could trigger a simulated data flow
-    # For now, just return demo mode status
-    
-    return {
-        "message": "Use the demo_publisher.py script for full simulation",
-        "demo_mode": mqtt_handler.inference_engine.demo_mode_active
-    }
+    raise HTTPException(
+        status_code=501,
+        detail="Not implemented. Use demo_publisher.py for full simulation."
+    )
 
 
 if __name__ == "__main__":

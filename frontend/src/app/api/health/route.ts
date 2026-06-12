@@ -27,6 +27,12 @@ function toErrorMessage(error: unknown) {
   return String(error || 'Unknown error')
 }
 
+function isDetailedHealthAuthorized(request: Request) {
+  const internalToken = process.env.INTERNAL_API_TOKEN
+  const providedToken = request.headers.get('x-internal-token')
+  return Boolean(internalToken && providedToken && providedToken === internalToken)
+}
+
 function getInferenceBaseUrl() {
   return (process.env.ASCULTICOR_INFERENCE_URL || 'http://inference:8000').replace(/\/+$/, '')
 }
@@ -222,7 +228,20 @@ async function getSupabaseSummary() {
   }
 }
 
-export async function GET() {
+export async function GET(request: Request) {
+  const checkedAt = new Date().toISOString()
+  const wantsDetails = new URL(request.url).searchParams.get('details') === '1'
+  if (!wantsDetails) {
+    return jsonNoStore({
+      status: 'healthy',
+      checkedAt,
+    })
+  }
+
+  if (!isDetailedHealthAuthorized(request)) {
+    return jsonNoStore({ error: 'Unauthorized' }, 401)
+  }
+
   const [supabase, inference, metrics] = await Promise.all([
     getSupabaseSummary(),
     getInferenceHealth(),
@@ -237,9 +256,13 @@ export async function GET() {
         ? 'healthy'
         : 'degraded'
 
-  return jsonNoStore({
+  const publicPayload = {
     status,
-    checkedAt: new Date().toISOString(),
+    checkedAt,
+  }
+
+  return jsonNoStore({
+    ...publicPayload,
     services: {
       supabase: {
         status: supabase.status,

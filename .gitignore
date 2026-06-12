@@ -1,8 +1,11 @@
 # Environment variables
+# IMPORTANT: 'env' (no extension) is the production secrets file — NEVER commit it
+env
 .env
 .env.cloud
 .env.local
 .env.*.local
+.env.*
 
 # Dependencies
 node_modules/
@@ -22,6 +25,7 @@ ENV/
 *.swo
 *~
 .playwright-cli/
+
 # OS
 .DS_Store
 Thumbs.db
@@ -36,6 +40,7 @@ logs/
 .gitnexus/
 .claude/skills/gitnexus/
 .agent/
+
 # Build outputs
 dist/
 build/
@@ -52,6 +57,7 @@ inference/models/*.pth
 !inference/models/.gitkeep
 
 specs/
+
 # Data
 *.wav
 *.bin

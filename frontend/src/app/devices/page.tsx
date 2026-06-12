@@ -3,13 +3,15 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import Link from 'next/link'
 import {
-  Plus, Activity, Battery, Wifi, AlertCircle, CheckCircle,
-  Clock, ChevronRight, Cpu, X, Eye, Trash2, Copy, Check,
-  Terminal, Mic, Heart, Search, Filter, MoreVertical
+  Plus, Activity, Battery, Wifi, AlertCircle,
+  Clock, ChevronRight, Cpu, X, Eye, Trash2,
+  Mic, Heart, Search, Filter, MoreVertical
 } from 'lucide-react'
 import { PageSkeleton } from '../components/Skeleton'
 import { useToast } from '../components/Toast'
 import { GlassCard } from '../../components/ui/GlassCard'
+import { DeviceProvisioningWizard } from '../../components/devices/DeviceProvisioningWizard'
+import type { DeviceProvisioningCredentials } from '../../lib/deviceProvisioning'
 
 interface Device {
   id: string
@@ -21,31 +23,6 @@ interface Device {
   signal_strength: number
   device_groups: { name: string }
   sessions: { count: number }[]
-}
-
-interface DeviceCredentials {
-  device_id: string
-  device_secret: string
-  org_id: string
-  bootstrap_url: string
-  bootstrap_requires_host_override: boolean
-  provisioning_mode: 'bootstrap_recommended' | 'legacy_manual'
-  mqtt_host: string
-  mqtt_port: number
-  mqtt_tls: boolean
-  mqtt_lan_exposure_enabled: boolean
-  mqtt_user: string
-  mqtt_pass: string
-}
-
-function replaceLoopbackHost(url: string) {
-  try {
-    const parsed = new URL(url)
-    parsed.hostname = 'YOUR_SERVER_IP'
-    return parsed.toString()
-  } catch {
-    return 'http://YOUR_SERVER_IP/api/device/bootstrap'
-  }
 }
 
 export default function DevicesPage() {
@@ -60,8 +37,7 @@ export default function DevicesPage() {
   const [newDeviceType, setNewDeviceType] = useState('sonocardia-kit')
   const [creating, setCreating] = useState(false)
   const [deleting, setDeleting] = useState<string | null>(null)
-  const [credentials, setCredentials] = useState<DeviceCredentials | null>(null)
-  const [copiedField, setCopiedField] = useState<string | null>(null)
+  const [credentials, setCredentials] = useState<DeviceProvisioningCredentials | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState<'all' | 'online' | 'offline' | 'error'>('all')
@@ -102,6 +78,13 @@ export default function DevicesPage() {
 
   useEffect(() => {
     if (!showAddModal) return
+    if (!credentials && !newDeviceName.trim()) {
+      const timeLabel = new Date().toLocaleTimeString([], {
+        hour: '2-digit',
+        minute: '2-digit',
+      })
+      setNewDeviceName(`ESP32 USB ${timeLabel}`)
+    }
     const handleKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         setShowAddModal(false)
@@ -111,7 +94,7 @@ export default function DevicesPage() {
     window.addEventListener('keydown', handleKey)
     setTimeout(() => addFirstFieldRef.current?.focus(), 0)
     return () => window.removeEventListener('keydown', handleKey)
-  }, [showAddModal])
+  }, [credentials, newDeviceName, showAddModal])
 
   useEffect(() => {
     if (!showDeleteConfirm) return
@@ -179,24 +162,6 @@ export default function DevicesPage() {
     }
   }
 
-  const copyToClipboard = async (text: string, field: string) => {
-    try {
-      await navigator.clipboard.writeText(text)
-      setCopiedField(field)
-      setTimeout(() => setCopiedField(null), 2000)
-    } catch {
-      // Fallback for older browsers
-      const ta = document.createElement('textarea')
-      ta.value = text
-      document.body.appendChild(ta)
-      ta.select()
-      document.execCommand('copy')
-      document.body.removeChild(ta)
-      setCopiedField(field)
-      setTimeout(() => setCopiedField(null), 2000)
-    }
-  }
-
   const formatLastSeen = (date: string) => {
     if (!date) return 'Never'
     const lastSeen = new Date(date)
@@ -234,13 +199,6 @@ export default function DevicesPage() {
     }
     return labels[type] || type.toUpperCase()
   }
-  const mqttUserProvisionValue = credentials?.mqtt_user || 'asculticor'
-  const mqttPassProvisionValue = credentials?.mqtt_pass || 'YOUR_MQTT_PASSWORD'
-  const bootstrapProvisionValue = credentials?.bootstrap_url
-    ? credentials.bootstrap_requires_host_override
-      ? replaceLoopbackHost(credentials.bootstrap_url)
-      : credentials.bootstrap_url
-    : 'http://YOUR_SERVER_IP/api/device/bootstrap'
 
   if (loading) {
     return <div className="page-wrapper"><PageSkeleton /></div>
@@ -521,12 +479,14 @@ export default function DevicesPage() {
               role="dialog"
               aria-modal="true"
               aria-labelledby="add-device-title"
-              className="relative bg-[#0a0e17]/90 border border-[#00f0ff]/30 shadow-[0_0_30px_rgba(0,240,255,0.15)] rounded-2xl max-w-lg w-full p-6 fade-in max-h-[90vh] overflow-y-auto backdrop-blur-xl"
+              className={`relative bg-[#0a0e17]/90 border border-[#00f0ff]/30 shadow-[0_0_30px_rgba(0,240,255,0.15)] rounded-2xl w-full p-6 fade-in max-h-[90vh] overflow-y-auto backdrop-blur-xl ${
+                credentials ? 'max-w-5xl' : 'max-w-lg'
+              }`}
             >
               {!credentials ? (
                 <>
                   <div className="flex items-center justify-between mb-6">
-                    <h2 id="add-device-title" className="text-xl font-bold text-foreground">Add New Device</h2>
+                    <h2 id="add-device-title" className="text-xl font-bold text-foreground">Add ESP32 Device</h2>
                     <button onClick={() => setShowAddModal(false)} className="p-1 rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent transition-colors">
                       <X className="w-5 h-5" />
                     </button>
@@ -550,7 +510,7 @@ export default function DevicesPage() {
                         className="input-field"
                         ref={addFirstFieldRef}
                       />
-                      <p className="form-hint">Use a location or patient-friendly label for quick identification.</p>
+                      <p className="form-hint">A default USB label is ready; rename it only if you want a room or kit label.</p>
                     </div>
 
                     <div className="form-group">
@@ -604,194 +564,20 @@ export default function DevicesPage() {
                       <button type="button" onClick={() => setShowAddModal(false)} className="btn-ghost">Cancel</button>
                       <button type="submit" disabled={creating} className="btn-primary gap-2">
                         {creating && <Activity className="w-4 h-4 animate-spin" />}
-                        {creating ? 'Creating...' : 'Create Device'}
+                        {creating ? 'Creating...' : 'Create Device & Open USB Setup'}
                       </button>
                     </div>
                   </form>
                 </>
               ) : (
-                <>
-                  <div className="text-center mb-6">
-                    <div className="w-14 h-14 rounded-2xl bg-emerald-100 dark:bg-emerald-950/30 flex items-center justify-center mx-auto mb-3">
-                      <CheckCircle className="w-7 h-7 text-emerald-600 dark:text-emerald-400" />
-                    </div>
-                    <h2 className="text-xl font-bold text-foreground">Device Created!</h2>
-                    <p className="text-sm text-muted-foreground mt-1">Save these credentials — you&apos;ll only see them once</p>
-                  </div>
-
-                  <div className="bg-muted rounded-xl p-4 space-y-3 mb-6">
-                    {[
-                      { label: 'Device ID', value: credentials.device_id, key: 'device_id' },
-                      { label: 'Organization ID', value: credentials.org_id, key: 'org_id' },
-                      { label: 'Bootstrap URL', value: bootstrapProvisionValue, key: 'bootstrap_url' },
-                      { label: 'Device Secret', value: credentials.device_secret, key: 'secret' },
-                    ].map(item => (
-                      <div key={item.label}>
-                        <p className="text-xs font-semibold text-muted-foreground uppercase mb-1">{item.label}</p>
-                        <div className="flex items-center gap-2">
-                          <code className="flex-1 block text-sm bg-background p-2.5 rounded-lg border border-border font-mono break-all text-foreground">
-                            {item.value}
-                          </code>
-                          <button
-                            onClick={() => copyToClipboard(item.value, item.key)}
-                            className="shrink-0 p-2 rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
-                            title="Copy to clipboard"
-                          >
-                            {copiedField === item.key ? (
-                              <Check className="w-4 h-4 text-emerald-500" />
-                            ) : (
-                              <Copy className="w-4 h-4" />
-                            )}
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-
-                  <div className="rounded-xl border border-emerald-200 bg-emerald-50/80 p-4 mb-6 text-sm text-emerald-950 dark:border-emerald-900/60 dark:bg-emerald-950/20 dark:text-emerald-100">
-                    <p className="font-semibold">Recommended provisioning mode: bootstrap</p>
-                    <p className="mt-1 text-xs text-emerald-800 dark:text-emerald-200/80">
-                      The ESP32 only needs its device identity, secret, and the bootstrap URL. It will fetch this device&apos;s scoped MQTT username and password securely at boot.
-                    </p>
-                  </div>
-
-                  {!credentials.mqtt_lan_exposure_enabled && (
-                    <div className="rounded-xl border border-amber-200 bg-amber-50/80 p-4 mb-6 text-sm text-amber-950 dark:border-amber-900/60 dark:bg-amber-950/20 dark:text-amber-100">
-                      <p className="font-semibold">LAN device access is still disabled in Docker</p>
-                      <p className="mt-1 text-xs text-amber-800 dark:text-amber-200/80">
-                        Real ESP32 devices cannot reach the broker while <code>MQTT_BIND_ADDRESS</code> stays on <code>127.0.0.1</code>. Set it to <code>0.0.0.0</code> before starting Docker if the device will connect from another machine on your network.
-                      </p>
-                    </div>
-                  )}
-
-                  {/* Serial Provisioning Instructions */}
-                  <div className="rounded-xl bg-gray-900 dark:bg-gray-950 p-4 mb-6">
-                    <div className="flex items-center gap-2 mb-3">
-                      <Terminal className="w-4 h-4 text-emerald-400" />
-                      <p className="text-sm font-semibold text-white">Bootstrap Provisioning via Serial Monitor</p>
-                    </div>
-                    <p className="text-xs text-gray-400 mb-3">
-                      Open Arduino IDE Serial Monitor at 115200 baud and send these commands:
-                    </p>
-                    <div className="font-mono text-xs space-y-1">
-                      <div className="flex items-center gap-2">
-                        <span className="text-gray-500 select-none">&gt;</span>
-                        <code className="text-emerald-400">SET device_id {credentials.device_id}</code>
-                        <button
-                          onClick={() => copyToClipboard(`SET device_id ${credentials.device_id}`, 'cmd_device')}
-                          className="ml-auto shrink-0 p-1 rounded text-gray-500 hover:text-white transition-colors"
-                        >
-                          {copiedField === 'cmd_device' ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
-                        </button>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-gray-500 select-none">&gt;</span>
-                        <code className="text-emerald-400">SET device_secret {credentials.device_secret}</code>
-                        <button
-                          onClick={() => copyToClipboard(`SET device_secret ${credentials.device_secret}`, 'cmd_secret')}
-                          className="ml-auto shrink-0 p-1 rounded text-gray-500 hover:text-white transition-colors"
-                        >
-                          {copiedField === 'cmd_secret' ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
-                        </button>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-gray-500 select-none">&gt;</span>
-                        <code className="text-emerald-400">SET bootstrap_url {bootstrapProvisionValue}</code>
-                        <button
-                          onClick={() => copyToClipboard(`SET bootstrap_url ${bootstrapProvisionValue}`, 'cmd_bootstrap_url')}
-                          className="ml-auto shrink-0 p-1 rounded text-gray-500 hover:text-white transition-colors"
-                        >
-                          {copiedField === 'cmd_bootstrap_url' ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
-                        </button>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-gray-500 select-none">&gt;</span>
-                        <code className="text-yellow-400">SET wifi_ssid YOUR_WIFI_NAME</code>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-gray-500 select-none">&gt;</span>
-                        <code className="text-yellow-400">SET wifi_pass YOUR_WIFI_PASSWORD</code>
-                      </div>
-                      <div className="flex items-center gap-2 pt-1 border-t border-gray-700">
-                        <span className="text-gray-500 select-none">&gt;</span>
-                        <code className="text-blue-400">REBOOT</code>
-                      </div>
-                    </div>
-                    <p className="text-xs text-gray-500 mt-3">
-                      <span className="text-emerald-400">Green</span> = auto-filled from credentials &bull;
-                      <span className="text-yellow-400 ml-1">Yellow</span> = you need to fill in
-                    </p>
-                    <p className="text-xs text-gray-500 mt-1">
-                      The firmware will fetch <code className="text-emerald-400">org_id</code>, MQTT host, port, and this device&apos;s MQTT username and password from the bootstrap endpoint automatically.
-                    </p>
-                    <p className="text-xs text-gray-500 mt-1">
-                      If your bootstrap URL uses <code>https://</code>, configure either <code>bootstrap_tls_fingerprint</code> or <code>bootstrap_ca_pem</code> on the firmware before rebooting.
-                    </p>
-                    {credentials.bootstrap_requires_host_override && (
-                      <p className="text-xs text-amber-300 mt-1">
-                        Replace <code>YOUR_SERVER_IP</code> with the LAN IP or hostname of the machine running AscultiCor.
-                      </p>
-                    )}
-                  </div>
-
-                  <details className="rounded-xl border border-border bg-background p-4 mb-6">
-                    <summary className="cursor-pointer text-sm font-semibold text-foreground">
-                      Manual MQTT provisioning
-                    </summary>
-                    <p className="text-xs text-muted-foreground mt-3">
-                      Use this only if you intentionally want the ESP32 to store broker credentials locally instead of bootstrapping them.
-                    </p>
-                    <div className="bg-muted rounded-lg p-3 space-y-2 mt-3 font-mono text-xs">
-                      <div className="flex items-center gap-2">
-                        <span className="text-muted-foreground select-none">&gt;</span>
-                        <code className="text-foreground">SET org_id {credentials.org_id}</code>
-                        <button
-                          onClick={() => copyToClipboard(`SET org_id ${credentials.org_id}`, 'cmd_org')}
-                          className="ml-auto shrink-0 p-1 rounded text-muted-foreground hover:text-foreground transition-colors"
-                        >
-                          {copiedField === 'cmd_org' ? <Check className="w-3 h-3 text-emerald-500" /> : <Copy className="w-3 h-3" />}
-                        </button>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-muted-foreground select-none">&gt;</span>
-                        <code className="text-foreground">SET mqtt_host {credentials.mqtt_host}</code>
-                        <button
-                          onClick={() => copyToClipboard(`SET mqtt_host ${credentials.mqtt_host}`, 'cmd_mqtt_host')}
-                          className="ml-auto shrink-0 p-1 rounded text-muted-foreground hover:text-foreground transition-colors"
-                        >
-                          {copiedField === 'cmd_mqtt_host' ? <Check className="w-3 h-3 text-emerald-500" /> : <Copy className="w-3 h-3" />}
-                        </button>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-muted-foreground select-none">&gt;</span>
-                        <code className="text-foreground">SET mqtt_user {mqttUserProvisionValue}</code>
-                        <button
-                          onClick={() => copyToClipboard(`SET mqtt_user ${mqttUserProvisionValue}`, 'cmd_mqtt_user')}
-                          className="ml-auto shrink-0 p-1 rounded text-muted-foreground hover:text-foreground transition-colors"
-                        >
-                          {copiedField === 'cmd_mqtt_user' ? <Check className="w-3 h-3 text-emerald-500" /> : <Copy className="w-3 h-3" />}
-                        </button>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-muted-foreground select-none">&gt;</span>
-                        <code className="text-foreground">SET mqtt_pass {mqttPassProvisionValue}</code>
-                        <button
-                          onClick={() => copyToClipboard(`SET mqtt_pass ${mqttPassProvisionValue}`, 'cmd_mqtt_pass')}
-                          className="ml-auto shrink-0 p-1 rounded text-muted-foreground hover:text-foreground transition-colors"
-                        >
-                          {copiedField === 'cmd_mqtt_pass' ? <Check className="w-3 h-3 text-emerald-500" /> : <Copy className="w-3 h-3" />}
-                        </button>
-                      </div>
-                    </div>
-                  </details>
-
-                  <button
-                    onClick={() => { setShowAddModal(false); setCredentials(null) }}
-                    className="btn-primary w-full"
-                  >
-                    Done
-                  </button>
-                </>
+                <DeviceProvisioningWizard
+                  credentials={credentials}
+                  onDeviceRefresh={fetchDevices}
+                  onDone={() => {
+                    setShowAddModal(false)
+                    setCredentials(null)
+                  }}
+                />
               )}
             </div>
           </div>

@@ -1,4 +1,4 @@
-# AscultiCor Device Management System - Complete Guide
+﻿# AscultiCor Device Management System - Complete Guide
 
 ## Overview
 
@@ -7,70 +7,43 @@ AscultiCor now supports **unlimited ESP32 devices** with individual dashboards, 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                     AscultiCor System                           │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                 │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐                       │
-│  │ ESP32 #1 │  │ ESP32 #2 │  │ ESP32 #N │   Multiple Devices    │
-│  │ Patient  │  │ Patient  │  │ Patient  │                       │
-│  │ Room 101 │  │ Room 102 │  │ Room 10N │                       │
-│  └────┬─────┘  └────┬─────┘  └────┬─────┘                       │
-│       │             │             │                             │
-│       └─────────────┴─────────────┘                             │
-│                     │                                           │
-│                     ▼                                           │
-│          ┌──────────────────┐                                   │
-│          │   MQTT Broker    │                                   │
-│          │  (Mosquitto/AWS) │                                   │
-│          └────────┬─────────┘                                   │
-│                   │                                             │
-│       ┌───────────┼───────────┐                                 │
-│       ▼           ▼           ▼                                 │
-│  ┌─────────┐ ┌─────────┐ ┌─────────┐                            │
-│  │Inference│ │Supabase │ │Next.js  │                            │
-│  │Service  │ │Database │ │Frontend │                            │
-│  └────┬────┘ └────┬────┘ └────┬────┘                            │
-│       │           │           │                                 │
-│       └───────────┴───────────┘                                 │
-│                   │                                             │
-│                   ▼                                             │
-│          ┌──────────────────┐                                   │
-│          │   Web Dashboard  │                                   │
-│          │  (All Devices)   │                                   │
-│          └──────────────────┘                                   │
-│                                                                 │
-└─────────────────────────────────────────────────────────────────┘
+ESP32 devices
+  -> MQTT broker
+  -> Inference service
+  -> Supabase database and storage
+  -> Next.js dashboard
+
+Each registered device has its own dashboard, telemetry, sessions, alerts, and report history.
 ```
 
 ## Features
 
 ### 1. **Multi-Device Support**
-- ✅ Add unlimited ESP32 devices
-- ✅ Individual device dashboards
-- ✅ Device groups for organization
-- ✅ Polling-based status monitoring on the free-tier-compatible path
-- ✅ Battery and signal strength tracking
+- Add unlimited ESP32 devices
+- Individual device dashboards
+- Device groups for organization
+- Polling-based status monitoring on the free-tier-compatible path
+- Battery and signal strength tracking
 
 ### 2. **Individual Device Dashboards**
-- ✅ Overview of device status
-- ✅ All sessions per device
-- ✅ Telemetry data (temperature, battery, WiFi)
-- ✅ Active alerts
-- ✅ Device settings
+- Overview of device status
+- All sessions per device
+- Telemetry data (temperature, battery, WiFi)
+- Active alerts
+- Device settings
 
 ### 3. **LLM Reports**
-- ✅ Generate AI analysis per session
-- ✅ View historical reports
-- ✅ Educational insights with medical disclaimers
-- ✅ Downloadable PDF reports
+- Generate AI analysis per session
+- View historical reports
+- Educational insights with medical disclaimers
+- Downloadable PDF reports
 
 ### 4. **Device Management**
-- ✅ Add/remove devices
-- ✅ Edit device info
-- ✅ Device credentials management
-- ✅ Firmware version tracking
-- ✅ Group organization
+- Add/remove devices
+- Edit device info
+- Device credentials management
+- Firmware version tracking
+- Group organization
 
 ## Quick Start
 
@@ -364,7 +337,7 @@ Response:
 
 ### 2. Device Dashboard (`/devices/{id}`)
 Tabs:
-- **Overview**: Recent sessions, active alerts
+- Active alerts
 - **Sessions**: All recordings with LLM report buttons
 - **Telemetry**: Health metrics history
 - **Alerts**: System notifications
@@ -451,7 +424,7 @@ pio run -e device2 -- -DDEVICE_2
 Devices automatically update status via:
 - MQTT connection state
 - Heartbeat messages every 5 seconds
-- Telemetry data streaming
+- Telemetry data (temperature, battery, WiFi)
 
 ### 2. WebSocket Subscriptions
 Frontend subscribes to real-time updates:
@@ -471,7 +444,7 @@ Automatic alerts for:
 - Device goes offline
 - Low battery (< 20%)
 - Signal strength poor (< -80 dBm)
-- High temperature (> 60°C)
+- High temperature (> 60 C)
 - Errors in data transmission
 
 ## LLM Report Generation
@@ -493,14 +466,14 @@ Each report includes:
 - Educational summary of findings
 - Key observations
 - Suggested follow-up actions
-- Medical disclaimer
+**MEDICAL DISCLAIMER**: This analysis is for educational purposes only...
 - Technical notes
 
 Example Report:
 ```markdown
 ## Educational Analysis Summary
 
-**⚠️ MEDICAL DISCLAIMER**: This analysis is for educational purposes only...
+**MEDICAL DISCLAIMER**: This analysis is for educational purposes only...
 
 ### Findings Overview
 The PCG analysis indicates normal heart sounds with regular S1 and S2 patterns...
@@ -534,14 +507,14 @@ Examples:
 ### 2. Group Organization
 ```
 ICU Unit
-├── ICU Bed 1
-├── ICU Bed 2
-└── ICU Bed 3
++-- ICU Bed 1
++-- ICU Bed 2
+`-- ICU Bed 3
 
 Cardiology
-├── Room A
-├── Room B
-└── Stress Test Lab
++-- Room A
++-- Room B
+`-- Stress Test Lab
 ```
 
 ### 3. Credential Management
@@ -586,7 +559,7 @@ Cardiology
 
 ### 1. Database
 - Index all query columns
-- Archive old telemetry data
+- Telemetry data (temperature, battery, WiFi)
 - Use connection pooling
 - Monitor query performance
 
@@ -639,22 +612,22 @@ WHERE id = 'old-device-id';
 You now have a complete multi-device management system!
 
 ### Key Capabilities:
-- ✅ Add unlimited ESP32 devices
-- ✅ Individual device dashboards
-- ✅ Real-time monitoring
-- ✅ LLM reports per session
-- ✅ Device groups and organization
-- ✅ Alert system
-- ✅ Telemetry tracking
-- ✅ Full API access
+- Add unlimited ESP32 devices
+- Individual device dashboards
+- Polling-based monitoring on the free-tier-compatible path
+- LLM reports per session
+- Device groups and organization
+- Alert system
+- Telemetry tracking
+- Full API access
 
 ### Next Steps:
 1. Run the database migration
-2. Enable Realtime for new tables
+2. Verify polling-based dashboard refresh
 3. Add your first device
 4. Configure ESP32 with credentials
-5. Monitor from the dashboard!
+5. Monitor from the dashboard
 
 For questions or issues, check the troubleshooting section or review the API documentation.
 
-Happy monitoring! 🏥💓
+Happy monitoring!

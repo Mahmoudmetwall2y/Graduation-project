@@ -6,6 +6,17 @@ on:
   pull_request:
 
 jobs:
+  security-smoke:
+    name: Security regression smoke checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run security smoke checks
+        shell: pwsh
+        run: ./scripts/security-smoke.ps1
+
   frontend:
     name: Frontend lint/build
     runs-on: ubuntu-latest
@@ -80,6 +91,9 @@ jobs:
           test -f supabase/migrations/021_llm_reports_requested_by_rate_limit.sql
           test -f supabase/migrations/022_admin_only_device_insert.sql
           test -f supabase/migrations/023_delete_policies_for_sessions_and_patients.sql
+          test -f supabase/migrations/024_add_patient_email.sql
+          test -f supabase/migrations/025_auto_generate_patient_mrn.sql
+          test -f supabase/migrations/026_device_mqtt_credentials.sql
           test -f supabase/migrations/apply_this_in_supabase.sql
 
       - name: SQL script non-empty check
@@ -88,4 +102,7 @@ jobs:
           test -s supabase/migrations/021_llm_reports_requested_by_rate_limit.sql
           test -s supabase/migrations/022_admin_only_device_insert.sql
           test -s supabase/migrations/023_delete_policies_for_sessions_and_patients.sql
+          test -s supabase/migrations/024_add_patient_email.sql
+          test -s supabase/migrations/025_auto_generate_patient_mrn.sql
+          test -s supabase/migrations/026_device_mqtt_credentials.sql
           test -s supabase/migrations/apply_this_in_supabase.sql

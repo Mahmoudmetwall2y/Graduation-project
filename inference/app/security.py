@@ -25,33 +25,40 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
         response = await call_next(request)
-        
+
         # Security headers
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
-        response.headers["X-XSS-Protection"] = "1; mode=block"
+        # X-XSS-Protection is intentionally omitted: it is deprecated in modern browsers
+        # and can introduce XSS vulnerabilities in legacy IE. Use CSP instead.
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
         response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
-        
+
         # Content Security Policy
         response.headers["Content-Security-Policy"] = self.csp_policy
-        
+
         return response
 
 
 class RateLimiter:
-    """Simple in-memory rate limiter."""
-    
+    """Simple in-memory rate limiter.
+
+    IMPORTANT LIMITATION: This implementation is process-local — rate limit counters
+    reset on every container restart and are not shared across multiple inference
+    replicas. For production multi-replica deployments, replace with a Redis-backed
+    implementation (e.g., slowapi with Redis backend).
+    """
+
     def __init__(self, requests_per_minute: int = 60):
         self.requests_per_minute = requests_per_minute
         self.requests: Dict[str, List[float]] = {}
-    
+
     def is_allowed(self, client_id: str) -> bool:
         """Check if request is within rate limit."""
         now = time.time()
         minute_ago = now - 60
-        
+
         # Clean old requests
         if client_id in self.requests:
             self.requests[client_id] = [
@@ -60,15 +67,15 @@ class RateLimiter:
             ]
         else:
             self.requests[client_id] = []
-        
+
         # Check limit
         if len(self.requests[client_id]) >= self.requests_per_minute:
             return False
-        
+
         # Record request
         self.requests[client_id].append(now)
         return True
-    
+
     def reset(self, client_id: str):
         """Reset rate limit for a client."""
         self.requests.pop(client_id, None)

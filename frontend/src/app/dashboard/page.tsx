@@ -147,11 +147,18 @@ export default function Dashboard() {
         return
       }
 
-      const { data: profile } = await supabase
+      const { data: profile, error: profileError } = await supabase
         .from('profiles')
         .select('role')
         .eq('id', user.id)
         .single()
+
+      // If we can't read the profile (network error, not a role mismatch),
+      // don't lock the user out — show a degraded dashboard instead.
+      if (profileError && profileError.code !== 'PGRST116') {
+        // PGRST116 = 'no rows returned' (genuine non-admin); other errors are transient
+        console.warn('Profile fetch error (non-fatal):', profileError.message)
+      }
 
       if (profile?.role !== 'admin') {
         setIsAdmin(false)
@@ -357,9 +364,12 @@ export default function Dashboard() {
   useEffect(() => {
     fetchDashboardData()
 
-    // Polling remains the supported live path because browser MQTT topics are
-    // not produced by the backend and Supabase realtime is intentionally limited.
-    const interval = setInterval(fetchDashboardData, 5000)
+    // Poll every 15 seconds (reduced from 5s to lower Supabase query load).
+    // Each poll makes ~12 queries. At 15s cadence, 10 concurrent admins
+    // generate ~480 queries/minute — within Supabase free tier limits.
+    // TODO: Replace polling with Supabase Realtime subscriptions on sessions + devices
+    //       for instant updates without the query overhead.
+    const interval = setInterval(fetchDashboardData, 15000)
 
     return () => {
       clearInterval(interval)
@@ -537,8 +547,13 @@ export default function Dashboard() {
   // Calculate patient age string
   const getPatientAge = (dob: string | null) => {
     if (!dob) return '—'
-    const diff = Date.now() - new Date(dob).getTime()
-    const age = Math.abs(new Date(diff).getUTCFullYear() - 1970)
+    const birthDate = new Date(dob)
+    const today = new Date()
+    let age = today.getFullYear() - birthDate.getFullYear()
+    const monthDiff = today.getMonth() - birthDate.getMonth()
+    if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
+      age--
+    }
     return `${age} yrs`
   }
 
