@@ -1,4 +1,4 @@
--- Per-device MQTT credentials for broker ACL isolation.
+-- 026: Per-device MQTT credentials for broker ACL isolation.
 
 ALTER TABLE devices
   ADD COLUMN IF NOT EXISTS mqtt_username TEXT,

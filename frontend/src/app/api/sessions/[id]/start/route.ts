@@ -4,11 +4,13 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import mqtt from 'mqtt'
 
-const START_ACK_TIMEOUT_MS = 8000
+const START_ACK_TIMEOUT_MS = 15000
 const START_ACK_POLL_MS = 250
 const DEFAULT_CAPTURE_DURATION_SEC = 15
 const MIN_CAPTURE_DURATION_SEC = 8
 const MAX_CAPTURE_DURATION_SEC = 60
+const DEVICE_START_FRESH_MS = 90 * 1000
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 function sanitizeCaptureDuration(rawValue: string | undefined) {
   const parsed = Number(rawValue ?? DEFAULT_CAPTURE_DURATION_SEC)
@@ -27,6 +29,85 @@ function createServiceRoleClient() {
   }
 
   return createClient(supabaseUrl, serviceRoleKey)
+}
+
+function parseBoolean(value: string | undefined, fallback = false) {
+  if (!value) return fallback
+  return ['1', 'true', 'yes', 'on'].includes(value.toLowerCase())
+}
+
+function buildMqttUrl(hostValue: string, portValue: string | undefined, useTls: boolean) {
+  const scheme = useTls ? 'mqtts' : 'mqtt'
+  const normalizedHost = hostValue
+    .trim()
+    .replace(/^mqtts?:\/\//i, '')
+    .replace(/\/.*$/, '')
+  const port = Number(portValue || 1883)
+  const hasPort = /:\d+$/.test(normalizedHost)
+
+  return `${scheme}://${normalizedHost}${hasPort ? '' : `:${Number.isFinite(port) ? port : 1883}`}`
+}
+
+function getStartCommandBrokerUrl() {
+  const commandBrokerUrl = process.env.MQTT_COMMAND_BROKER_URL?.trim()
+  if (commandBrokerUrl) {
+    return commandBrokerUrl
+  }
+
+  const deviceBrokerHost = process.env.DEVICE_BOOTSTRAP_MQTT_HOST?.trim()
+  if (deviceBrokerHost) {
+    return buildMqttUrl(
+      deviceBrokerHost,
+      process.env.DEVICE_BOOTSTRAP_MQTT_PORT,
+      parseBoolean(process.env.DEVICE_BOOTSTRAP_MQTT_TLS)
+    )
+  }
+
+  return process.env.MQTT_BROKER_URL || 'mqtt://127.0.0.1:1883'
+}
+
+function describeBrokerTarget(brokerUrl: string) {
+  try {
+    const parsed = new URL(brokerUrl)
+    return `${parsed.hostname}${parsed.port ? `:${parsed.port}` : ''}`
+  } catch {
+    return brokerUrl.replace(/^mqtts?:\/\//i, '')
+  }
+}
+
+function getDeviceBrokerTarget() {
+  const deviceBrokerHost = process.env.DEVICE_BOOTSTRAP_MQTT_HOST?.trim()
+  if (!deviceBrokerHost) return null
+
+  return describeBrokerTarget(
+    buildMqttUrl(
+      deviceBrokerHost,
+      process.env.DEVICE_BOOTSTRAP_MQTT_PORT,
+      parseBoolean(process.env.DEVICE_BOOTSTRAP_MQTT_TLS)
+    )
+  )
+}
+
+function isFreshOnlineDevice(device: { status?: string | null; last_seen_at?: string | null } | null) {
+  if (!device || device.status !== 'online' || !device.last_seen_at) {
+    return false
+  }
+
+  const lastSeenAt = new Date(device.last_seen_at).getTime()
+  return Number.isFinite(lastSeenAt) && Date.now() - lastSeenAt <= DEVICE_START_FRESH_MS
+}
+
+function formatLastSeenAge(lastSeenAt: string | null | undefined) {
+  if (!lastSeenAt) return 'never'
+
+  const elapsedSeconds = Math.round((Date.now() - new Date(lastSeenAt).getTime()) / 1000)
+  if (!Number.isFinite(elapsedSeconds) || elapsedSeconds < 0) return 'unknown'
+  if (elapsedSeconds < 60) return `${elapsedSeconds}s ago`
+
+  const elapsedMinutes = Math.round(elapsedSeconds / 60)
+  if (elapsedMinutes < 60) return `${elapsedMinutes}m ago`
+
+  return `${Math.round(elapsedMinutes / 60)}h ago`
 }
 
 async function fetchLatestStartFailure(sessionId: string) {
@@ -65,6 +146,36 @@ async function fetchLatestStartFailure(sessionId: string) {
   } catch (error) {
     console.error('Failed to fetch latest session start failure:', error)
     return null
+  }
+}
+
+async function writeSessionAuditLog(input: {
+  orgId: string
+  userId: string
+  sessionId: string
+  action: string
+  metadata: Record<string, unknown>
+}) {
+  try {
+    const adminClient = createServiceRoleClient()
+    if (!adminClient) return
+
+    const { error } = await adminClient
+      .from('audit_logs')
+      .insert({
+        org_id: input.orgId,
+        user_id: input.userId,
+        action: input.action,
+        entity_type: 'session',
+        entity_id: input.sessionId,
+        metadata: input.metadata,
+      })
+
+    if (error) {
+      console.error(`Audit log failed (${input.action}):`, error)
+    }
+  } catch (error) {
+    console.error(`Audit log failed (${input.action}):`, error)
   }
 }
 
@@ -139,6 +250,10 @@ export async function POST(
 ) {
   try {
     const supabase = createRouteHandlerClient({ cookies })
+    if (!UUID_RE.test(params.id)) {
+      return NextResponse.json({ error: 'Invalid session id' }, { status: 400 })
+    }
+
     const { data: { session: authSession } } = await supabase.auth.getSession()
 
     if (!authSession) {
@@ -148,7 +263,7 @@ export async function POST(
     // Get the session & profile to verify access
     const { data: session, error: sessionFetchError } = await supabase
       .from('sessions')
-      .select('device_id, org_id')
+      .select('device_id, org_id, status')
       .eq('id', params.id)
       .single()
 
@@ -161,16 +276,43 @@ export async function POST(
       .select('org_id')
       .eq('id', authSession.user.id)
       .single()
-      
+
     if (!profile || profile.org_id !== session.org_id) {
        return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
+    const { data: device, error: deviceError } = await supabase
+      .from('devices')
+      .select('id, device_name, status, last_seen_at')
+      .eq('id', session.device_id)
+      .eq('org_id', session.org_id)
+      .single()
+
+    if (deviceError || !device) {
+      return NextResponse.json({ error: 'Selected device was not found for this organization.' }, { status: 404 })
+    }
+
+    if (!isFreshOnlineDevice(device)) {
+      return NextResponse.json(
+        {
+          error: `${device.device_name || 'Selected device'} is not ready for capture. Last seen: ${formatLastSeenAge(device.last_seen_at)}. Keep the ESP32 powered on, confirm MQTT is connected, then refresh devices before starting.`
+        },
+        { status: 409 }
+      )
+    }
+
     // Attempt to publish MQTT message
-    // Connect to mosquitto container (or localhost if ran standalone)
-    const brokerUrl = process.env.MQTT_BROKER_URL || 'mqtt://127.0.0.1:1883'
-    const username = process.env.MQTT_USERNAME || 'asculticor'
-    const password = process.env.MQTT_PASSWORD || 'asc_e4ccc9032dcb46eda42e427ff1b76b92'
+    // Publish to the same MQTT broker target used by the ESP32 bootstrap flow.
+    const brokerUrl = getStartCommandBrokerUrl()
+    const username = process.env.MQTT_USERNAME
+    const password = process.env.MQTT_PASSWORD
+
+    if (!username || !password) {
+      return NextResponse.json(
+        { error: 'Server misconfiguration: MQTT command credentials are missing.' },
+        { status: 500 }
+      )
+    }
 
     const requestBody = await request.json().catch(() => ({})) as { durationSec?: number | string }
     const requestedDurationRaw =
@@ -188,6 +330,18 @@ export async function POST(
 
     try {
       await publishStartCommand(brokerUrl, username, password, topic, payload)
+      await writeSessionAuditLog({
+        orgId: session.org_id,
+        userId: authSession.user.id,
+        sessionId: params.id,
+        action: 'session_start_command_published',
+        metadata: {
+          device_id: session.device_id,
+          broker_target: describeBrokerTarget(brokerUrl),
+          device_broker_target: getDeviceBrokerTarget(),
+          duration_sec: captureDurationSec,
+        },
+      })
     } catch (err) {
       console.error('MQTT start command error:', err)
       return NextResponse.json({ error: 'Failed to send start command' }, { status: 500 })
@@ -195,9 +349,30 @@ export async function POST(
 
     const status = await waitForSessionAcknowledgement(supabase, params.id)
     if (status === 'created') {
+      const commandBrokerTarget = describeBrokerTarget(brokerUrl)
+      const deviceBrokerTarget = getDeviceBrokerTarget()
+      await writeSessionAuditLog({
+        orgId: session.org_id,
+        userId: authSession.user.id,
+        sessionId: params.id,
+        action: 'session_start_no_ack',
+        metadata: {
+          device_id: session.device_id,
+          device_name: device.device_name,
+          device_last_seen_at: device.last_seen_at,
+          command_broker_target: commandBrokerTarget,
+          device_broker_target: deviceBrokerTarget,
+          duration_sec: captureDurationSec,
+        },
+      })
+
+      const brokerHint = deviceBrokerTarget && deviceBrokerTarget !== commandBrokerTarget
+        ? ` The command broker is ${commandBrokerTarget}, while the ESP32 bootstrap broker is ${deviceBrokerTarget}; align these broker settings or reprovision the ESP32.`
+        : ` Command broker: ${commandBrokerTarget}.`
+
       return NextResponse.json(
         {
-          error: 'Device did not acknowledge the start command. Check that the ESP32 is powered on, connected to MQTT, and still printing logs in Serial Monitor.'
+          error: `Device did not acknowledge the start command. The ESP32 is online, but no preflight/start metadata reached the session within ${Math.round(START_ACK_TIMEOUT_MS / 1000)} seconds.${brokerHint} Check Serial Monitor for “[MQTT] Control command: start” and confirm the broker/topic match.`
         },
         { status: 504 }
       )

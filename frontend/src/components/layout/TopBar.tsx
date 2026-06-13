@@ -3,8 +3,6 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs'
 import {
-  Moon,
-  Sun,
   User,
   Bell,
   Settings,
@@ -16,6 +14,7 @@ import {
   LogOut,
   Activity,
 } from 'lucide-react'
+import Image from 'next/image'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 
@@ -80,15 +79,15 @@ export function TopBar() {
     <header className="topbar-shell">
       <div className="topbar-row">
         <Link href="/" className="topbar-brand">
-          <div className="topbar-brand-mark">
-            <svg viewBox="0 0 24 24" className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2.25">
-              <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
-            </svg>
-          </div>
-          <div className="leading-tight">
-            <p className="topbar-brand-title">AscultiCor</p>
-            <p className="topbar-brand-sub">Pulse Intelligence</p>
-          </div>
+          <Image
+            src="/asculticor-logo-wordmark.png"
+            alt="AscultiCor"
+            width={132}
+            height={44}
+            className="block h-7 w-36 object-contain"
+            priority
+            unoptimized
+          />
         </Link>
 
         <div className="topbar-actions">

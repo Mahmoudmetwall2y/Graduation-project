@@ -1,5 +1,5 @@
 // Device Authentication Edge Function
-// Validates device credentials and returns short-lived token
+// Validates device credentials and returns device identity metadata.
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
@@ -74,12 +74,6 @@ serve(async (req) => {
       .update({ last_seen_at: new Date().toISOString() })
       .eq('id', device_id)
 
-    // Generate cryptographically secure short-lived token
-    const rawBytes = new Uint8Array(32)
-    crypto.getRandomValues(rawBytes)
-    const token = Array.from(rawBytes).map(b => b.toString(16).padStart(2, '0')).join('')
-    const expiresIn = 3600 // 1 hour
-
     // Insert audit log
     await supabase
       .from('audit_logs')
@@ -97,12 +91,9 @@ serve(async (req) => {
 
     return new Response(
       JSON.stringify({
-        device_token: token,
         org_id: device.org_id,
         device_id: device.id,
-        device_name: device.device_name,
-        expires_in: expiresIn,
-        expires_at: new Date(Date.now() + expiresIn * 1000).toISOString()
+        device_name: device.device_name
       }),
       { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )

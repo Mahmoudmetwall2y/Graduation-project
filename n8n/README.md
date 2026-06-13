@@ -15,6 +15,8 @@ This folder contains importable n8n workflow templates for the AscultiCor automa
 
 The JSON exports are generated from `generate_workflows.py`.
 
+For the supervisor-facing real-device demo sequence, use `docs/REAL_DEVICE_DEMO_RUNBOOK.md` before activating these workflows.
+
 ## Regenerate
 
 Run from the repo root:

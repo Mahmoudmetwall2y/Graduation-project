@@ -5,7 +5,6 @@ import {
   useCallback,
   useEffect,
   useImperativeHandle,
-  useMemo,
   useRef,
   useState,
 } from 'react'
@@ -35,7 +34,6 @@ interface LiveWaveformMonitorProps {
   accentGlow: string
   amplitudeRange?: [number, number]
   fallbackSampleRate: number
-  fallbackSamples: number[]
   isSessionActive: boolean
   playbackLatencyMs?: number
   sampleLabel: string
@@ -127,7 +125,6 @@ export const LiveWaveformMonitor = forwardRef<
     accentGlow,
     amplitudeRange = [-1.1, 1.1],
     fallbackSampleRate,
-    fallbackSamples,
     isSessionActive,
     playbackLatencyMs = 220,
     sampleLabel,
@@ -152,11 +149,6 @@ export const LiveWaveformMonitor = forwardRef<
   const hasLiveDataRef = useRef(false)
   const replaySnapshotRef = useRef<WaveformReplaySnapshot | null>(null)
   const [uiClock, setUiClock] = useState(Date.now())
-
-  const fallbackSnapshot = useMemo<WaveformReplaySnapshot>(() => ({
-    samples: fallbackSamples,
-    sampleRate: fallbackSampleRate,
-  }), [fallbackSampleRate, fallbackSamples])
 
   const resetBuffer = useCallback((sampleRate: number) => {
     const windowSamples = Math.max(1, Math.round(visibleDurationSec * sampleRate))
@@ -654,8 +646,6 @@ export const LiveWaveformMonitor = forwardRef<
             renderSweepCursor(ctx, width, height)
           }
         }
-      } else if (!isSessionActive) {
-        renderSnapshot(ctx, width, height, fallbackSnapshot)
       }
 
       animationFrame = window.requestAnimationFrame(renderFrame)
@@ -667,7 +657,6 @@ export const LiveWaveformMonitor = forwardRef<
     accentColor,
     accentGlow,
     amplitudeRange,
-    fallbackSnapshot,
     isSessionActive,
     playbackLatencyMs,
     sampleLabel,
@@ -692,8 +681,10 @@ export const LiveWaveformMonitor = forwardRef<
         : 'Captured trace'
       : isSessionActive
         ? 'Awaiting live signal'
-        : 'Demo fallback'
+        : 'No capture yet'
   const activeSampleRate = replaySnapshotRef.current?.sampleRate || sampleRateRef.current || fallbackSampleRate
+  const hasDisplayData = Boolean(replaySnapshotRef.current || hasLiveDataRef.current)
+  const emptyLabel = isSessionActive ? 'Waiting for ESP32 signal' : 'No captured trace'
 
   return (
     <div className="space-y-3">
@@ -702,6 +693,18 @@ export const LiveWaveformMonitor = forwardRef<
         className="relative h-[220px] overflow-hidden rounded-2xl border border-white/10 bg-slate-950/60 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.03)]"
       >
         <canvas ref={canvasRef} className="block h-full w-full" aria-label={`${sampleLabel} waveform monitor`} />
+        {!hasDisplayData && (
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center px-6 text-center">
+            <div className="rounded-xl border border-white/10 bg-slate-950/70 px-4 py-3 shadow-[0_0_24px_rgba(15,23,42,0.45)]">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-200/80">
+                {emptyLabel}
+              </p>
+              <p className="mt-1 text-[10px] uppercase tracking-[0.18em] text-slate-400/80">
+                Real ESP32 data only
+              </p>
+            </div>
+          </div>
+        )}
         <div className="pointer-events-none absolute inset-x-0 top-0 flex items-center justify-between px-4 py-3 text-[11px] uppercase tracking-[0.24em] text-slate-300/75">
           <span>{sampleLabel}</span>
           <span className={isStale ? 'text-amber-300' : 'text-slate-300/75'}>

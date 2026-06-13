@@ -45,7 +45,8 @@ services:
       - asculticor-network
     depends_on:
       mosquitto:
-        condition: service_healthy
+        # service_started (not service_healthy) — Nginx should start even if MQTT is temporarily down.
+        condition: service_started
       frontend:
         condition: service_started
       inference:
@@ -66,18 +67,18 @@ services:
       - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY:?SUPABASE_SERVICE_ROLE_KEY is required}
 
       # MQTT
-      - MQTT_BROKER=mosquitto
-      - MQTT_PORT=1883
+      - MQTT_BROKER=${MQTT_BROKER:-mosquitto}
+      - MQTT_PORT=${MQTT_PORT:-1883}
       - MQTT_USERNAME=${MQTT_USERNAME:?MQTT_USERNAME is required}
       - MQTT_PASSWORD=${MQTT_PASSWORD:?MQTT_PASSWORD is required}
       - MQTT_KEEPALIVE=60
 
-      # ML Settings
+      # ML Settings — ECG values MUST match BiLSTM training config (MIT-BIH 360Hz/300-sample)
       - PCG_SAMPLE_RATE=${PCG_SAMPLE_RATE:-22050}
       - PCG_TARGET_DURATION=${PCG_TARGET_DURATION:-10}
       - PCG_MAX_DURATION=${PCG_MAX_DURATION:-20}
-      - ECG_SAMPLE_RATE=${ECG_SAMPLE_RATE:-500}
-      - ECG_WINDOW_SIZE=${ECG_WINDOW_SIZE:-500}
+      - ECG_SAMPLE_RATE=${ECG_SAMPLE_RATE:-360}
+      - ECG_WINDOW_SIZE=${ECG_WINDOW_SIZE:-300}
       - ECG_MAX_WINDOWS=${ECG_MAX_WINDOWS:-12}
       - ECG_MAX_DURATION=${ECG_MAX_DURATION:-60}
 
@@ -93,7 +94,7 @@ services:
       - LOG_LEVEL=INFO
       - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:3001}
       - SECURITY_HEADERS_ENABLED=${SECURITY_HEADERS_ENABLED:-true}
-      - TRUSTED_HOSTS=${TRUSTED_HOSTS:-*.asculticor.com,localhost,127.0.0.1}
+      - TRUSTED_HOSTS=${TRUSTED_HOSTS:-*.asculticor.com,localhost,127.0.0.1},inference,asculticor-inference
       - INFERENCE_INTERNAL_TOKEN=${INFERENCE_INTERNAL_TOKEN:?INFERENCE_INTERNAL_TOKEN is required}
       - MODELS_DIR=/app/models
     volumes:
@@ -124,7 +125,12 @@ services:
     ports:
       - "${FRONTEND_BIND_ADDRESS:-0.0.0.0}:${FRONTEND_PORT:-3000}:3000"
     environment:
-      - MQTT_BROKER_URL=mqtt://mosquitto:1883
+      # MQTT_BROKER_URL is used by server-side Next.js API routes (internal Docker DNS)
+      - MQTT_BROKER_URL=${MQTT_BROKER_URL:-mqtt://mosquitto:1883}
+      # NEXT_PUBLIC_MQTT_WS_URL is used by the browser (must be a WebSocket URL reachable from the client)
+      # Set this to ws://your-server-ip:9001 or wss://your-domain.com/mqtt in production
+      - NEXT_PUBLIC_MQTT_WS_URL=${NEXT_PUBLIC_MQTT_WS_URL:-ws://localhost:9001}
+      - MQTT_COMMAND_BROKER_URL=${MQTT_COMMAND_BROKER_URL:-}
       - NEXT_PUBLIC_SUPABASE_URL=${SUPABASE_URL:?SUPABASE_URL is required}
       - NEXT_PUBLIC_SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY:?SUPABASE_ANON_KEY is required}
       - SUPABASE_URL=${SUPABASE_URL:?SUPABASE_URL is required}
@@ -135,6 +141,7 @@ services:
       - CLAUDE_API_KEY=${CLAUDE_API_KEY:-}
       - CLAUDE_BASE_URL=${CLAUDE_BASE_URL:-https://agentrouter.org}
       - CLAUDE_MODEL=${CLAUDE_MODEL:-claude-sonnet-4-5-20250514}
+      - N8N_EMAIL_PAYLOAD_EXPORT_ENABLED=${N8N_EMAIL_PAYLOAD_EXPORT_ENABLED:-false}
       - ASCULTICOR_ALERT_EMAIL_TO=${ASCULTICOR_ALERT_EMAIL_TO:-}
       - ASCULTICOR_ALERT_EMAIL_FROM=${ASCULTICOR_ALERT_EMAIL_FROM:-AscultiCor <alerts@localhost>}
       - ASCULTICOR_INFERENCE_URL=${ASCULTICOR_INFERENCE_URL:-http://inference:8000}
@@ -153,7 +160,9 @@ services:
       - asculticor-network
     depends_on:
       mosquitto:
-        condition: service_healthy
+        # service_started (not service_healthy) — the UI should start even if MQTT is down.
+        # MQTT failure affects data streaming only, not the application being accessible.
+        condition: service_started
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/api/health"]

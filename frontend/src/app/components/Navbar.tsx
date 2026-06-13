@@ -1,5 +1,6 @@
 'use client'
 
+import Image from 'next/image'
 import Link from 'next/link'
 import { useRouter, usePathname } from 'next/navigation'
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs'
@@ -11,7 +12,6 @@ import {
     LogOut,
     Menu,
     X,
-    Heart,
     Settings,
     Users,
     ClipboardList,
@@ -148,7 +148,6 @@ export default function Navbar({ showBackLink, backHref = '/', backLabel = '<- B
             items: [
                 { href: '/admin', label: 'Admin', icon: Shield },
                 { href: '/admin/audit', label: 'Audit Logs', icon: ShieldAlert },
-                { href: '/debug', label: 'Debug', icon: Activity },
                 { href: '/settings', label: 'Settings', icon: Settings },
             ],
         },
@@ -160,22 +159,31 @@ export default function Navbar({ showBackLink, backHref = '/', backLabel = '<- B
             <aside className={`hidden lg:flex flex-col border-r border-hud-border/50 bg-hud-surface-glass backdrop-blur-[12px] shadow-lg lg:sticky lg:top-0 lg:h-screen transition-all duration-300 z-50 ${isCollapsed ? 'w-20' : 'w-64'}`}>
                 <div className="px-5 py-5">
                     <Link href="/dashboard" className={`flex items-center gap-2.5 group ${isCollapsed ? 'justify-center' : ''}`}>
-                        <div className="relative flex items-center justify-center w-10 h-10 rounded-xl bg-gradient-to-br from-teal-500 to-teal-700 shadow-md ring-1 ring-white/20 group-hover:shadow-lg transition-shadow">
-                            <svg viewBox="0 0 32 32" className="logo-mark" aria-hidden="true">
-                                <path d="M3 16h6l2.2-6.2 3.6 12.4 2.8-7.2 1.8 1.8H29" fill="none" stroke="white" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
-                            </svg>
-                            <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-card animate-pulse" />
-                        </div>
-                        {!isCollapsed && (
-                            <span className="text-xl font-bold tracking-tight text-foreground">
-                                Asculti<span className="gradient-text">Cor</span>
-                            </span>
+                        {isCollapsed ? (
+                            <Image
+                                src="/asculticor-logo-mark.png"
+                                alt="AscultiCor"
+                                width={40}
+                                height={40}
+                                className="h-10 w-10 object-contain"
+                                priority
+                                unoptimized
+                            />
+                        ) : (
+                            <Image
+                                src="/asculticor-logo-wordmark.png"
+                                alt="AscultiCor"
+                                width={168}
+                                height={36}
+                                className="h-9 w-40 object-contain"
+                                priority
+                                unoptimized
+                            />
                         )}
                     </Link>
-                    {/* Demo Mode Indicator */}
-                    <div className={`mt-2 px-2 py-1 rounded-md bg-amber-100 dark:bg-amber-900/30 ${isCollapsed ? 'mx-auto w-fit' : ''}`} title="Demo Mode - Using simulated ML predictions">
-                        <span className="text-[10px] font-semibold text-amber-700 dark:text-amber-400 uppercase tracking-wide">
-                            {isCollapsed ? 'DEMO' : 'Demo Mode'}
+                    <div className={`mt-2 px-2 py-1 rounded-md bg-emerald-100 dark:bg-emerald-900/30 ${isCollapsed ? 'mx-auto w-fit' : ''}`} title="Real hardware workflow">
+                        <span className="text-[10px] font-semibold text-emerald-700 dark:text-emerald-400 uppercase tracking-wide">
+                            {isCollapsed ? 'HW' : 'Hardware Mode'}
                         </span>
                     </div>
                 </div>
@@ -279,13 +287,15 @@ export default function Navbar({ showBackLink, backHref = '/', backLabel = '<- B
             <div className="lg:hidden sticky top-0 z-50 border-b border-hud-border/50 bg-hud-surface-glass backdrop-blur-[12px] shadow-lg">
                 <div className="flex items-center justify-between h-16 px-4">
                     <Link href="/dashboard" className="flex items-center gap-2.5">
-                        <div className="relative flex items-center justify-center w-9 h-9 rounded-lg bg-gradient-to-br from-teal-500 to-teal-700 shadow-md ring-1 ring-white/20">
-                            <Heart className="w-5 h-5 text-white" strokeWidth={2.5} />
-                            <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-card animate-pulse" />
-                        </div>
-                        <span className="text-lg font-bold tracking-tight text-foreground">
-                            Asculti<span className="gradient-text">Cor</span>
-                        </span>
+                        <Image
+                            src="/asculticor-logo-wordmark.png"
+                            alt="AscultiCor"
+                            width={150}
+                            height={32}
+                            className="h-8 w-36 object-contain"
+                            priority
+                            unoptimized
+                        />
                     </Link>
                     <button
                         onClick={() => setMobileOpen(!mobileOpen)}
@@ -385,4 +395,3 @@ export default function Navbar({ showBackLink, backHref = '/', backLabel = '<- B
         </>
     )
 }
-

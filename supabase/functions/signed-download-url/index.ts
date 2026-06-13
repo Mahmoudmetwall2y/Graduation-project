@@ -18,6 +18,8 @@ function getCorsHeaders(req: Request) {
   }
 }
 
+const STORAGE_PATH_RE = /^[0-9a-f-]{36}\/[0-9a-f-]{36}\/(?:pcg|ecg)\/[a-zA-Z0-9._-]{1,160}$/i
+
 serve(async (req) => {
   const corsHeaders = getCorsHeaders(req)
   if (req.method === 'OPTIONS') {
@@ -73,12 +75,33 @@ serve(async (req) => {
       )
     }
 
+    if (!STORAGE_PATH_RE.test(storage_path)) {
+      return new Response(
+        JSON.stringify({ error: 'Invalid storage_path' }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
     // Verify the path belongs to user's org
     const pathOrgId = storage_path.split('/')[0]
     if (pathOrgId !== profile.org_id) {
       return new Response(
         JSON.stringify({ error: 'Access denied' }),
         { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    const { data: recording, error: recordingError } = await supabase
+      .from('recordings')
+      .select('id')
+      .eq('org_id', profile.org_id)
+      .eq('storage_path', storage_path)
+      .single()
+
+    if (recordingError || !recording) {
+      return new Response(
+        JSON.stringify({ error: 'Recording not found' }),
+        { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
 

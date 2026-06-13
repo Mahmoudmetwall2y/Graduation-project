@@ -18,6 +18,10 @@ function getCorsHeaders(req: Request) {
   }
 }
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+const SAFE_FILENAME_RE = /^[a-zA-Z0-9._-]{1,160}$/
+const ALLOWED_MODALITIES = new Set(['pcg', 'ecg'])
+
 serve(async (req) => {
   const corsHeaders = getCorsHeaders(req)
   if (req.method === 'OPTIONS') {
@@ -70,6 +74,27 @@ serve(async (req) => {
       return new Response(
         JSON.stringify({ error: 'session_id, modality, and filename are required' }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    if (!UUID_RE.test(session_id) || !ALLOWED_MODALITIES.has(modality) || !SAFE_FILENAME_RE.test(filename)) {
+      return new Response(
+        JSON.stringify({ error: 'Invalid upload request' }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    const { data: session, error: sessionError } = await supabase
+      .from('sessions')
+      .select('id')
+      .eq('id', session_id)
+      .eq('org_id', profile.org_id)
+      .single()
+
+    if (sessionError || !session) {
+      return new Response(
+        JSON.stringify({ error: 'Session not found' }),
+        { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
 

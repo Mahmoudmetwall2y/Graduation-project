@@ -82,9 +82,14 @@ class InferenceEngine:
         # tune capture windows without code edits.
         pcg_sample_rate = int(os.getenv("PCG_SAMPLE_RATE", 22050))
         pcg_target_duration = float(os.getenv("PCG_TARGET_DURATION", 10))
-        ecg_sample_rate = int(os.getenv("ECG_SAMPLE_RATE", 360))
-        ecg_window_size = int(os.getenv("ECG_WINDOW_SIZE", 300))
+        # ECG parameters — MUST match training configuration (MIT-BIH: 360 Hz, 300-sample window).
+        # The MQTT handler receives raw signal at the ESP32 capture rate (default 500 Hz) and
+        # the ECGPreprocessor resamples to 360 Hz before windowing.
+        # Changing these values requires retraining the BiLSTM model.
+        ecg_sample_rate = int(os.getenv("ECG_SAMPLE_RATE", 360))   # MIT-BIH training rate
+        ecg_window_size = int(os.getenv("ECG_WINDOW_SIZE", 300))   # matches WINDOW_SIZE in training script
         self.ecg_max_windows = int(os.getenv("ECG_MAX_WINDOWS", 12))
+
 
         self.pcg_preprocessor = PCGPreprocessor(
             sample_rate=pcg_sample_rate,
@@ -529,15 +534,19 @@ class InferenceEngine:
         return np.stack(windows, axis=0)
 
     def _format_ecg_windows(self, ecg_windows: np.ndarray) -> np.ndarray:
-        """Normalize each ECG window and format it for the BiLSTM input."""
+        """Normalize each ECG window and format it for the BiLSTM input.
+
+        Output shape: (batch, window_size, 1)
+        Matches the training configuration in training/train_ecg.py.
+        """
         normalized = []
         for window in ecg_windows:
             normalized_window = self.ecg_preprocessor._normalize(window)
             normalized.append(normalized_window)
 
         batch = np.stack(normalized, axis=0).astype(np.float32)
-        batch = np.expand_dims(batch, axis=-1)
-        batch = np.pad(batch, ((0, 0), (0, 0), (0, 1)), 'constant')
+        batch = np.expand_dims(batch, axis=-1)  # (batch, window_size, 1)
+        # NOTE: Do NOT add further padding here — training used shape (batch, window, 1)
         return batch
 
     def _estimate_heart_rate(self, ecg: np.ndarray, sample_rate: int) -> Optional[float]:

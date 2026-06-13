@@ -6,6 +6,7 @@ import bcrypt from 'bcryptjs'
 import { buildDeviceMqttCredentials } from '../../../lib/mqttCredentials'
 
 const DEVICE_OFFLINE_THRESHOLD_MS = 90 * 1000
+const VALID_DEVICE_TYPES = new Set(['esp32', 'esp32-s3', 'esp32-c3', 'custom'])
 
 function isMissingMqttCredentialColumns(error: unknown) {
   const message = JSON.stringify(error ?? '').toLowerCase()
@@ -74,6 +75,45 @@ function parseBoolean(value: string | undefined, fallback = false) {
   return ['1', 'true', 'yes', 'on'].includes(value.toLowerCase())
 }
 
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value))
+}
+
+function validateDeviceCreateBody(body: any) {
+  const deviceName = typeof body?.device_name === 'string' ? body.device_name.trim() : ''
+  const deviceType = typeof body?.device_type === 'string' && body.device_type
+    ? body.device_type
+    : 'esp32'
+  const notes = typeof body?.notes === 'string' ? body.notes.trim() : ''
+  const sensorConfig = body?.sensor_config === undefined ? {} : body.sensor_config
+
+  if (!deviceName || deviceName.length > 120) {
+    return { error: 'Device name is required and must be 120 characters or fewer.' }
+  }
+
+  if (!VALID_DEVICE_TYPES.has(deviceType)) {
+    return { error: 'Invalid device_type.' }
+  }
+
+  if (notes.length > 2000) {
+    return { error: 'Notes must be 2000 characters or fewer.' }
+  }
+
+  if (!isPlainObject(sensorConfig)) {
+    return { error: 'sensor_config must be an object.' }
+  }
+
+  return {
+    value: {
+      device_name: deviceName,
+      device_type: deviceType,
+      device_group_id: typeof body?.device_group_id === 'string' && body.device_group_id ? body.device_group_id : null,
+      notes: notes || null,
+      sensor_config: sensorConfig,
+    },
+  }
+}
+
 // GET /api/devices - List all devices
 export async function GET(request: Request) {
   try {
@@ -129,14 +169,16 @@ export async function POST(request: Request) {
     const supabase = createRouteHandlerClient({ cookies })
     const body = await request.json()
 
-    const { device_name, device_type = 'esp32', device_group_id, notes, sensor_config } = body
+    const validation = validateDeviceCreateBody(body)
 
-    if (!device_name) {
+    if ('error' in validation) {
       return NextResponse.json(
-        { error: 'Device name is required' },
+        { error: validation.error },
         { status: 400 }
       )
     }
+
+    const { device_name, device_type, device_group_id, notes, sensor_config } = validation.value
 
     // Get current user
     const { data: { user } } = await supabase.auth.getUser()

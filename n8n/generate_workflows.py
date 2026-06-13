@@ -119,7 +119,7 @@ def http_post_node(
 
 INTERNAL_HOST_HEADER = (
     "={{$env.ASCULTICOR_INTERNAL_HOST_HEADER || "
-    "($env.ASCULTICOR_PUBLIC_APP_URL || 'https://srv1621744.hstgr.cloud')"
+    "($env.ASCULTICOR_PUBLIC_APP_URL || 'http://frontend:3000')"
     ".replace(/^https?:\\/\\//, '').replace(/\\/.*$/, '')}}"
 )
 
@@ -175,7 +175,161 @@ function requiredEnv(name) {
 
 const SUPABASE_URL = requiredEnv('SUPABASE_URL').replace(/\/+$/, '');
 const SERVICE_KEY = requiredEnv('SUPABASE_SERVICE_ROLE_KEY');
-const APP_URL = env('ASCULTICOR_PUBLIC_APP_URL', env('DEVICE_BOOTSTRAP_PUBLIC_BASE_URL', 'https://srv1621744.hstgr.cloud')).replace(/\/+$/, '');
+const APP_URL = env('ASCULTICOR_PUBLIC_APP_URL', env('DEVICE_BOOTSTRAP_PUBLIC_BASE_URL', 'http://localhost:3000')).replace(/\/+$/, '');
+const EMAIL_TO = env('ASCULTICOR_ALERT_EMAIL_TO');
+const EMAIL_FROM = env('ASCULTICOR_ALERT_EMAIL_FROM', 'AscultiCor <alerts@localhost>');
+
+async function supabase(path, options = {}) {
+  const method = options.method || 'GET';
+  const headers = {
+    apikey: SERVICE_KEY,
+    Authorization: `Bearer ${SERVICE_KEY}`,
+    'Content-Type': 'application/json',
+    ...(options.headers || {}),
+  };
+  if (options.prefer) headers.Prefer = options.prefer;
+  const response = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
+    method,
+    headers,
+    body: options.body === undefined ? undefined : JSON.stringify(options.body),
+  });
+  const text = await response.text();
+  if (!response.ok) {
+    throw new Error(`${method} ${path} failed: ${response.status} ${text}`);
+  }
+  if (!text) return null;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
+  }
+}
+
+function qs(params) {
+  const out = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined && value !== null) out.append(key, String(value));
+  }
+  return out.toString();
+}
+
+function get(obj, path, fallback = undefined) {
+  return path.split('.').reduce((acc, key) => (acc && acc[key] !== undefined ? acc[key] : undefined), obj) ?? fallback;
+}
+
+function isoMinutesAgo(minutes) {
+  return new Date(Date.now() - minutes * 60 * 1000).toISOString();
+}
+
+function emailItem(subject, text, to = EMAIL_TO) {
+  if (!to) throw new Error('A recipient email is required before sending email');
+  return { json: { emailFrom: EMAIL_FROM, emailTo: to, emailSubject: subject, emailText: text } };
+}
+
+async function findOpenAlert(deviceId, sessionId, subtype) {
+  const rows = await supabase(`device_alerts?${qs({
+    select: '*',
+    device_id: `eq.${deviceId}`,
+    is_resolved: 'eq.false',
+    order: 'created_at.desc',
+    limit: 100,
+  })}`);
+  return (rows || []).find((row) => {
+    const metadata = row.metadata || {};
+    return metadata.session_id === sessionId && metadata.subtype === subtype;
+  });
+}
+
+async function insertAlert({ deviceId, orgId, alertType, severity, message, metadata }) {
+  const inserted = await supabase('device_alerts?select=*', {
+    method: 'POST',
+    prefer: 'return=representation',
+    body: {
+      device_id: deviceId,
+      org_id: orgId,
+      alert_type: alertType,
+      severity,
+      message,
+      metadata,
+      is_resolved: false,
+    },
+  });
+  return inserted?.[0];
+}
+
+async function patientForSession(session) {
+  if (!session?.patient_id) return null;
+  const rows = await supabase(`patients?${qs({ select: 'id,full_name,email', id: `eq.${session.patient_id}`, limit: 1 })}`);
+  return rows?.[0] || null;
+}
+"""
+
+
+CONNECTIVITY_JS = r"""
+function env(name, fallback = '') {
+  const value = typeof $env !== 'undefined' ? $env[name] : undefined;
+  return value === undefined || value === null || value === '' ? fallback : value;
+}
+
+const EMAIL_TO = env('ASCULTICOR_ALERT_EMAIL_TO');
+const EMAIL_FROM = env('ASCULTICOR_ALERT_EMAIL_FROM', 'AscultiCor <alerts@localhost>');
+
+function emailItem(subject, text, to = EMAIL_TO) {
+  if (!to) throw new Error('A recipient email is required before sending email');
+  return { json: { emailFrom: EMAIL_FROM, emailTo: to, emailSubject: subject, emailText: text } };
+}
+
+function firstJson(nodeName) {
+  try {
+    return $(nodeName).first().json;
+  } catch (error) {
+    return { unavailable: true, error: error.message };
+  }
+}
+
+function allJson(nodeName) {
+  try {
+    return $(nodeName).all().map((item) => item.json);
+  } catch (error) {
+    return [{ unavailable: true, error: error.message }];
+  }
+}
+
+function preview(value) {
+  return JSON.stringify(value).slice(0, 300);
+}
+
+const inference = firstJson('Inference Health');
+const frontend = firstJson('Frontend Health');
+const reports = allJson('Supabase LLM Report Sample');
+
+return [
+  emailItem(
+    'AscultiCor n8n connectivity OK',
+    [
+      'AscultiCor n8n connectivity check passed.',
+      '',
+      `Inference: ${preview(inference)}`,
+      `Frontend: ${preview(frontend)}`,
+      `Supabase llm_reports sample rows: ${reports.length}`,
+      `Checked at: ${new Date().toISOString()}`,
+    ].join('\n')
+  )
+];
+"""
+
+
+EMAILS_FROM_RESULT_JS = r"""
+const emails = Array.isArray($json.emails) ? $json.emails : [];
+
+return emails
+  .filter((item) => item && item.emailTo && item.emailSubject && item.emailText)
+  .map((item) => ({
+    json: {
+      emailFrom: item.emailFrom || '',
+      emailTo: item.emailTo,
+      emailSubject: item.emailSubject,
+      emailText: item.emailText,
 const EMAIL_TO = env('ASCULTICOR_ALERT_EMAIL_TO');
 const EMAIL_FROM = env('ASCULTICOR_ALERT_EMAIL_FROM', 'AscultiCor <alerts@localhost>');
 
@@ -337,7 +491,7 @@ return emails
 
 LLM_JS = COMMON_JS + r"""
 const CLAUDE_API_KEY = requiredEnv('CLAUDE_API_KEY');
-const CLAUDE_BASE_URL = env('CLAUDE_BASE_URL', 'https://agentrouter.org').replace(/\/+$/, '');
+const CLAUDE_BASE_URL = env('CLAUDE_BASE_URL', 'https://api.anthropic.com').replace(/\/+$/, '');
 const CLAUDE_MODEL = env('CLAUDE_MODEL', 'claude-sonnet-4-5-20250514');
 
 function confidenceFromPredictions(predictions) {
@@ -713,7 +867,7 @@ return emails;
 
 DAILY_DIGEST_JS = COMMON_JS + r"""
 const CLAUDE_API_KEY = env('CLAUDE_API_KEY');
-const CLAUDE_BASE_URL = env('CLAUDE_BASE_URL', 'https://agentrouter.org').replace(/\/+$/, '');
+const CLAUDE_BASE_URL = env('CLAUDE_BASE_URL', 'https://api.anthropic.com').replace(/\/+$/, '');
 const CLAUDE_MODEL = env('CLAUDE_MODEL', 'claude-sonnet-4-5-20250514');
 const since = isoMinutesAgo(24 * 60);
 
@@ -968,20 +1122,14 @@ def write_workflows() -> None:
             "01-process-pending-llm-reports.json",
             [
                 manual_node(),
-                schedule_node("Every Minute", minutes=1),
-                http_post_node("Process Pending Reports", frontend_action_url("process-pending", "/api/llm"), headers=internal_api_headers(), x=300, y=80),
-                code_node("Prepare LLM Report Emails", EMAILS_FROM_RESULT_JS, x=600, y=80),
-                gmail_node(x=900, y=80),
-            ],
-            {
-                "Manual Trigger": {"main": [[{"node": "Process Pending Reports", "type": "main", "index": 0}]]},
-                "Every Minute": {"main": [[{"node": "Process Pending Reports", "type": "main", "index": 0}]]},
-                "Process Pending Reports": {"main": [[{"node": "Prepare LLM Report Emails", "type": "main", "index": 0}]]},
-                "Prepare LLM Report Emails": {"main": [[{"node": "Send Gmail", "type": "main", "index": 0}]]},
-            },
-        ),
-        (
-            "02 - Clinical Alert Notifications",
+                schedule_node("Every Five Minutes", minutes=5),
+                http_post_node(
+                    "Process Pending Reports",
+                    frontend_action_url("process-pending&include_email_payloads=1", "/api/llm"),
+                    headers=internal_api_headers(),
+                    x=300,
+                    y=80,
+                ),
             "02-clinical-alert-notifications.json",
             [
                 manual_node(),

@@ -3,9 +3,31 @@ import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
 import { deriveDeviceMqttPassword } from '../../../../lib/mqttCredentials'
 
+export const runtime = 'nodejs'
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+const BOOTSTRAP_RATE_LIMIT_WINDOW_MS = 10 * 60 * 1000
+const BOOTSTRAP_RATE_LIMIT_MAX = 8
+const bootstrapAttempts = new Map<string, number[]>()
+
 function isMissingMqttCredentialColumns(error: unknown) {
   const message = JSON.stringify(error ?? '').toLowerCase()
   return message.includes('mqtt_username') || message.includes('mqtt_password_hash')
+}
+
+function clientKey(request: Request, deviceId: string) {
+  const forwardedFor = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
+  const realIp = request.headers.get('x-real-ip')?.trim()
+  return `${forwardedFor || realIp || 'unknown'}:${deviceId || 'unknown'}`
+}
+
+function isRateLimited(key: string) {
+  const now = Date.now()
+  const since = now - BOOTSTRAP_RATE_LIMIT_WINDOW_MS
+  const attempts = (bootstrapAttempts.get(key) || []).filter((time) => time > since)
+  attempts.push(now)
+  bootstrapAttempts.set(key, attempts)
+  return attempts.length > BOOTSTRAP_RATE_LIMIT_MAX
 }
 
 function getRequestOrigin(request: Request) {
@@ -54,6 +76,17 @@ export async function POST(request: Request) {
       return NextResponse.json(
         { error: 'device_id and device_secret are required' },
         { status: 400 }
+      )
+    }
+
+    if (!UUID_RE.test(deviceId)) {
+      return NextResponse.json({ error: 'Invalid device credentials' }, { status: 401 })
+    }
+
+    if (isRateLimited(clientKey(request, deviceId))) {
+      return NextResponse.json(
+        { error: 'Too many bootstrap attempts. Try again later.' },
+        { status: 429 }
       )
     }
 

@@ -49,10 +49,12 @@ Configuration notes:
 
 For existing databases, apply numbered migrations in order from
 `supabase/migrations/001_initial_schema.sql` through
-`supabase/migrations/024_device_mqtt_credentials.sql`.
+`supabase/migrations/026_device_mqtt_credentials.sql`.
 
 For a fresh one-shot bootstrap database, you can run
 `supabase/migrations/apply_this_in_supabase.sql`.
+Treat the one-shot file as a fresh-database snapshot; the numbered migrations
+remain the source of truth for existing databases.
 
 ### 3. Start all services
 
@@ -66,8 +68,8 @@ Services:
 - MQTT Broker: `mqtt://localhost:1883`
 
 Cloud/staging deployment:
-- Use [.env.cloud.example](/d:/cardiosense-project/cardiosense/.env.cloud.example:1) as the starting point
-- Follow [docs/CLOUD_VM_DEPLOYMENT.md](/d:/cardiosense-project/cardiosense/docs/CLOUD_VM_DEPLOYMENT.md:1)
+- Use `.env.cloud.example` as the starting point
+- Follow `docs/CLOUD_VM_DEPLOYMENT.md`
 
 ### 4. Process LLM report queue (async)
 
@@ -81,6 +83,10 @@ curl -X POST "http://localhost:3000/api/llm?action=process-pending" \
 Optional: enable `.github/workflows/process-llm-queue.yml` and set repository secrets:
 - `ASCULTICOR_APP_URL` (e.g., `https://your-app.example.com`)
 - `ASCULTICOR_INTERNAL_API_TOKEN`
+
+By default, the LLM queue endpoint does not return generated email/report body
+payloads. Set `N8N_EMAIL_PAYLOAD_EXPORT_ENABLED=true` and call the queue worker
+with `include_email_payloads=1` only for trusted n8n email workflows.
 
 ### 5. Login
 
@@ -100,7 +106,8 @@ asculticor/
   inference/           FastAPI ML inference service
   mosquitto/           MQTT broker
   supabase/            migrations, seed data, edge functions
-  simulator/           demo data publisher
+  n8n/                 optional workflow automation exports
+  docs/                diagrams, runbooks, and deployment notes
 ```
 
 ## Design System
@@ -115,7 +122,13 @@ cd frontend && npm ci && npm run lint && npm run typecheck && npm run build
 
 # Inference
 cd ../inference && python -m pip install -r requirements.txt && python -m compileall app
+
+# Project-specific security regression checks
+powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/security-smoke.ps1
 ```
+
+Public `/api/health` returns only a minimal status payload. Detailed health
+diagnostics require `?details=1` and the `x-internal-token` header.
 
 ## Release Checklist
 

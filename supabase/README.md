@@ -55,9 +55,13 @@ This directory contains all Supabase-related configuration for AscultiCor.
    - `migrations/021_llm_reports_requested_by_rate_limit.sql`
    - `migrations/022_admin_only_device_insert.sql`
    - `migrations/023_delete_policies_for_sessions_and_patients.sql`
+   - `migrations/024_add_patient_email.sql`
+   - `migrations/025_auto_generate_patient_mrn.sql`
+   - `migrations/026_device_mqtt_credentials.sql`
 
    Fresh bootstrap alternative:
    - Run `migrations/apply_this_in_supabase.sql` for one-shot setup on a new database.
+   - This one-shot file is a fresh-database snapshot. For existing databases, use the numbered migrations as the source of truth.
 
    Optional scheduled cleanup migration:
    - `migrations/20240101000002_live_metrics_cleanup.sql` uses `pg_cron`.
@@ -76,14 +80,10 @@ This directory contains all Supabase-related configuration for AscultiCor.
    psql "$DATABASE_URL" -f seed.sql
    ```
 
-6. **Enable Realtime** (via Dashboard):
-   - Go to Database > Replication
-   - Enable for these tables:
-     - ✅ sessions
-     - ✅ predictions
-     - ✅ murmur_severity
-     - ✅ live_metrics
-     - ✅ devices
+6. **Realtime/polling note**:
+   - The current graduation-safe path uses explicit polling in the dashboard.
+   - Do not re-enable table realtime replication unless you also validate the realtime migration path and browser behavior.
+   - Migrations `012` through `017` intentionally disable or clean up problematic realtime publication/triggers for the free-tier-compatible setup.
 
 7. **Create Storage bucket** (via Dashboard):
    - Go to Storage > New Bucket
@@ -192,20 +192,20 @@ After setup, verify everything works:
 
 ```sql
 -- Check tables exist
-SELECT table_name FROM information_schema.tables 
-WHERE table_schema = 'public' 
+SELECT table_name FROM information_schema.tables
+WHERE table_schema = 'public'
 ORDER BY table_name;
 
 -- Check RLS is enabled
-SELECT tablename, rowsecurity FROM pg_tables 
+SELECT tablename, rowsecurity FROM pg_tables
 WHERE schemaname = 'public';
 
 -- Check organization
 SELECT * FROM organizations;
 
 -- Check users
-SELECT p.id, p.full_name, p.role, o.name as org_name 
-FROM profiles p 
+SELECT p.id, p.full_name, p.role, o.name as org_name
+FROM profiles p
 JOIN organizations o ON p.org_id = o.id;
 
 -- Check devices
@@ -226,10 +226,10 @@ JOIN profiles p ON d.owner_user_id = p.id;
 - Check user's org_id matches data org_id
 - Test with service_role key (bypasses RLS)
 
-### Realtime not working
-- Ensure tables are enabled in Replication settings
-- Check WebSocket connection in browser console
-- Verify anon key has correct permissions
+### Dashboard data freshness
+- The dashboard intentionally uses polling for sessions, devices, and live metrics.
+- If data does not refresh, verify the API routes, session state, MQTT ingestion, and Supabase rows before changing realtime settings.
+- Only investigate browser WebSocket/realtime settings if you intentionally reintroduce realtime.
 
 ### Storage uploads fail
 - Check bucket exists and is private
