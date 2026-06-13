@@ -308,7 +308,7 @@ export default function SettingsPage() {
                                 <Shield className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                                 <input
                                     type="text"
-                                    value={profile?.role || 'operator'}
+                                    value={profile?.role || 'visitor'}
                                     disabled
                                     className="input-field pl-10 opacity-60 cursor-not-allowed capitalize"
                                 />

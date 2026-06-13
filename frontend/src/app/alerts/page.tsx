@@ -2,9 +2,11 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs'
+import { useRouter } from 'next/navigation'
 import { PageSkeleton } from '../components/Skeleton'
 import { Bell, CheckCircle, Filter, ShieldAlert } from 'lucide-react'
 import { DataList, DataListRow, DataListCell } from '../../components/ui/DataList'
+import { useUserRole } from '../../hooks/useUserRole'
 
 interface AlertRow {
   id: string
@@ -25,6 +27,8 @@ interface AlertRow {
 
 export default function AlertsPage() {
   const supabase = createClientComponentClient()
+  const router = useRouter()
+  const { isAdmin, loading: roleLoading } = useUserRole()
   const [alerts, setAlerts] = useState<AlertRow[]>([])
   const [loading, setLoading] = useState(true)
   const [severityFilter, setSeverityFilter] = useState<'all' | 'info' | 'warning' | 'critical'>('all')
@@ -72,8 +76,14 @@ export default function AlertsPage() {
     return true
   })
 
-  if (loading) {
+  if (loading || roleLoading) {
     return <div className="page-wrapper"><PageSkeleton /></div>
+  }
+
+  // Visitors don't have access to system alerts — redirect to sessions
+  if (!isAdmin) {
+    router.replace('/sessions')
+    return null
   }
 
   return (

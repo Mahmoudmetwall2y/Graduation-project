@@ -27,7 +27,7 @@ interface Device {
 
 export default function DevicesPage() {
   const [devices, setDevices] = useState<Device[]>([])
-  const [currentUserRole, setCurrentUserRole] = useState<string>('operator')
+  const [currentUserRole, setCurrentUserRole] = useState<string>('visitor')
   const [canCreateDevices, setCanCreateDevices] = useState(false)
   const [loading, setLoading] = useState(true)
   const [showAddModal, setShowAddModal] = useState(false)
@@ -54,7 +54,7 @@ export default function DevicesPage() {
       if (!response.ok) throw new Error('Failed to fetch devices')
       const data = await response.json()
       setDevices(data.devices || [])
-      setCurrentUserRole(data.current_user_role || 'operator')
+      setCurrentUserRole(data.current_user_role || 'visitor')
       setCanCreateDevices(Boolean(data.can_create_devices))
     } catch (error) {
       console.error('Error fetching devices:', error)
@@ -224,9 +224,9 @@ export default function DevicesPage() {
         </div>
 
         {!canCreateDevices && (
-          <div className="rounded-lg bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900/40 p-3 fade-in">
-            <p className="text-sm text-amber-800 dark:text-amber-300">
-              Device provisioning is restricted to admin users. Your role: <span className="font-semibold uppercase">{currentUserRole}</span>.
+          <div className="rounded-lg bg-hud-cyan/5 border border-hud-cyan/20 p-3 fade-in">
+            <p className="text-sm text-hud-cyan/70">
+              You are logged in as a <span className="font-semibold uppercase text-hud-cyan">{currentUserRole}</span>. Devices are pre-configured by an admin — you can view them and start sessions, but cannot register or delete devices.
             </p>
           </div>
         )}

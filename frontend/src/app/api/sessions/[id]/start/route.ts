@@ -254,9 +254,9 @@ export async function POST(
       return NextResponse.json({ error: 'Invalid session id' }, { status: 400 })
     }
 
-    const { data: { session: authSession } } = await supabase.auth.getSession()
+    const { data: { user }, error: authError } = await supabase.auth.getUser()
 
-    if (!authSession) {
+    if (authError || !user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
@@ -274,7 +274,7 @@ export async function POST(
     const { data: profile } = await supabase
       .from('profiles')
       .select('org_id')
-      .eq('id', authSession.user.id)
+      .eq('id', user.id)
       .single()
 
     if (!profile || profile.org_id !== session.org_id) {
@@ -332,7 +332,7 @@ export async function POST(
       await publishStartCommand(brokerUrl, username, password, topic, payload)
       await writeSessionAuditLog({
         orgId: session.org_id,
-        userId: authSession.user.id,
+        userId: user.id,
         sessionId: params.id,
         action: 'session_start_command_published',
         metadata: {
@@ -353,7 +353,7 @@ export async function POST(
       const deviceBrokerTarget = getDeviceBrokerTarget()
       await writeSessionAuditLog({
         orgId: session.org_id,
-        userId: authSession.user.id,
+        userId: user.id,
         sessionId: params.id,
         action: 'session_start_no_ack',
         metadata: {
