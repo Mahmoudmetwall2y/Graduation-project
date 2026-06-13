@@ -547,7 +547,7 @@ async function generateLLMReport(session: any, reportId: string, supabase: any) 
 // ── Claude API call via AgentRouter (Anthropic Messages API) ──────
 async function callClaudeAPI(prompt: string): Promise<string> {
   const apiKey = process.env.CLAUDE_API_KEY
-  const baseUrl = (process.env.CLAUDE_BASE_URL || 'https://agentrouter.org').replace(/\/+$/, '')
+  const baseUrl = (process.env.CLAUDE_BASE_URL || 'https://api.anthropic.com').replace(/\/+$/, '')
   const model = process.env.CLAUDE_MODEL || 'claude-sonnet-4-5-20250514'
 
   if (!apiKey) {

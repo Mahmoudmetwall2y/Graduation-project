@@ -20,9 +20,11 @@ import {
     ChevronLeft,
     ChevronRight,
     User,
-    Activity
+    Activity,
+    Heart,
 } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
+import { useUserRole } from '../../hooks/useUserRole'
 
 interface NavbarProps {
     showBackLink?: boolean
@@ -40,6 +42,8 @@ export default function Navbar({ showBackLink, backHref = '/', backLabel = '<- B
     const [userName, setUserName] = useState<string | null>(null)
     const [deviceStats, setDeviceStats] = useState<{ total: number; online: number }>({ total: 0, online: 0 })
     const [lastUpdate, setLastUpdate] = useState<Date | null>(null)
+
+    const { role, isAdmin, loading: roleLoading } = useUserRole()
 
     useEffect(() => {
         const saved = window.localStorage.getItem('sidebar-collapsed')
@@ -126,11 +130,13 @@ export default function Navbar({ showBackLink, backHref = '/', backLabel = '<- B
         router.refresh()
     }
 
-    const navSections = [
+    // ─── Role-aware nav sections ────────────────────────────────────────────────
+    // Admin sees everything. Visitors see a focused subset.
+    const adminNavSections = [
         {
             title: 'Core',
             items: [
-                { href: '/', label: 'Dashboard', icon: LayoutDashboard },
+                { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
                 { href: '/patients', label: 'Patients', icon: Users },
                 { href: '/devices', label: 'Devices', icon: Cpu },
                 { href: '/sessions', label: 'Sessions', icon: ClipboardList },
@@ -153,12 +159,92 @@ export default function Navbar({ showBackLink, backHref = '/', backLabel = '<- B
         },
     ]
 
+    const visitorNavSections = [
+        {
+            title: 'My Work',
+            items: [
+                { href: '/sessions', label: 'My Sessions', icon: ClipboardList },
+                { href: '/devices', label: 'Devices', icon: Cpu },
+                { href: '/reports', label: 'Reports', icon: Heart },
+            ],
+        },
+        {
+            title: 'Actions',
+            items: [
+                { href: '/session/new', label: 'New Session', icon: PlusCircle },
+            ],
+        },
+        {
+            title: 'Account',
+            items: [
+                { href: '/settings', label: 'Settings', icon: Settings },
+            ],
+        },
+    ]
+
+    // While role is loading, show a minimal set to avoid flicker
+    const navSections = roleLoading
+        ? []
+        : isAdmin
+            ? adminNavSections
+            : visitorNavSections
+
+    const roleBadge = !roleLoading && (
+        <div
+            className={`mt-2 px-2 py-1 rounded-md w-fit ${isCollapsed ? 'mx-auto' : ''} ${isAdmin
+                ? 'bg-emerald-100 dark:bg-emerald-900/30'
+                : 'bg-hud-cyan/10 border border-hud-cyan/20'
+                }`}
+            title={isAdmin ? 'Administrator' : 'Visitor — limited access'}
+        >
+            <span className={`text-[10px] font-semibold uppercase tracking-wide ${isAdmin
+                ? 'text-emerald-700 dark:text-emerald-400'
+                : 'text-hud-cyan/80'
+                }`}>
+                {isCollapsed ? (isAdmin ? 'ADM' : 'VST') : (isAdmin ? 'Administrator' : 'Visitor')}
+            </span>
+        </div>
+    )
+
+    const renderNavSections = (sections: typeof adminNavSections) => sections.map((section) => (
+        <div key={section.title}>
+            {!isCollapsed && (
+                <p className="px-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground/70 mb-2">
+                    {section.title}
+                </p>
+            )}
+            <div className="space-y-1">
+                {section.items.map((link) => {
+                    const isActive = pathname === link.href || (link.href !== '/' && pathname?.startsWith(link.href + '/'))
+                    const Icon = link.icon
+                    return (
+                        <Link
+                            key={link.href}
+                            href={link.href}
+                            title={isCollapsed ? link.label : undefined}
+                            className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-300 hover:shadow-[0_0_15px_rgba(0,240,255,0.3)] hover:border-hud-cyan/30 border border-transparent ${isActive
+                                ? 'bg-hud-cyan/10 text-hud-cyan border-hud-cyan/30 shadow-[0_0_20px_rgba(0,240,255,0.2)]'
+                                : 'text-white/60 hover:text-white hover:bg-hud-cyan/5'
+                                } ${isCollapsed ? 'justify-center' : ''}`}
+                        >
+                            {isActive && (
+                                <span className="w-1.5 h-1.5 rounded-full bg-primary mr-1" />
+                            )}
+                            <Icon className="w-4 h-4" />
+                            {!isCollapsed && link.label}
+                        </Link>
+                    )
+                })}
+            </div>
+        </div>
+    ))
+
     return (
         <>
             {/* Desktop sidebar */}
             <aside className={`hidden lg:flex flex-col border-r border-hud-border/50 bg-hud-surface-glass backdrop-blur-[12px] shadow-lg lg:sticky lg:top-0 lg:h-screen transition-all duration-300 z-50 ${isCollapsed ? 'w-20' : 'w-64'}`}>
                 <div className="px-5 py-5">
-                    <Link href="/dashboard" className={`flex items-center gap-2.5 group ${isCollapsed ? 'justify-center' : ''}`}>
+                    <Link href={isAdmin ? '/dashboard' : '/sessions'} className={`flex items-center gap-2.5 group ${isCollapsed ? 'justify-center' : ''}`}>
                         {isCollapsed ? (
                             <Image
                                 src="/asculticor-logo-mark.png"
@@ -181,49 +267,15 @@ export default function Navbar({ showBackLink, backHref = '/', backLabel = '<- B
                             />
                         )}
                     </Link>
-                    <div className={`mt-2 px-2 py-1 rounded-md bg-emerald-100 dark:bg-emerald-900/30 ${isCollapsed ? 'mx-auto w-fit' : ''}`} title="Real hardware workflow">
-                        <span className="text-[10px] font-semibold text-emerald-700 dark:text-emerald-400 uppercase tracking-wide">
-                            {isCollapsed ? 'HW' : 'Hardware Mode'}
-                        </span>
-                    </div>
+                    {roleBadge}
                 </div>
 
                 <nav className="px-3 space-y-4">
-                    {navSections.map((section) => (
-                        <div key={section.title}>
-                            {!isCollapsed && (
-                                <p className="px-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground/70 mb-2">
-                                    {section.title}
-                                </p>
-                            )}
-                            <div className="space-y-1">
-                                {section.items.map((link) => {
-                                    const isActive = pathname === link.href
-                                    const Icon = link.icon
-                                    return (
-                                        <Link
-                                            key={link.href}
-                                            href={link.href}
-                                            title={isCollapsed ? link.label : undefined}
-                                            className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-300 hover:shadow-[0_0_15px_rgba(0,240,255,0.3)] hover:border-hud-cyan/30 border border-transparent ${isActive
-                                                ? 'bg-hud-cyan/10 text-hud-cyan border-hud-cyan/30 shadow-[0_0_20px_rgba(0,240,255,0.2)]'
-                                                : 'text-white/60 hover:text-white hover:bg-hud-cyan/5'
-                                                } ${isCollapsed ? 'justify-center' : ''}`}
-                                        >
-                                            {isActive && (
-                                                <span className="w-1.5 h-1.5 rounded-full bg-primary mr-1" />
-                                            )}
-                                            <Icon className="w-4 h-4" />
-                                            {!isCollapsed && link.label}
-                                        </Link>
-                                    )
-                                })}
-                            </div>
-                        </div>
-                    ))}
+                    {renderNavSections(navSections)}
                 </nav>
 
-                {!isCollapsed && (
+                {/* Quick Actions — role-aware */}
+                {!isCollapsed && !roleLoading && (
                     <div className="px-4 mt-5">
                         <p className="px-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground/70 mb-2">
                             Quick Actions
@@ -233,10 +285,12 @@ export default function Navbar({ showBackLink, backHref = '/', backLabel = '<- B
                                 <PlusCircle className="w-4 h-4" />
                                 New Session
                             </Link>
-                            <Link href="/devices" className="btn-secondary justify-center">
-                                <Cpu className="w-4 h-4" />
-                                Add Device
-                            </Link>
+                            {isAdmin && (
+                                <Link href="/devices" className="btn-secondary justify-center">
+                                    <Cpu className="w-4 h-4" />
+                                    Add Device
+                                </Link>
+                            )}
                         </div>
                     </div>
                 )}
@@ -271,7 +325,6 @@ export default function Navbar({ showBackLink, backHref = '/', backLabel = '<- B
                         )}
                     </div>
 
-                    
                     <button
                         onClick={handleSignOut}
                         className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-white/50 hover:text-hud-red hover:bg-hud-red/10 hover:shadow-[0_0_15px_rgba(255,51,51,0.2)] transition-all duration-300 ${isCollapsed ? 'justify-center' : ''}`}
@@ -286,7 +339,7 @@ export default function Navbar({ showBackLink, backHref = '/', backLabel = '<- B
             {/* Mobile top bar */}
             <div className="lg:hidden sticky top-0 z-50 border-b border-hud-border/50 bg-hud-surface-glass backdrop-blur-[12px] shadow-lg">
                 <div className="flex items-center justify-between h-16 px-4">
-                    <Link href="/dashboard" className="flex items-center gap-2.5">
+                    <Link href={isAdmin ? '/dashboard' : '/sessions'} className="flex items-center gap-2.5">
                         <Image
                             src="/asculticor-logo-wordmark.png"
                             alt="AscultiCor"
@@ -353,10 +406,12 @@ export default function Navbar({ showBackLink, backHref = '/', backLabel = '<- B
                                     <PlusCircle className="w-4 h-4" />
                                     New Session
                                 </Link>
-                                <Link href="/devices" onClick={() => setMobileOpen(false)} className="btn-secondary justify-center">
-                                    <Cpu className="w-4 h-4" />
-                                    Add Device
-                                </Link>
+                                {isAdmin && (
+                                    <Link href="/devices" onClick={() => setMobileOpen(false)} className="btn-secondary justify-center">
+                                        <Cpu className="w-4 h-4" />
+                                        Add Device
+                                    </Link>
+                                )}
                             </div>
                         </div>
                         <div className="mt-6">
@@ -372,7 +427,7 @@ export default function Navbar({ showBackLink, backHref = '/', backLabel = '<- B
                                     <p className="text-xs text-white/60 truncate">{userEmail || 'Connected'}</p>
                                 </div>
                             </div>
-                            
+
                             <button
                                 onClick={handleSignOut}
                                 className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-white/50 hover:text-hud-red hover:bg-hud-red/10 hover:shadow-[0_0_15px_rgba(255,51,51,0.2)] transition-all duration-300 border border-transparent"

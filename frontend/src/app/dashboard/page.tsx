@@ -444,24 +444,9 @@ export default function Dashboard() {
   }
 
   if (!isAdmin && !loading && !error) {
-    return (
-      <div className="page-wrapper">
-        <div className="page-content flex flex-col items-center justify-center min-h-[60vh] space-y-4">
-          <div className="p-4 rounded-full bg-red-50/10 dark:bg-red-950/30">
-            <ShieldAlert className="w-12 h-12 text-destructive mx-auto mb-2" />
-          </div>
-          <h2 className="text-2xl font-bold text-foreground mb-2">Access Denied</h2>
-          <p className="text-muted-foreground max-w-sm text-center">
-            Admin privileges are required to view the clinical dashboard. Contact your system administrator to request access.
-          </p>
-          <div className="mt-6 flex gap-4">
-            <Link href="/" className="btn-primary">
-              Return Home
-            </Link>
-          </div>
-        </div>
-      </div>
-    )
+    // Visitors don't have dashboard access — redirect them to their sessions list
+    router.replace('/sessions')
+    return null
   }
 
 

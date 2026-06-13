@@ -97,7 +97,7 @@ async function ensureUserProfile(user: {
       id: user.id,
       org_id: orgId,
       full_name: fullName,
-      role: 'operator',
+      role: 'visitor',
     })
 
   if (insertError) {

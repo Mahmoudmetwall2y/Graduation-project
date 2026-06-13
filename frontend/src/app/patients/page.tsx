@@ -37,7 +37,7 @@ export default function PatientsPage() {
   const { showToast } = useToast()
   const [patients, setPatients] = useState<Patient[]>([])
   const [currentUserId, setCurrentUserId] = useState<string | null>(null)
-  const [currentUserRole, setCurrentUserRole] = useState<string>('operator')
+  const [currentUserRole, setCurrentUserRole] = useState<string>('visitor')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState('')

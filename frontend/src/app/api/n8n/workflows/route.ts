@@ -351,7 +351,7 @@ async function callClaudeSummary(prompt: string) {
   const apiKey = process.env.CLAUDE_API_KEY
   if (!apiKey) return null
 
-  const response = await fetch(`${env('CLAUDE_BASE_URL', 'https://agentrouter.org').replace(/\/+$/, '')}/v1/messages`, {
+  const response = await fetch(`${env('CLAUDE_BASE_URL', 'https://api.anthropic.com').replace(/\/+$/, '')}/v1/messages`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
