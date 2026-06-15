@@ -9,11 +9,32 @@ This guide is the exact rollout path for a Hostinger VPS running:
 
 It builds on the cloud files already in this repo:
 
-- [docker-compose.yml](/d:/cardiosense-project/cardiosense/docker-compose.yml:1)
-- [docker-compose.cloud.yml](/d:/cardiosense-project/cardiosense/docker-compose.cloud.yml:1)
-- [.env.cloud.example](/d:/cardiosense-project/cardiosense/.env.cloud.example:1)
+- [docker-compose.yml](../docker-compose.yml)
+- [docker-compose.cloud.yml](../docker-compose.cloud.yml)
+- [.env.cloud.example](../.env.cloud.example)
+
+---
+
+> [!CAUTION]
+> **Required overrides when using `.env.cloud.example` as your starting point.**
+> The cloud example file contains incorrect default values that **will break the system**
+> if not corrected before starting services.
+>
+> | Variable | Wrong default | Correct value | Why |
+> |---|---|---|---|
+> | `ECG_SAMPLE_RATE` | 500 | **360** | BiLSTM trained on MIT-BIH 360 Hz |
+> | `ECG_WINDOW_SIZE` | 500 | **300** | BiLSTM expects 300-sample input windows |
+> | `MQTT_BIND_ADDRESS` | 127.0.0.1 | **0.0.0.0** | ESP32 must reach VPS MQTT broker via WiFi |
+> | `MQTT_WS_BIND_ADDRESS` | 127.0.0.1 | **0.0.0.0** | Browser MQTT WebSocket proxied via NGINX |
+> | `NEXT_PUBLIC_MQTT_WS_URL` | ws://localhost:9001 | **wss://your-domain.com/mqtt** | Browser WebSocket URL |
+> | `ALLOWED_ORIGINS` | http://localhost:3000 | **https://your-domain.com** | CORS for inference service |
+>
+> Apply these fixes in your `.env` file **before** running `docker compose up`.
+
+---
 
 ## 1. DNS
+
 
 In your Hostinger DNS zone, create:
 
