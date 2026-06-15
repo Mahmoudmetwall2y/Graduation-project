@@ -50,6 +50,15 @@ async def lifespan(app: FastAPI):
         mqtt_handler = MQTTHandler()
         mqtt_handler.start()
         logger.info("MQTT handler started successfully")
+
+        # Warn loudly if demo mode is active so it is never invisible
+        if mqtt_handler.inference_engine.demo_mode_active:
+            logger.warning("=" * 60)
+            logger.warning("DEMO MODE ACTIVE — all predictions are deterministic mock values.")
+            logger.warning("Set ENABLE_DEMO_MODE=false and mount real models for real-device use.")
+            logger.warning("=" * 60)
+        else:
+            logger.info("Real inference mode active — all 3 ML models loaded.")
     except Exception as e:
         logger.error(f"Failed to start MQTT handler: {e}")
         raise
@@ -254,7 +263,7 @@ async def get_config(request: Request):
         ecg_max_duration=float(os.getenv("ECG_MAX_DURATION", 60)),
         stream_timeout_sec=int(os.getenv("STREAM_TIMEOUT_SEC", 10)),
         metrics_update_hz=float(os.getenv("METRICS_UPDATE_HZ", 10)),
-        demo_mode=os.getenv("ENABLE_DEMO_MODE", "true").lower() == "true"
+        demo_mode=os.getenv("ENABLE_DEMO_MODE", "false").lower() == "true"
     )
 
 
@@ -294,14 +303,38 @@ async def get_metrics(request: Request):
 @app.post("/simulate")
 async def simulate_inference(request: Request):
     """
-    Simulation endpoint — NOT YET IMPLEMENTED.
-    Use the demo_publisher.py script in the tools/ directory for full pipeline simulation.
+    Simulation status endpoint.
+    Full pipeline simulation requires a real ESP32 device or publishing binary
+    MQTT data on the correct session topics. See docs/REAL_DEVICE_DEMO_RUNBOOK.md.
     """
     require_internal_token(request)
-    raise HTTPException(
-        status_code=501,
-        detail="Not implemented. Use demo_publisher.py for full simulation."
-    )
+
+    global mqtt_handler
+
+    models_loaded: Dict[str, bool] = {}
+    demo_mode_active: Optional[bool] = None
+
+    if mqtt_handler:
+        engine = mqtt_handler.inference_engine
+        demo_mode_active = engine.demo_mode_active
+        models_loaded = {
+            "pcg": engine.pcg_model is not None,
+            "severity": engine.severity_model is not None,
+            "ecg": engine.ecg_model is not None,
+        }
+
+    return {
+        "status": "simulation_requires_real_device_or_mqtt_publish",
+        "message": (
+            "Direct API simulation is not available. "
+            "To run a full pipeline test, connect a real ESP32 sensor or publish "
+            "binary PCG/ECG MQTT data on the correct session topics. "
+            "See docs/REAL_DEVICE_DEMO_RUNBOOK.md for the topic format and payload spec."
+        ),
+        "demo_mode_active": demo_mode_active,
+        "models_loaded": models_loaded,
+        "docs": "docs/REAL_DEVICE_DEMO_RUNBOOK.md",
+    }
 
 
 if __name__ == "__main__":
