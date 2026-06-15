@@ -179,6 +179,9 @@ export async function POST(request: Request) {
       bootstrap_requires_host_override: isLoopbackHost(bootstrapHost),
       mqtt_lan_exposure_enabled: mqttLanExposureEnabled,
       provisioning_mode: usesPerDeviceMqtt ? 'bootstrap_recommended' : 'legacy_manual',
+      security_warning: !mqttTls
+        ? 'Bootstrap response contains MQTT credentials. Serve this endpoint over HTTPS in production to prevent cleartext credential exposure.'
+        : null,
     })
   } catch (error) {
     console.error('Error bootstrapping device credentials:', error)
