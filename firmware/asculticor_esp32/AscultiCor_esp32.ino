@@ -54,15 +54,18 @@
 #define DEFAULT_MQTT_PASS       "CHANGE_ME_IN_PRODUCTION"
 #define DEFAULT_BOOTSTRAP_URL   ""
 
-// Default device identity (overridden after web registration)
-#define DEFAULT_ORG_ID          "00000000-0000-0000-0000-000000000001"
-#define DEFAULT_DEVICE_ID       "00000000-0000-0000-0000-000000000004"
+// Default device identity — MUST be overridden via serial provisioning before use.
+// Commands: SET device_id <uuid>  and  SET device_secret <secret>
+// These placeholder values will be rejected by the inference service.
+#define DEFAULT_ORG_ID          "00000000-0000-0000-0000-000000000000"
+#define DEFAULT_DEVICE_ID       "00000000-0000-0000-0000-000000000000"
 
 // ═══════════════════════════════════════════════════════════════
 //  SAMPLING CONSTANTS
 // ═══════════════════════════════════════════════════════════════
-#define ECG_SAMPLE_RATE         500       // Hz
-#define PCG_SAMPLE_RATE         22050     // Hz
+#define ECG_SAMPLE_RATE         500       // Hz (exact: 1 MHz / 2000 timer ticks)
+#define PCG_SAMPLE_RATE         22050     // Hz (target / training rate — used for display only)
+#define PCG_ACTUAL_SAMPLE_RATE  (1000000 / 45)  // 22222 Hz — real hardware timer rate
 #define ECG_BUFFER_SIZE         500       // 1 s of ECG samples
 #define PCG_CHUNK_SAMPLES       512       // Samples per MQTT chunk
 #define DEFAULT_SESSION_DURATION_SEC 15   // Default recording window
@@ -389,6 +392,19 @@ void loadCredentials() {
   Serial.printf("  Device Secret : %s\n", strlen(device_secret) > 0 ? "***set***" : "(not set)");
   Serial.printf("  Org ID        : %s\n", org_id);
   Serial.printf("  Session Dur.  : %u sec\n", defaultSessionDurationSec);
+
+  // Warn if still running with stub (unprovisioned) UUIDs
+  if (strncmp(device_id, "00000000-0000-0000-0000-000000000000", 36) == 0) {
+    Serial.println();
+    Serial.println("[WARN] *** DEVICE NOT PROVISIONED ***");
+    Serial.println("[WARN] Device ID is the default stub. Device will be rejected by the server.");
+    Serial.println("[WARN] Run these commands in Serial Monitor to provision:");
+    Serial.println("[WARN]   SET device_id     <uuid-from-dashboard>");
+    Serial.println("[WARN]   SET device_secret <secret-from-dashboard>");
+    Serial.println("[WARN]   SET bootstrap_url http://<host-ip>/api/device/bootstrap");
+    Serial.println("[WARN]   REBOOT");
+    Serial.println();
+  }
 }
 
 void saveCredential(const char *key, const char *value) {
@@ -451,10 +467,14 @@ bool fetchBootstrapConfig() {
       secureClient.setCACert(caPem.c_str());
       Serial.println("[BOOTSTRAP] HTTPS using configured CA certificate");
     } else if (strlen(bootstrap_tls_fingerprint) > 0) {
-      // NOTE: setFingerprint() removed in ESP32 Core v3.x — falling back to insecure mode.
-      // For production, use bootstrap_ca_pem instead of fingerprint.
-      secureClient.setInsecure();
-      Serial.println("[BOOTSTRAP] WARNING: Fingerprint TLS not supported in Core v3.x — using insecure fallback");
+      // setFingerprint() was removed in ESP32 Core v3.x. This mode is no longer supported.
+      // REQUIRED ACTION: Use bootstrap_ca_pem for HTTPS bootstrap instead.
+      //   SET bootstrap_ca_pem <your-PEM-certificate>
+      // Or for local development only:
+      //   SET bootstrap_insecure true
+      Serial.println("[BOOTSTRAP] ERROR: TLS fingerprint mode is not supported on ESP32 Core v3.x.");
+      Serial.println("[BOOTSTRAP] Configure bootstrap_ca_pem, or set bootstrap_insecure=true for dev.");
+      return false;
     } else if (bootstrap_insecure) {
       secureClient.setInsecure();
       Serial.println("[BOOTSTRAP] WARNING: HTTPS bootstrap is using insecure TLS mode");
@@ -964,7 +984,7 @@ void publishSessionMeta(const char *type, const char *extraKey = nullptr,
   // Add modality-specific fields
   if (strcmp(type, "start_pcg") == 0) {
     doc["valve_position"]     = "AV";
-    doc["sample_rate_hz"]     = PCG_SAMPLE_RATE;
+    doc["sample_rate_hz"]     = PCG_ACTUAL_SAMPLE_RATE;  // 22222 Hz — actual hardware timer rate
     doc["format"]             = "pcm_s16le";
     doc["channels"]           = 1;
     doc["chunk_samples"]      = PCG_CHUNK_SAMPLES;
