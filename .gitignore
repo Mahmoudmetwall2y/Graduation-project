@@ -86,6 +86,8 @@ cache/
 frontend/.next/
 frontend/out/
 frontend/dist/
+frontend/tailwind_err.txt
+frontend/output.css
 
 # Large binary files
 *.pdf
