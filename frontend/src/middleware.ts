@@ -7,8 +7,9 @@ const PUBLIC_FILE = /\.(?:png|jpe?g|gif|webp|svg|ico)$/i
 export async function middleware(req: NextRequest) {
   const res = NextResponse.next()
   const supabase = createMiddlewareClient({ req, res })
+  const pathname = req.nextUrl.pathname
 
-  if (PUBLIC_FILE.test(req.nextUrl.pathname)) {
+  if (PUBLIC_FILE.test(pathname) || pathname.startsWith('/firmware/')) {
     return res
   }
 
@@ -16,7 +17,7 @@ export async function middleware(req: NextRequest) {
   // receive a valid token. Each individual API route is responsible for
   // verifying auth (via createServerComponentClient / createRouteHandlerClient).
   // We do NOT redirect API calls to /auth/login — that would break JSON clients.
-  if (req.nextUrl.pathname.startsWith('/api/')) {
+  if (pathname.startsWith('/api/')) {
     await supabase.auth.getSession() // Refreshes cookie if needed
     return res
   }
@@ -26,12 +27,12 @@ export async function middleware(req: NextRequest) {
   } = await supabase.auth.getSession()
 
   // Protect all non-public page routes
-  if (!session && !req.nextUrl.pathname.startsWith('/auth') && req.nextUrl.pathname !== '/') {
+  if (!session && !pathname.startsWith('/auth') && pathname !== '/') {
     return NextResponse.redirect(new URL('/auth/login', req.url))
   }
 
   // Redirect authenticated users away from auth pages → dashboard
-  if (session && req.nextUrl.pathname.startsWith('/auth')) {
+  if (session && pathname.startsWith('/auth')) {
     return NextResponse.redirect(new URL('/dashboard', req.url))
   }
 

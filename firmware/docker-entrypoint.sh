@@ -32,11 +32,16 @@ fi
 echo "${BANNER} Starting compilation (first run ~2-3 min, subsequent runs use cache)..."
 mkdir -p /build "${OUTPUT_DIR}"
 
+WORK_SKETCH_DIR="/workspace/$(basename "${SKETCH_DIR}")"
+rm -rf "${WORK_SKETCH_DIR}"
+mkdir -p "${WORK_SKETCH_DIR}"
+cp -a "${SKETCH_DIR}/." "${WORK_SKETCH_DIR}/"
+
 arduino-cli compile \
   --fqbn "${FQBN}" \
   --export-binaries \
   --output-dir /build \
-  "${SKETCH_DIR}"
+  "${WORK_SKETCH_DIR}"
 
 echo "${BANNER} Compilation successful. Locating output binaries..."
 
