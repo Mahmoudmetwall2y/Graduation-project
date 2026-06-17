@@ -418,6 +418,9 @@ export default function SessionDetailPage() {
   }, [sessionEvents])
 
   const timelineItems = useMemo(() => {
+    const items: Array<{
+      id: string
+      time: string
       title: string
       description?: string
       tone: 'info' | 'success' | 'warning' | 'neutral'

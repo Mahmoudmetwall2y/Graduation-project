@@ -84,6 +84,49 @@ export function buildProvisioningBundle(input: {
   }
 }
 
+export interface JsonProvisioningPayload {
+  cmd: 'provision'
+  device_id: string
+  device_secret: string
+  bootstrap_url: string
+  wifi_ssid: string
+  wifi_pass: string
+  /** Set to true to skip TLS certificate verification on HTTPS bootstrap — local testing only. */
+  bootstrap_insecure?: boolean
+}
+
+/**
+ * Build the JSON provisioning payload that is sent as a single JSON line to
+ * the ESP32 firmware via Web Serial. The firmware handles this with the
+ * `{"cmd":"provision",...}` handler and responds with
+ * `{"status":"ok","stage":"saved_to_nvs"}` on success.
+ */
+export function buildJsonProvisioningPayload(input: {
+  credentials: DeviceProvisioningCredentials
+  bootstrapUrl: string
+  wifiSsid: string
+  wifiPassword: string
+  bootstrapInsecure?: boolean
+}): JsonProvisioningPayload {
+  const payload: JsonProvisioningPayload = {
+    cmd: 'provision',
+    device_id: input.credentials.device_id,
+    device_secret: input.credentials.device_secret,
+    bootstrap_url: input.bootstrapUrl,
+    wifi_ssid: input.wifiSsid,
+    wifi_pass: input.wifiPassword,
+  }
+  if (input.bootstrapInsecure) {
+    payload.bootstrap_insecure = true
+  }
+  return payload
+}
+
+/**
+ * @deprecated Use buildJsonProvisioningPayload instead.
+ * The legacy SET-command protocol still works on the firmware but success
+ * detection is fragile. This wrapper is kept only for backwards compatibility.
+ */
 export function buildSerialProvisioningCommands(input: {
   credentials: DeviceProvisioningCredentials
   bootstrapUrl: string
