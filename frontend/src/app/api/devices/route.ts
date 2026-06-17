@@ -6,7 +6,7 @@ import bcrypt from 'bcryptjs'
 import { buildDeviceMqttCredentials } from '../../../lib/mqttCredentials'
 
 const DEVICE_OFFLINE_THRESHOLD_MS = 90 * 1000
-const VALID_DEVICE_TYPES = new Set(['esp32', 'esp32-s3', 'esp32-c3', 'custom'])
+const VALID_DEVICE_TYPES = new Set(['esp32', 'esp32-s3', 'esp32-c3', 'sonocardia-kit', 'custom'])
 
 function isMissingMqttCredentialColumns(error: unknown) {
   const message = JSON.stringify(error ?? '').toLowerCase()
@@ -53,9 +53,14 @@ function getRequestOrigin(request: Request) {
 }
 
 function getBootstrapBaseUrl(request: Request) {
-  const configured = process.env.DEVICE_BOOTSTRAP_PUBLIC_BASE_URL?.trim()
+  const configured = (
+    process.env.DEVICE_BOOTSTRAP_URL ||
+    process.env.NEXT_PUBLIC_DEVICE_BOOTSTRAP_URL ||
+    process.env.DEVICE_BOOTSTRAP_PUBLIC_BASE_URL ||
+    process.env.NEXT_PUBLIC_APP_URL
+  )?.trim()
   if (configured) {
-    return configured.replace(/\/$/, '')
+    return configured.replace(/\/api\/device\/bootstrap$/, '').replace(/\/$/, '')
   }
 
   return getRequestOrigin(request)
@@ -285,9 +290,22 @@ export async function POST(request: Request) {
     const bootstrapUrl = `${bootstrapBaseUrl}/api/device/bootstrap`
     const bootstrapHost = new URL(bootstrapBaseUrl).host
     const mqttHost =
-      process.env.DEVICE_BOOTSTRAP_MQTT_HOST?.trim() || stripPort(new URL(bootstrapBaseUrl).host)
-    const mqttPort = Number(process.env.DEVICE_BOOTSTRAP_MQTT_PORT || 1883)
-    const mqttTls = parseBoolean(process.env.DEVICE_BOOTSTRAP_MQTT_TLS, false)
+      process.env.MQTT_PUBLIC_HOST?.trim() ||
+      process.env.NEXT_PUBLIC_MQTT_PUBLIC_HOST?.trim() ||
+      process.env.DEVICE_BOOTSTRAP_MQTT_HOST?.trim() ||
+      stripPort(new URL(bootstrapBaseUrl).host)
+    const mqttPort = Number(
+      process.env.MQTT_PUBLIC_PORT ||
+      process.env.NEXT_PUBLIC_MQTT_PUBLIC_PORT ||
+      process.env.DEVICE_BOOTSTRAP_MQTT_PORT ||
+      1883
+    )
+    const mqttTls = parseBoolean(
+      process.env.MQTT_PUBLIC_USE_TLS ||
+      process.env.NEXT_PUBLIC_MQTT_USE_TLS ||
+      process.env.DEVICE_BOOTSTRAP_MQTT_TLS,
+      false
+    )
     const mqttLanExposureEnabled = !isLoopbackHost(
       process.env.MQTT_BIND_ADDRESS || '127.0.0.1'
     )
@@ -305,6 +323,13 @@ export async function POST(request: Request) {
         mqtt_port: mqttPort,
         mqtt_tls: mqttTls,
         mqtt_lan_exposure_enabled: mqttLanExposureEnabled,
+        firmware_version: process.env.NEXT_PUBLIC_ASCULTICOR_FIRMWARE_VERSION || '3.0.0',
+        environment: process.env.NEXT_PUBLIC_DEPLOYMENT_MODE === 'vps' ? 'vps' : 'local',
+        mqtt: {
+          host: mqttHost,
+          port: mqttPort,
+          use_tls: mqttTls,
+        },
         mqtt_user: usesPerDeviceMqtt ? mqttUsername : sharedMqttUser!,
         mqtt_pass: usesPerDeviceMqtt ? mqttPassword : sharedMqttPass!
       }

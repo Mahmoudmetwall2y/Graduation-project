@@ -20,7 +20,42 @@ This guide explains how to connect real ESP32 hardware with sensors and deploy t
                                   └─────────────────┘
 ```
 
+## ⚠️ Step 0: Expose MQTT Broker to the LAN (Required Before Powering On Hardware)
+
+> **This is the most common reason an ESP32 cannot connect.** By default, the MQTT
+> broker only listens on the loopback interface (`127.0.0.1`). A physical ESP32
+> connects to your machine's LAN IP — not loopback — so the connection is refused.
+
+### Fix (takes 30 seconds)
+
+1. Open `.env` in the project root.
+2. Change these two lines:
+   ```bash
+   MQTT_BIND_ADDRESS=0.0.0.0
+   MQTT_WS_BIND_ADDRESS=0.0.0.0
+   ```
+3. Restart the broker:
+   ```bash
+   docker compose restart mosquitto
+   ```
+4. Verify from any machine on the same LAN (or use your phone as a hotspot):
+   ```bash
+   mosquitto_pub -h 192.168.1.X -p 1883 -u asculticor -P <password> -t test -m hello
+   ```
+   Expected: no "connection refused" error.
+
+### VPS Deployment Extra Step
+
+On Hostinger VPS, you must also open port 1883 in the firewall:
+- Hostinger Control Panel → VPS → Firewall → Add Inbound Rule → TCP 1883
+
+> **Security note:** Port 1883 is plaintext MQTT. This is acceptable for a graduation
+> demo. Do not use it to transmit real patient data without adding TLS (port 8883) or a VPN.
+
+---
+
 ## Step 1: ESP32 Hardware Setup
+
 
 ### Required Components
 

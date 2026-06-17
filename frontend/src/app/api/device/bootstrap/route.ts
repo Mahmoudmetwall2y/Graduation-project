@@ -44,9 +44,14 @@ function getRequestOrigin(request: Request) {
 }
 
 function getBootstrapBaseUrl(request: Request) {
-  const configured = process.env.DEVICE_BOOTSTRAP_PUBLIC_BASE_URL?.trim()
+  const configured = (
+    process.env.DEVICE_BOOTSTRAP_URL ||
+    process.env.NEXT_PUBLIC_DEVICE_BOOTSTRAP_URL ||
+    process.env.DEVICE_BOOTSTRAP_PUBLIC_BASE_URL ||
+    process.env.NEXT_PUBLIC_APP_URL
+  )?.trim()
   if (configured) {
-    return configured.replace(/\/$/, '')
+    return configured.replace(/\/api\/device\/bootstrap$/, '').replace(/\/$/, '')
   }
 
   return getRequestOrigin(request)
@@ -74,18 +79,18 @@ export async function POST(request: Request) {
 
     if (!deviceId || !deviceSecret) {
       return NextResponse.json(
-        { error: 'device_id and device_secret are required' },
+        { status: 'error', code: 'MALFORMED_REQUEST', message: 'device_id and device_secret are required' },
         { status: 400 }
       )
     }
 
     if (!UUID_RE.test(deviceId)) {
-      return NextResponse.json({ error: 'Invalid device credentials' }, { status: 401 })
+      return NextResponse.json({ status: 'error', code: 'INVALID_DEVICE_SECRET', message: 'Device authentication failed' }, { status: 401 })
     }
 
     if (isRateLimited(clientKey(request, deviceId))) {
       return NextResponse.json(
-        { error: 'Too many bootstrap attempts. Try again later.' },
+        { status: 'error', code: 'RATE_LIMITED', message: 'Too many bootstrap attempts. Try again later.' },
         { status: 429 }
       )
     }
@@ -94,7 +99,7 @@ export async function POST(request: Request) {
     const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY
     if (!supabaseUrl || !serviceRoleKey) {
       return NextResponse.json(
-        { error: 'Server misconfiguration: device bootstrap is unavailable.' },
+        { status: 'error', code: 'SERVER_MISCONFIGURED', message: 'Device bootstrap is unavailable.' },
         { status: 500 }
       )
     }
@@ -117,12 +122,12 @@ export async function POST(request: Request) {
     const { data: device, error: deviceError } = deviceResponse
 
     if (deviceError || !device) {
-      return NextResponse.json({ error: 'Invalid device credentials' }, { status: 401 })
+      return NextResponse.json({ status: 'error', code: 'INVALID_DEVICE_SECRET', message: 'Device authentication failed' }, { status: 401 })
     }
 
     const validSecret = await bcrypt.compare(deviceSecret, device.device_secret_hash)
     if (!validSecret) {
-      return NextResponse.json({ error: 'Invalid device credentials' }, { status: 401 })
+      return NextResponse.json({ status: 'error', code: 'INVALID_DEVICE_SECRET', message: 'Device authentication failed' }, { status: 401 })
     }
 
     const usesPerDeviceMqtt = Boolean(device.mqtt_username && device.mqtt_password_hash)
@@ -135,7 +140,7 @@ export async function POST(request: Request) {
 
     if (!mqttUser || !mqttPass) {
       return NextResponse.json(
-        { error: 'Server misconfiguration: broker credentials are unavailable for this device.' },
+        { status: 'error', code: 'MQTT_CREDENTIALS_UNAVAILABLE', message: 'Broker credentials are unavailable for this device.' },
         { status: 500 }
       )
     }
@@ -144,9 +149,22 @@ export async function POST(request: Request) {
     const bootstrapUrl = `${bootstrapBaseUrl}/api/device/bootstrap`
     const bootstrapHost = new URL(bootstrapBaseUrl).host
     const mqttHost =
-      process.env.DEVICE_BOOTSTRAP_MQTT_HOST?.trim() || stripPort(new URL(bootstrapBaseUrl).host)
-    const mqttPort = Number(process.env.DEVICE_BOOTSTRAP_MQTT_PORT || 1883)
-    const mqttTls = parseBoolean(process.env.DEVICE_BOOTSTRAP_MQTT_TLS, false)
+      process.env.MQTT_PUBLIC_HOST?.trim() ||
+      process.env.NEXT_PUBLIC_MQTT_PUBLIC_HOST?.trim() ||
+      process.env.DEVICE_BOOTSTRAP_MQTT_HOST?.trim() ||
+      stripPort(new URL(bootstrapBaseUrl).host)
+    const mqttPort = Number(
+      process.env.MQTT_PUBLIC_PORT ||
+      process.env.NEXT_PUBLIC_MQTT_PUBLIC_PORT ||
+      process.env.DEVICE_BOOTSTRAP_MQTT_PORT ||
+      1883
+    )
+    const mqttTls = parseBoolean(
+      process.env.MQTT_PUBLIC_USE_TLS ||
+      process.env.NEXT_PUBLIC_MQTT_USE_TLS ||
+      process.env.DEVICE_BOOTSTRAP_MQTT_TLS,
+      false
+    )
     const mqttLanExposureEnabled = !isLoopbackHost(
       process.env.MQTT_BIND_ADDRESS || '127.0.0.1'
     )
@@ -167,9 +185,24 @@ export async function POST(request: Request) {
     })
 
     return NextResponse.json({
+      status: 'ok',
       device_id: device.id,
       org_id: device.org_id,
       device_name: device.device_name,
+      mqtt: {
+        host: mqttHost,
+        port: mqttPort,
+        username: mqttUser,
+        password: mqttPass,
+        client_id: `asculticor_${device.id}`,
+        use_tls: mqttTls,
+        topic_prefix: `org/${device.org_id}/device/${device.id}`,
+      },
+      limits: {
+        ecg_sample_rate: 500,
+        pcg_sample_rate: 22050,
+        max_session_seconds: 60,
+      },
       mqtt_host: mqttHost,
       mqtt_port: mqttPort,
       mqtt_user: mqttUser,
@@ -179,11 +212,14 @@ export async function POST(request: Request) {
       bootstrap_requires_host_override: isLoopbackHost(bootstrapHost),
       mqtt_lan_exposure_enabled: mqttLanExposureEnabled,
       provisioning_mode: usesPerDeviceMqtt ? 'bootstrap_recommended' : 'legacy_manual',
+      security_warning: !mqttTls
+        ? 'Bootstrap response contains MQTT credentials. Serve this endpoint over HTTPS in production to prevent cleartext credential exposure.'
+        : null,
     })
   } catch (error) {
     console.error('Error bootstrapping device credentials:', error)
     return NextResponse.json(
-      { error: 'Failed to bootstrap device credentials' },
+      { status: 'error', code: 'BOOTSTRAP_FAILED', message: 'Failed to bootstrap device credentials' },
       { status: 500 }
     )
   }

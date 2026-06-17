@@ -113,6 +113,31 @@ services:
       retries: 3
       start_period: 15s
 
+  # ─────────────────────────────────────────────────────────────
+  # Firmware Builder (one-shot)
+  # Compiles AscultiCor_esp32.ino with arduino-cli inside Docker.
+  # No Arduino IDE, drivers, or local toolchain required.
+  #
+  # First run:  downloads ESP32 core (~350 MB) and compiles (~2-3 min)
+  # After that: Docker image layers are cached; the entrypoint script
+  #             detects existing binaries and exits in <1 s.
+  #
+  # To force a full recompile:
+  #   docker volume rm asculticor_firmware_public
+  #   docker compose up firmware-builder
+  # ─────────────────────────────────────────────────────────────
+  firmware-builder:
+    build:
+      context: ./firmware
+      dockerfile: Dockerfile.builder
+    container_name: asculticor-firmware-builder
+    volumes:
+      # Source sketch — read-only; never baked into the image
+      - ./firmware/asculticor_esp32:/sketch:ro
+      # Output volume shared with the frontend (read-write here)
+      - firmware_public:/out
+    restart: "no"   # one-shot: exits after compilation
+
   # Frontend (Next.js)
   frontend:
     build:
@@ -158,11 +183,18 @@ services:
       - NODE_ENV=production
     networks:
       - asculticor-network
+    volumes:
+      # Firmware binaries compiled by firmware-builder and served as
+      # static files at /firmware/*.bin for the ESP Web Tools flash button.
+      - firmware_public:/app/public/firmware:ro
     depends_on:
       mosquitto:
         # service_started (not service_healthy) — the UI should start even if MQTT is down.
         # MQTT failure affects data streaming only, not the application being accessible.
         condition: service_started
+      firmware-builder:
+        # Wait for the firmware binaries to be compiled before starting.
+        condition: service_completed_successfully
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/api/health"]
@@ -178,3 +210,6 @@ volumes:
   mosquitto_data:
   mosquitto_logs:
   inference_cache:
+  # Compiled firmware binaries shared between firmware-builder and frontend.
+  # Delete this volume to force a firmware recompile on next docker compose up.
+  firmware_public:

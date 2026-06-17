@@ -19,36 +19,27 @@ import {
   XCircle,
 } from 'lucide-react'
 import {
+  buildJsonProvisioningPayload,
   buildProvisioningBundle,
-  buildSerialProvisioningCommands,
   DeviceProvisioningCredentials,
   resolveBootstrapUrl,
 } from '../../lib/deviceProvisioning'
+import {
+  isWebSerialSupported,
+  requestSerialPort,
+  sendJsonLineCommands,
+  toWebSerialErrorMessage,
+} from '../../lib/device/webSerial'
+import type { SerialResponse } from '../../lib/device/provisioning'
+import { maskSecret } from '../../lib/device/provisioning'
 
 type SerialStatus = 'idle' | 'sending' | 'sent' | 'error'
 type OnlineStatus = 'idle' | 'checking' | 'online' | 'offline' | 'error'
-
-type SerialPortLike = {
-  open(options: { baudRate: number }): Promise<void>
-  close(): Promise<void>
-  readable?: ReadableStream<Uint8Array> | null
-  writable?: WritableStream<Uint8Array> | null
-}
-
-type NavigatorWithSerial = Navigator & {
-  serial?: {
-    requestPort(): Promise<SerialPortLike>
-  }
-}
 
 interface DeviceProvisioningWizardProps {
   credentials: DeviceProvisioningCredentials
   onDone: () => void
   onDeviceRefresh?: () => void
-}
-
-function sleep(ms: number) {
-  return new Promise(resolve => setTimeout(resolve, ms))
 }
 
 function isLikelyHttps(url: string) {
@@ -63,15 +54,13 @@ function formatSerialLog(log: string) {
   return log.trim() || 'Waiting for ESP32 serial output...'
 }
 
-function toSerialErrorMessage(error: unknown) {
-  const message = error instanceof Error ? error.message : 'Failed to provision over USB.'
-  const lower = message.toLowerCase()
-
-  if (lower.includes('open') || lower.includes('permission') || lower.includes('denied')) {
-    return `${message}. Close Arduino Serial Monitor. On Linux, make sure your user can access the serial device, for example by joining the dialout group.`
-  }
-
-  return message
+function isSensorOnlySerialLine(line: string) {
+  return (
+    line.includes('AD8232 ECG ->') ||
+    line.includes('MAX9814 Mic ->') ||
+    (line.includes('signal saturated') && line.includes('wiring issue')) ||
+    /^-+$/.test(line.trim())
+  )
 }
 
 const quickSetupSteps = [
@@ -114,17 +103,16 @@ export function DeviceProvisioningWizard({
   const [pollAttempts, setPollAttempts] = useState(0)
   const [bundleCreatedAt] = useState(() => new Date().toISOString())
 
-  const serialSupported =
-    typeof navigator !== 'undefined' && Boolean((navigator as NavigatorWithSerial).serial)
+  const serialSupported = isWebSerialSupported()
 
   const bootstrapUrl = useMemo(
     () => resolveBootstrapUrl(credentials, hostOverride),
     [credentials, hostOverride]
   )
 
-  const commands = useMemo(
+  const jsonPayload = useMemo(
     () =>
-      buildSerialProvisioningCommands({
+      buildJsonProvisioningPayload({
         credentials,
         bootstrapUrl,
         wifiSsid: wifiSsid.trim() || 'YOUR_WIFI_NAME',
@@ -268,8 +256,7 @@ export function DeviceProvisioningWizard({
       return
     }
 
-    const nav = navigator as NavigatorWithSerial
-    if (!nav.serial) {
+    if (!serialSupported) {
       setSerialStatus('error')
       setSerialError('Web Serial is not available in this browser. Use Chrome or Edge.')
       return
@@ -279,84 +266,66 @@ export function DeviceProvisioningWizard({
     setSerialError(null)
     setSerialLog('')
 
-    let port: SerialPortLike | null = null
-    let writer: WritableStreamDefaultWriter<Uint8Array> | null = null
-    const readerHolder: { current: ReadableStreamDefaultReader<Uint8Array> | null } = {
-      current: null,
-    }
-    let keepReading = true
-
     try {
-      port = await nav.serial.requestPort()
-      await port.open({ baudRate: 115200 })
+      const port = await requestSerialPort()
+      // Build the actual payload with real credentials (not the preview placeholders)
+      const payload = buildJsonProvisioningPayload({
+        credentials,
+        bootstrapUrl,
+        wifiSsid: wifiSsid.trim(),
+        wifiPassword: wifiPassword.trim(),
+        bootstrapInsecure,
+      })
+      let provisioningSaved = false
 
-      const decoder = new TextDecoder()
-      const encoder = new TextEncoder()
+      await sendJsonLineCommands({
+        port,
+        // provision → status → reboot
+        commands: [payload, { cmd: 'status' }, { cmd: 'reboot' }],
+        // Extra drain time so the firmware's reboot ACK arrives before port closes
+        drainMs: 1500,
+        onLine: (line, parsed: SerialResponse | undefined) => {
+          if (isSensorOnlySerialLine(line)) return
+          // Mask secrets in the serial log
+          const safeLine = line
+            .replace(credentials.device_secret, maskSecret(credentials.device_secret))
+            .replace(wifiPassword, wifiPassword ? '********' : '')
+          setSerialLog(current => `${current}${safeLine}\n`)
+          // Detect successful save — firmware responds with stage:saved_to_nvs
+          if (parsed?.status === 'ok' && parsed.stage === 'saved_to_nvs') {
+            provisioningSaved = true
+          }
+        },
+      })
 
-      const readPromise = port.readable
-        ? (async () => {
-            readerHolder.current = port?.readable?.getReader() || null
-            while (keepReading && readerHolder.current) {
-              const { value, done } = await readerHolder.current.read()
-              if (done) break
-              if (value) {
-                setSerialLog(current => `${current}${decoder.decode(value, { stream: true })}`)
-              }
-            }
-          })()
-        : Promise.resolve()
-
-      if (!port.writable) {
-        throw new Error('Selected serial port is not writable.')
+      if (!provisioningSaved) {
+        throw new Error(
+          'The ESP32 did not confirm that provisioning was saved. ' +
+          'Make sure the board is running AscultiCor firmware, then try again.'
+        )
       }
 
-      writer = port.writable.getWriter()
-
-      for (const command of commands) {
-        setSerialLog(current => `${current}\n> ${command}\n`)
-        await writer.write(encoder.encode(`${command}\r\n`))
-        await sleep(command === 'REBOOT' ? 700 : 220)
-      }
-
-      writer.releaseLock()
-      writer = null
       setSerialStatus('sent')
       setWatchingOnline(true)
       setOnlineMessage('Waiting for the ESP32 to reboot, bootstrap, and send a heartbeat.')
-
-      await sleep(1500)
-      keepReading = false
-      await readerHolder.current?.cancel().catch(() => undefined)
-      await readPromise.catch(() => undefined)
-      readerHolder.current?.releaseLock()
-      readerHolder.current = null
-      await port.close().catch(() => undefined)
     } catch (error) {
       setSerialStatus('error')
-      setSerialError(toSerialErrorMessage(error))
-    } finally {
-      keepReading = false
-      try {
-        writer?.releaseLock()
-      } catch {
-        // Ignore stale serial locks after ESP32 reboot.
-      }
-      try {
-        await readerHolder.current?.cancel()
-        readerHolder.current?.releaseLock()
-        readerHolder.current = null
-      } catch {
-        // Ignore stale serial locks after ESP32 reboot.
-      }
-      try {
-        await port?.close()
-      } catch {
-        // Ignore close errors when the board rebooted.
-      }
+      setSerialError(toWebSerialErrorMessage(error))
     }
   }
 
-  const manualCommandsText = commands.join('\n')
+  // JSON text shown in the manual fallback panel
+  const manualJsonText = JSON.stringify(
+    buildJsonProvisioningPayload({
+      credentials,
+      bootstrapUrl,
+      wifiSsid: wifiSsid.trim() || 'YOUR_WIFI_NAME',
+      wifiPassword: wifiPassword || 'YOUR_WIFI_PASSWORD',
+      bootstrapInsecure,
+    }),
+    null,
+    2
+  )
   const provisioningPayloadText = JSON.stringify(qrBundle, null, 2)
   const tlsNeedsAttention = isLikelyHttps(bootstrapUrl) && !bootstrapInsecure
 
@@ -583,9 +552,19 @@ export function DeviceProvisioningWizard({
           </button>
 
           {serialStatus === 'sent' && (
-            <div className="mt-3 flex items-start gap-2 rounded-xl border border-emerald-400/30 bg-emerald-500/10 p-3 text-sm text-emerald-100">
-              <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
-              Commands sent. The ESP32 should reboot, fetch MQTT credentials, then appear online.
+            <div className="mt-3 rounded-xl border border-emerald-400/30 bg-emerald-500/10 p-3 text-sm text-emerald-100">
+              <div className="flex items-start gap-2">
+                <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
+                <div>
+                  <p className="font-semibold">Device provisioning was sent successfully.</p>
+                  <p className="mt-1 text-xs text-emerald-100/80">
+                    Sensors are not required to add the ESP32. Connect AD8232/MAX9814 before starting a real recording session.
+                  </p>
+                </div>
+              </div>
+              <button type="button" onClick={onDone} className="btn-primary mt-3 w-full justify-center">
+                Finish Device Setup
+              </button>
             </div>
           )}
 
@@ -667,24 +646,25 @@ export function DeviceProvisioningWizard({
           Optional manual Serial Monitor fallback
         </summary>
         <p className="mt-3 text-xs text-muted-foreground">
-          Open Arduino IDE Serial Monitor at 115200 baud and send these commands if Web Serial is unavailable.
+          Open Arduino IDE Serial Monitor at 115200 baud and paste this JSON line if Web Serial is unavailable.
+          The ESP32 will reply with <code>{'{"status":"ok","stage":"saved_to_nvs"}'}</code> on success.
         </p>
         <div className="mt-3 rounded-xl bg-slate-950 p-3">
           <div className="mb-2 flex items-center justify-between gap-2">
             <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
               <Terminal className="h-3 w-3" />
-              Commands
+              JSON Command
             </div>
             <button
               type="button"
-              onClick={() => copyToClipboard(manualCommandsText, 'commands')}
+              onClick={() => copyToClipboard(manualJsonText, 'commands')}
               className="text-xs text-slate-400 hover:text-white"
             >
-              {copiedKey === 'commands' ? 'Copied' : 'Copy All'}
+              {copiedKey === 'commands' ? 'Copied' : 'Copy'}
             </button>
           </div>
           <pre className="max-h-56 overflow-auto whitespace-pre-wrap text-xs text-emerald-300">
-            {manualCommandsText}
+            {manualJsonText}
           </pre>
         </div>
       </details>
@@ -720,7 +700,7 @@ export function DeviceProvisioningWizard({
       </details>
 
       <button type="button" onClick={onDone} className="btn-primary w-full justify-center">
-        Done
+        Done - sensors can be connected later
       </button>
     </div>
   )

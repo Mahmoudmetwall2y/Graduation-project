@@ -53,16 +53,20 @@
 #define DEFAULT_MQTT_USER       "asculticor"
 #define DEFAULT_MQTT_PASS       "CHANGE_ME_IN_PRODUCTION"
 #define DEFAULT_BOOTSTRAP_URL   ""
+#define FIRMWARE_VERSION        "3.0.0"
 
-// Default device identity (overridden after web registration)
-#define DEFAULT_ORG_ID          "00000000-0000-0000-0000-000000000001"
-#define DEFAULT_DEVICE_ID       "00000000-0000-0000-0000-000000000004"
+// Default device identity — MUST be overridden via serial provisioning before use.
+// Commands: SET device_id <uuid>  and  SET device_secret <secret>
+// These placeholder values will be rejected by the inference service.
+#define DEFAULT_ORG_ID          "00000000-0000-0000-0000-000000000000"
+#define DEFAULT_DEVICE_ID       "00000000-0000-0000-0000-000000000000"
 
 // ═══════════════════════════════════════════════════════════════
 //  SAMPLING CONSTANTS
 // ═══════════════════════════════════════════════════════════════
-#define ECG_SAMPLE_RATE         500       // Hz
-#define PCG_SAMPLE_RATE         22050     // Hz
+#define ECG_SAMPLE_RATE         500       // Hz (exact: 1 MHz / 2000 timer ticks)
+#define PCG_SAMPLE_RATE         22050     // Hz (target / training rate — used for display only)
+#define PCG_ACTUAL_SAMPLE_RATE  (1000000 / 45)  // 22222 Hz — real hardware timer rate
 #define ECG_BUFFER_SIZE         500       // 1 s of ECG samples
 #define PCG_CHUNK_SAMPLES       512       // Samples per MQTT chunk
 #define DEFAULT_SESSION_DURATION_SEC 15   // Default recording window
@@ -389,6 +393,19 @@ void loadCredentials() {
   Serial.printf("  Device Secret : %s\n", strlen(device_secret) > 0 ? "***set***" : "(not set)");
   Serial.printf("  Org ID        : %s\n", org_id);
   Serial.printf("  Session Dur.  : %u sec\n", defaultSessionDurationSec);
+
+  // Warn if still running with stub (unprovisioned) UUIDs
+  if (strncmp(device_id, "00000000-0000-0000-0000-000000000000", 36) == 0) {
+    Serial.println();
+    Serial.println("[WARN] *** DEVICE NOT PROVISIONED ***");
+    Serial.println("[WARN] Device ID is the default stub. Device will be rejected by the server.");
+    Serial.println("[WARN] Run these commands in Serial Monitor to provision:");
+    Serial.println("[WARN]   SET device_id     <uuid-from-dashboard>");
+    Serial.println("[WARN]   SET device_secret <secret-from-dashboard>");
+    Serial.println("[WARN]   SET bootstrap_url http://<host-ip>/api/device/bootstrap");
+    Serial.println("[WARN]   REBOOT");
+    Serial.println();
+  }
 }
 
 void saveCredential(const char *key, const char *value) {
@@ -412,7 +429,15 @@ void saveCredential(const char *key, const char *value) {
   }
 
   nvs.end();
-  Serial.printf("[NVS] Saved %s = %s\n", key, value);
+  if (
+    strcmp(key, "wifi_pass") == 0 ||
+    strcmp(key, "device_secret") == 0 ||
+    strcmp(key, "mqtt_pass") == 0
+  ) {
+    Serial.printf("[NVS] Saved %s = ********\n", key);
+  } else {
+    Serial.printf("[NVS] Saved %s = %s\n", key, value);
+  }
 }
 
 bool shouldUseBootstrap() {
@@ -451,10 +476,14 @@ bool fetchBootstrapConfig() {
       secureClient.setCACert(caPem.c_str());
       Serial.println("[BOOTSTRAP] HTTPS using configured CA certificate");
     } else if (strlen(bootstrap_tls_fingerprint) > 0) {
-      // NOTE: setFingerprint() removed in ESP32 Core v3.x — falling back to insecure mode.
-      // For production, use bootstrap_ca_pem instead of fingerprint.
-      secureClient.setInsecure();
-      Serial.println("[BOOTSTRAP] WARNING: Fingerprint TLS not supported in Core v3.x — using insecure fallback");
+      // setFingerprint() was removed in ESP32 Core v3.x. This mode is no longer supported.
+      // REQUIRED ACTION: Use bootstrap_ca_pem for HTTPS bootstrap instead.
+      //   SET bootstrap_ca_pem <your-PEM-certificate>
+      // Or for local development only:
+      //   SET bootstrap_insecure true
+      Serial.println("[BOOTSTRAP] ERROR: TLS fingerprint mode is not supported on ESP32 Core v3.x.");
+      Serial.println("[BOOTSTRAP] Configure bootstrap_ca_pem, or set bootstrap_insecure=true for dev.");
+      return false;
     } else if (bootstrap_insecure) {
       secureClient.setInsecure();
       Serial.println("[BOOTSTRAP] WARNING: HTTPS bootstrap is using insecure TLS mode");
@@ -499,11 +528,18 @@ bool fetchBootstrapConfig() {
     return false;
   }
 
-  const char *newMqttHost = responseDoc["mqtt_host"];
-  const char *newMqttUser = responseDoc["mqtt_user"];
-  const char *newMqttPass = responseDoc["mqtt_pass"];
+  JsonObject mqttConfig = responseDoc["mqtt"];
+  const char *flatMqttHost = responseDoc["mqtt_host"] | nullptr;
+  const char *flatMqttUser = responseDoc["mqtt_user"] | nullptr;
+  const char *flatMqttPass = responseDoc["mqtt_pass"] | nullptr;
+  const char *nestedMqttHost = mqttConfig["host"] | nullptr;
+  const char *nestedMqttUser = mqttConfig["username"] | nullptr;
+  const char *nestedMqttPass = mqttConfig["password"] | nullptr;
+  const char *newMqttHost = flatMqttHost ? flatMqttHost : nestedMqttHost;
+  const char *newMqttUser = flatMqttUser ? flatMqttUser : nestedMqttUser;
+  const char *newMqttPass = flatMqttPass ? flatMqttPass : nestedMqttPass;
   const char *newOrgId    = responseDoc["org_id"];
-  int newMqttPort         = responseDoc["mqtt_port"] | DEFAULT_MQTT_PORT;
+  int newMqttPort         = responseDoc["mqtt_port"] | (mqttConfig["port"] | DEFAULT_MQTT_PORT);
 
   if (!newMqttHost || !newMqttUser || !newMqttPass || !newOrgId) {
     Serial.println("[BOOTSTRAP] Response missing required broker fields");
@@ -537,11 +573,187 @@ void printSerialPrompt() {
   Serial.print("> ");
 }
 
+void printJsonStatus(const char *stage = "status") {
+  StaticJsonDocument<512> doc;
+  doc["status"] = "ok";
+  doc["stage"] = stage;
+  doc["firmware_version"] = FIRMWARE_VERSION;
+  doc["provisioned"] = shouldUseBootstrap();
+  doc["wifi"] = WiFi.isConnected() ? "connected" : "disconnected";
+  doc["mqtt"] = mqtt.connected() ? "connected" : "disconnected";
+  doc["device_id"] = device_id;
+  doc["ip"] = WiFi.isConnected() ? WiFi.localIP().toString() : "";
+  doc["mode"] = "real_hardware";
+  serializeJson(doc, Serial);
+  Serial.println();
+}
+
+void printJsonError(const char *code, const char *message) {
+  StaticJsonDocument<192> doc;
+  doc["status"] = "error";
+  doc["code"] = code;
+  doc["message"] = message;
+  serializeJson(doc, Serial);
+  Serial.println();
+}
+
+void printJsonPreflight(const SessionPreflightReport &report) {
+  StaticJsonDocument<768> doc;
+  doc["status"] = report.passed ? "ok" : "error";
+  doc["stage"] = "preflight";
+  doc["firmware_version"] = FIRMWARE_VERSION;
+  doc["device_id"] = device_id;
+  doc["mode"] = "real_hardware";
+  doc["message"] = report.reason;
+
+  JsonObject ecg = doc.createNestedObject("ecg");
+  ecg["sensor"] = "AD8232";
+  ecg["connected"] = report.ecg_leads_connected;
+  ecg["lead_off"] = !report.ecg_leads_connected;
+  ecg["sample_rate_hz"] = ECG_SAMPLE_RATE;
+  ecg["signal_detected"] = report.ecg_signal_present;
+  ecg["peak_to_peak_mv"] = report.ecg_peak_to_peak_mv;
+
+  JsonObject pcg = doc.createNestedObject("pcg");
+  pcg["sensor"] = "MAX9814";
+  pcg["connected"] = true;
+  pcg["sample_rate_hz"] = PCG_SAMPLE_RATE;
+  pcg["signal_detected"] = report.pcg_signal_present;
+  pcg["overflow"] = report.pcg_clipping_detected;
+  pcg["mean_abs_counts"] = report.pcg_mean_abs_counts;
+  pcg["peak_to_peak_counts"] = report.pcg_peak_to_peak_counts;
+
+  serializeJson(doc, Serial);
+  Serial.println();
+}
+
+void clearProvisioning() {
+  nvs.begin("asculticor", false);
+  nvs.remove("wifi_ssid");
+  nvs.remove("wifi_pass");
+  nvs.remove("device_id");
+  nvs.remove("device_secret");
+  nvs.remove("bootstrap_url");
+  nvs.remove("bootstrap_insecure");
+  nvs.remove("mqtt_host");
+  nvs.remove("mqtt_port");
+  nvs.remove("mqtt_user");
+  nvs.remove("mqtt_pass");
+  nvs.remove("org_id");
+  nvs.end();
+  loadCredentials();
+  buildTopicBase();
+}
+
+void saveJsonString(StaticJsonDocument<1024> &doc, const char *jsonKey, const char *nvsKey, bool required, bool *ok) {
+  const char *value = doc[jsonKey];
+  if (!value || strlen(value) == 0) {
+    if (required) {
+      *ok = false;
+    }
+    return;
+  }
+  saveCredential(nvsKey, value);
+}
+
+bool processJsonProvisioningCommand(String line) {
+  if (!line.startsWith("{")) return false;
+
+  StaticJsonDocument<1024> doc;
+  DeserializationError err = deserializeJson(doc, line);
+  if (err) {
+    printJsonError("INVALID_JSON", "Serial command was not valid JSON");
+    return true;
+  }
+
+  const char *cmd = doc["cmd"];
+  if (!cmd || strlen(cmd) == 0) {
+    printJsonError("MISSING_CMD", "JSON command requires cmd");
+    return true;
+  }
+
+  if (strcmp(cmd, "provision") == 0) {
+    bool ok = true;
+    saveJsonString(doc, "device_id", "device_id", true, &ok);
+    saveJsonString(doc, "device_secret", "device_secret", true, &ok);
+    saveJsonString(doc, "bootstrap_url", "bootstrap_url", true, &ok);
+    saveJsonString(doc, "wifi_ssid", "wifi_ssid", true, &ok);
+    saveJsonString(doc, "wifi_pass", "wifi_pass", true, &ok);
+    saveJsonString(doc, "mqtt_host", "mqtt_host", false, &ok);
+    saveJsonString(doc, "mqtt_user", "mqtt_user", false, &ok);
+    saveJsonString(doc, "mqtt_pass", "mqtt_pass", false, &ok);
+
+    int newMqttPort = doc["mqtt_port"] | 0;
+    if (newMqttPort > 0) {
+      char portBuf[8];
+      snprintf(portBuf, sizeof(portBuf), "%d", newMqttPort);
+      saveCredential("mqtt_port", portBuf);
+    }
+
+    if (!ok) {
+      printJsonError("MISSING_REQUIRED_FIELD", "Provision command requires device_id, device_secret, bootstrap_url, wifi_ssid, and wifi_pass");
+      return true;
+    }
+
+    loadCredentials();
+    buildTopicBase();
+    StaticJsonDocument<192> response;
+    response["status"] = "ok";
+    response["stage"] = "saved_to_nvs";
+    response["device_id"] = device_id;
+    response["firmware_version"] = FIRMWARE_VERSION;
+    serializeJson(response, Serial);
+    Serial.println();
+    return true;
+  }
+
+  if (strcmp(cmd, "status") == 0) {
+    printJsonStatus();
+    return true;
+  }
+
+  if (strcmp(cmd, "reset_provisioning") == 0) {
+    clearProvisioning();
+    printJsonStatus("provisioning_reset");
+    return true;
+  }
+
+  if (strcmp(cmd, "preflight") == 0 || strcmp(cmd, "test_ecg") == 0 || strcmp(cmd, "test_pcg") == 0) {
+    SessionPreflightReport report;
+    buildSessionPreflightReport(&report);
+    printJsonPreflight(report);
+    return true;
+  }
+
+  if (strcmp(cmd, "reboot") == 0) {
+    StaticJsonDocument<128> response;
+    response["status"] = "ok";
+    response["stage"] = "rebooting";
+    serializeJson(response, Serial);
+    Serial.println();
+    delay(500);
+    ESP.restart();
+    return true;
+  }
+
+  printJsonError("UNKNOWN_COMMAND", "Unsupported JSON serial command");
+  return true;
+}
+
 void processProvisioningCommand(String line) {
   line.trim();
   if (line.length() == 0) return;
 
-  Serial.printf("[PROV] Received: %s\n", line.c_str());
+  if (processJsonProvisioningCommand(line)) {
+    printSerialPrompt();
+    return;
+  }
+
+  if (line.indexOf("wifi_pass") >= 0 || line.indexOf("device_secret") >= 0 || line.indexOf("mqtt_pass") >= 0) {
+    Serial.println("[PROV] Received sensitive legacy command (masked)");
+  } else {
+    Serial.printf("[PROV] Received: %s\n", line.c_str());
+  }
 
   if (line.startsWith("SET ")) {
     int spaceIdx = line.indexOf(' ', 4);
@@ -549,7 +761,11 @@ void processProvisioningCommand(String line) {
       String key   = line.substring(4, spaceIdx);
       String value = line.substring(spaceIdx + 1);
       saveCredential(key.c_str(), value.c_str());
-      Serial.printf("[PROV] Set '%s' = '%s'. REBOOT to apply.\n", key.c_str(), value.c_str());
+      if (key == "wifi_pass" || key == "device_secret" || key == "mqtt_pass") {
+        Serial.printf("[PROV] Set '%s' = '********'. REBOOT to apply.\n", key.c_str());
+      } else {
+        Serial.printf("[PROV] Set '%s' = '%s'. REBOOT to apply.\n", key.c_str(), value.c_str());
+      }
     } else {
       Serial.println("[PROV] Usage: SET <key> <value>");
     }
@@ -558,6 +774,7 @@ void processProvisioningCommand(String line) {
     delay(500);
     ESP.restart();
   } else if (line == "STATUS") {
+    printJsonStatus();
     Serial.printf("[STATUS] WiFi: %s | MQTT: %s | Streaming: %s\n",
       WiFi.isConnected() ? "OK" : "DISCONNECTED",
       mqtt.connected() ? "OK" : "DISCONNECTED",
@@ -571,7 +788,8 @@ void processProvisioningCommand(String line) {
       bootstrap_insecure ? "insecure" : "strict");
     Serial.printf("[STATUS] Session Duration Default: %u sec\n", defaultSessionDurationSec);
   } else if (line == "HELP") {
-    Serial.println("Commands: SET <key> <value> | REBOOT | STATUS | HELP");
+    Serial.println("Commands: JSON lines {\"cmd\":\"provision\"} | SET <key> <value> | REBOOT | STATUS | HELP");
+    Serial.println("JSON commands: provision, reboot, status, reset_provisioning, preflight, test_ecg, test_pcg");
     Serial.println("Keys: wifi_ssid, wifi_pass, mqtt_host, mqtt_port, mqtt_user, mqtt_pass, bootstrap_url, bootstrap_tls_fingerprint, bootstrap_ca_pem, bootstrap_insecure, session_duration_sec, org_id, device_id, device_secret");
     Serial.println("\nRecommended bootstrap setup (from web app 'Add Device' modal):");
     Serial.println("  SET device_id     <id from web>");
@@ -934,7 +1152,10 @@ void publishDeviceStatus() {
   doc["status"] = "online";
   doc["ip"] = WiFi.localIP().toString();
   doc["rssi"] = WiFi.RSSI();
-  doc["firmware_version"] = "3.0.0";
+  doc["firmware_version"] = FIRMWARE_VERSION;
+  doc["mode"] = "real_hardware";
+  doc["wifi"] = WiFi.isConnected() ? "connected" : "disconnected";
+  doc["mqtt"] = mqtt.connected() ? "connected" : "disconnected";
   doc["free_heap"] = ESP.getFreeHeap();
   doc["mic_type"] = "MAX9814";
   doc["default_session_duration_sec"] = defaultSessionDurationSec;
@@ -964,7 +1185,7 @@ void publishSessionMeta(const char *type, const char *extraKey = nullptr,
   // Add modality-specific fields
   if (strcmp(type, "start_pcg") == 0) {
     doc["valve_position"]     = "AV";
-    doc["sample_rate_hz"]     = PCG_SAMPLE_RATE;
+    doc["sample_rate_hz"]     = PCG_ACTUAL_SAMPLE_RATE;  // 22222 Hz — actual hardware timer rate
     doc["format"]             = "pcm_s16le";
     doc["channels"]           = 1;
     doc["chunk_samples"]      = PCG_CHUNK_SAMPLES;

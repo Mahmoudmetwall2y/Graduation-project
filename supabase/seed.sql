@@ -36,7 +36,7 @@ ON CONFLICT (id) DO NOTHING;
 -- 3. CREATE DEVICE
 -- ============================================================
 
--- Device secret: demo_secret_2024
+-- Device secret: see project README for demo credentials. DO NOT commit real secrets in comments.
 INSERT INTO devices (id, org_id, owner_user_id, device_name, device_secret_hash, created_at)
 VALUES (
     '00000000-0000-0000-0000-000000000004'::uuid,

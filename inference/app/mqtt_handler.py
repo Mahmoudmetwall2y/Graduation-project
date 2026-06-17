@@ -300,7 +300,7 @@ class MQTTHandler:
         # Clients
         self.supabase = SupabaseClient()
         self.inference_engine = InferenceEngine(
-            enable_demo_mode=os.getenv("ENABLE_DEMO_MODE", "true").lower() == "true"
+            enable_demo_mode=os.getenv("ENABLE_DEMO_MODE", "false").lower() == "true"
         )
 
         # MQTT client
