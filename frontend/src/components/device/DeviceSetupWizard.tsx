@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import {
   Activity,
@@ -30,20 +30,6 @@ import {
   validateProvisioningPayload,
 } from '../../lib/device/provisioning'
 import { ASCULTICOR_FIRMWARE_MANIFEST_PATH, fetchFirmwareManifest } from '../../lib/device/firmwareManifest'
-import { isWebSerialSupported, requestSerialPort, sendJsonLineCommands } from '../../lib/device/webSerial'
-
-/** Load the ESP Web Tools custom element from CDN (client-side only). */
-function useEspWebTools() {
-  const loaded = useRef(false)
-  useEffect(() => {
-    if (loaded.current || typeof document === 'undefined') return
-    loaded.current = true
-    const script = document.createElement('script')
-    script.type = 'module'
-    script.src = 'https://unpkg.com/esp-web-tools@10/dist/web/install-button.js?module'
-    document.head.appendChild(script)
-  }, [])
-}
 
 type WizardStage =
   | 'requirements'
@@ -92,9 +78,9 @@ function SetupModeSelector({
   setMode: (mode: SetupMode) => void
 }) {
   const options: Array<{ id: SetupMode; icon: any; title: string; text: string }> = [
-    { id: 'new_esp32', icon: Cpu, title: 'New ESP32 setup', text: 'Flash firmware, then provision Wi-Fi and device credentials.' },
-    { id: 'already_flashed', icon: Usb, title: 'Already flashed ESP32', text: 'Skip flashing and send provisioning over USB serial.' },
-    { id: 'manual', icon: Terminal, title: 'Manual setup fallback', text: 'Use this when Web Serial or drivers are blocked.' },
+    { id: 'new_esp32', icon: Cpu, title: 'New ESP32 setup', text: 'Flash firmware, then provision Wi-Fi and device credentials through the system.' },
+    { id: 'already_flashed', icon: Usb, title: 'Already flashed ESP32', text: 'Skip flashing and send provisioning through the system.' },
+    { id: 'manual', icon: Terminal, title: 'Manual setup fallback', text: 'Use this only when automated system flashing is unavailable.' },
     { id: 'simulator', icon: FlaskConical, title: 'Simulator / testing mode - not real sensor data.', text: 'Clearly labeled testing path only.' },
   ]
 
@@ -121,14 +107,21 @@ function SetupModeSelector({
 function DriverHelpPanel() {
   return (
     <section className="rounded-lg border border-amber-300/30 bg-amber-500/10 p-4">
-      <h3 className="text-sm font-semibold text-amber-100">ESP32 not detected?</h3>
+      <h3 className="text-sm font-semibold text-amber-100">ESP32 USB / serial access</h3>
       <div className="mt-3 grid gap-2 text-xs text-amber-50/80 md:grid-cols-2">
-        <p>Use a USB data cable. Some charging-only cables will not detect the ESP32.</p>
-        <p>Close Arduino IDE, PlatformIO serial monitors, or any app using the port.</p>
-        <p>Try pressing BOOT while connecting or while flashing starts.</p>
-        <p>Use Chrome or Edge desktop; Web Serial is not available in all browsers.</p>
-        <p>Check Windows Device Manager, macOS System Information, or Linux dialout permissions.</p>
-        <p>Install CP210x, CH340, or FTDI drivers from official vendor pages for your board.</p>
+        <p>Use a USB <strong>data</strong> cable. Charging-only cables will not show up as a serial port.</p>
+        <p>Close Arduino IDE, PlatformIO serial monitors, or any app holding the port open.</p>
+        <p>For boards without auto-reset, hold <strong>BOOT</strong> while the flash starts, then release.</p>
+        <p>If the port appears then disappears, try another cable, a direct USB port, or a powered hub.</p>
+        <p className="md:col-span-2 font-semibold text-amber-100">🪟 Windows (Docker Desktop) — USB passthrough required:</p>
+        <div className="md:col-span-2 rounded bg-black/30 px-3 py-2 font-mono text-[11px] leading-relaxed text-emerald-200 space-y-0.5">
+          <p>usbipd list</p>
+          <p>usbipd bind   --busid &lt;BUS-ID&gt;</p>
+          <p>usbipd attach --wsl --busid &lt;BUS-ID&gt;</p>
+        </div>
+        <p className="md:col-span-2 text-amber-50/65">Install <strong>usbipd-win</strong> from <code>winget install usbipd</code> if needed. After attaching, the ESP32 appears as <code>/dev/ttyUSB0</code> or <code>/dev/ttyACM0</code> inside WSL2 and Docker.</p>
+        <p>🐧 Linux: add your user to the <code>dialout</code> group and stop ModemManager from grabbing the port.</p>
+        <p>Windows may also need CP210x, CH340, or FTDI drivers from the board vendor for the port to appear in Windows at all.</p>
       </div>
     </section>
   )
@@ -210,7 +203,14 @@ export function DeviceSetupWizard() {
   const [stage, setStage] = useState<WizardStage>('requirements')
   const [deploymentMode, setDeploymentMode] = useState<DeploymentMode>((process.env.NEXT_PUBLIC_DEPLOYMENT_MODE as DeploymentMode) || 'local')
   const [origin, setOrigin] = useState('')
-  const [localLanHost, setLocalLanHost] = useState('')
+  const [localLanHost, setLocalLanHost] = useState(() => {
+    const configuredUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.NEXT_PUBLIC_DEVICE_BOOTSTRAP_URL?.replace(/\/api\/device\/bootstrap$/, '') || ''
+    try {
+      return configuredUrl ? new URL(configuredUrl).host : ''
+    } catch {
+      return ''
+    }
+  })
   const [vpsBaseUrl, setVpsBaseUrl] = useState(process.env.NEXT_PUBLIC_APP_URL || process.env.NEXT_PUBLIC_DEVICE_BOOTSTRAP_URL?.replace(/\/api\/device\/bootstrap$/, '') || '')
   const [deviceName, setDeviceName] = useState('')
   const [wifiSsid, setWifiSsid] = useState('')
@@ -222,8 +222,8 @@ export function DeviceSetupWizard() {
   const [onlineMessage, setOnlineMessage] = useState('Waiting for device registration.')
   const [preflightResults, setPreflightResults] = useState<DevicePreflightResult[]>([])
   const [firmwareFound, setFirmwareFound] = useState<boolean | null>(null)
-
-  useEspWebTools()
+  const [systemFlasherReady, setSystemFlasherReady] = useState<boolean | null>(null)
+  const [flashLog, setFlashLog] = useState<string[]>([])
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -231,6 +231,10 @@ export function DeviceSetupWizard() {
       setDeviceName(`ESP32 USB ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`)
     }
     fetchFirmwareManifest().then(manifest => setFirmwareFound(Boolean(manifest)))
+    fetch('/api/device/flash', { cache: 'no-store' })
+      .then(response => response.json())
+      .then(data => setSystemFlasherReady(Boolean(data?.ok)))
+      .catch(() => setSystemFlasherReady(false))
   }, [])
 
   const bootstrapUrl = useMemo(() => buildBootstrapUrl({
@@ -261,6 +265,35 @@ export function DeviceSetupWizard() {
     }
   }, [bootstrapUrl, deviceName])
 
+  const flashFirmwareFromSystem = useCallback(async () => {
+    setBusy(true)
+    setError(null)
+    setFlashLog([])
+    setStage('flash')
+    try {
+      const response = await fetch('/api/device/flash', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      })
+      const data = await response.json()
+      const attempts = Array.isArray(data.attempts)
+        ? data.attempts.map((attempt: any) => `[detect ${attempt.port || 'unknown'}]\n${attempt.output || ''}`)
+        : []
+      const flashOutput = data.flash?.output ? [`[flash ${data.port || 'auto'}]\n${data.flash.output}`] : []
+      setFlashLog([...attempts, ...flashOutput].filter(Boolean).slice(-8))
+      if (!response.ok || !data.ok) {
+        throw new Error(data.error || 'System firmware flash failed.')
+      }
+      setStage('wifi')
+      setOnlineMessage(`Firmware flashed successfully from the Docker flasher service on ${data.port || 'the detected ESP32 port'}. Continue with Wi-Fi and provisioning.`)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'System firmware flash failed.')
+    } finally {
+      setBusy(false)
+    }
+  }, [])
+
   const provision = useCallback(async () => {
     if (!credentials) return
     const payload = buildProvisioningPayload({ credentials, bootstrapUrl, wifiSsid, wifiPassword })
@@ -275,38 +308,23 @@ export function DeviceSetupWizard() {
     setSerialLog([])
     setPreflightResults([])
     try {
-      const port = await requestSerialPort()
-      let provisioningSaved = false
-      let detectedAscultiCorFirmware = false
-      await sendJsonLineCommands({
-        port,
-        commands: [payload, { cmd: 'status' }, { cmd: 'reboot' }],
-        onLine: (line, parsed) => {
-          const safeLine = line
-            .replace(credentials.device_secret, maskSecret(credentials.device_secret))
-            .replace(wifiPassword, wifiPassword ? '********' : '')
-          if (isSensorOnlySerialLine(safeLine)) return
-          setSerialLog(current => [...current.slice(-80), safeLine])
-          if (parsed?.firmware_version) {
-            detectedAscultiCorFirmware = true
-          }
-          if (parsed?.status === 'ok' && parsed.stage === 'saved_to_nvs') {
-            provisioningSaved = true
-            setOnlineMessage('Provisioning saved to NVS. Sensors can be connected later.')
-          }
-        },
+      const response = await fetch('/api/device/provision', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ payload }),
       })
-      if (!provisioningSaved) {
-        throw new Error(
-          detectedAscultiCorFirmware
-            ? 'The ESP32 responded, but did not confirm that provisioning was saved. Try provisioning again.'
-            : 'The selected board did not answer with AscultiCor firmware. Flash the AscultiCor ESP32 firmware first, then send provisioning again.'
-        )
+      const data = await response.json()
+      const lines = (Array.isArray(data.lines) ? data.lines : Array.isArray(data.attempts) ? data.attempts.flatMap((attempt: any) => attempt.lines || []) : [])
+        .map((line: string) => line.replace(credentials.device_secret, maskSecret(credentials.device_secret)).replace(wifiPassword, wifiPassword ? '********' : ''))
+        .filter((line: string) => !isSensorOnlySerialLine(line))
+      setSerialLog(lines.slice(-80))
+      if (!response.ok || !data.ok) {
+        throw new Error(data.error || 'The ESP32 did not confirm that provisioning was saved. Make sure it is connected by USB and already flashed.')
       }
       setStage('ready')
-      setOnlineMessage('Device setup is complete. It may appear offline until Wi-Fi and MQTT heartbeat arrive.')
+      setOnlineMessage(`Provisioning saved through the Docker firmware service on ${data.port || 'the detected ESP32 port'}. It may appear offline until Wi-Fi and MQTT heartbeat arrive.`)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to provision over serial.')
+      setError(err instanceof Error ? err.message : 'Failed to provision through the system flasher.')
     } finally {
       setBusy(false)
     }
@@ -377,8 +395,8 @@ export function DeviceSetupWizard() {
 
       <section className="rounded-lg border border-[var(--hud-border)] bg-black/20 p-5">
         <div className="flex flex-wrap items-center gap-2">
-          <StatusPill ok={isWebSerialSupported()} label={isWebSerialSupported() ? 'Web Serial supported' : 'Web Serial unsupported'} />
           <StatusPill ok={firmwareFound === true} label={firmwareFound ? 'Firmware manifest found' : 'Firmware binaries not found'} />
+          <StatusPill ok={systemFlasherReady === true} label={systemFlasherReady ? 'System flasher ready' : 'System flasher unavailable'} />
           <StatusPill ok={!isBadDeviceHost(bootstrapUrl)} label="ESP32 reachable URL check" />
         </div>
         <div className="mt-4 grid gap-3 md:grid-cols-3">
@@ -403,23 +421,31 @@ export function DeviceSetupWizard() {
             <section className="rounded-lg border border-[var(--hud-border)] bg-black/20 p-5">
               <div className="flex items-center gap-2">
                 <Usb className="h-4 w-4 text-cyan-300" />
-                <h2 className="text-lg font-semibold text-white">Flash firmware</h2>
+                <h2 className="text-lg font-semibold text-white">1. Flash firmware</h2>
               </div>
               <p className="mt-2 text-sm text-white/60">
-                Click the button below. Chrome/Edge will ask you to pick the ESP32 serial port, then flash the firmware automatically — no Arduino IDE or drivers needed.
+                Flash the generic AscultiCor firmware first. Wi-Fi, server URL, and device credentials are saved afterward over USB serial, not baked into this firmware binary.
               </p>
 
               {firmwareFound ? (
                 <div className="mt-4">
-                  {/* ESP Web Tools custom element — handles flashing entirely in the browser */}
-                  {/* @ts-expect-error — esp-web-install-button is a custom element */}
-                  <esp-web-install-button
-                    manifest={ASCULTICOR_FIRMWARE_MANIFEST_PATH}
-                    style={{ display: 'block' }}
-                  />
+                  <button
+                    type="button"
+                    onClick={flashFirmwareFromSystem}
+                    disabled={busy || !systemFlasherReady}
+                    className="btn-primary gap-2"
+                  >
+                    {busy && stage === 'flash' ? <Activity className="h-4 w-4 animate-spin" /> : <Cpu className="h-4 w-4" />}
+                    {busy && stage === 'flash' ? 'Flashing from system...' : 'Flash from system'}
+                  </button>
                   <p className="mt-3 text-xs text-white/45">
-                    Uses the Web Serial API — requires Chrome or Edge. No drivers or software to install.
+                    The Docker firmware flasher auto-detects the ESP32 USB serial port and writes the compiled firmware from the shared firmware volume.
                   </p>
+                  {systemFlasherReady === false && (
+                    <p className="mt-2 text-xs text-amber-100/80">
+                      The firmware flasher container is not reachable. Restart the stack so the system flasher service is running.
+                    </p>
+                  )}
                 </div>
               ) : (
                 <div className="mt-4 rounded-lg border border-amber-300/40 bg-amber-500/10 p-4">
@@ -456,6 +482,13 @@ export function DeviceSetupWizard() {
             bootstrapUrl={bootstrapUrl}
           />
 
+          <section className="rounded-lg border border-[var(--hud-border)] bg-black/20 p-5">
+            <h2 className="text-lg font-semibold text-white">2. Prepare provisioning</h2>
+            <p className="mt-2 text-sm text-white/60">
+              After flashing, keep the ESP32 connected by USB. Enter the reachable server URL and Wi-Fi details, register the device, then let the system send provisioning to the flashed firmware.
+            </p>
+          </section>
+
           <section className="grid gap-4 md:grid-cols-2">
             <label className="space-y-1.5">
               <span className="text-xs font-semibold uppercase tracking-[0.16em] text-white/55">Device name</span>
@@ -476,11 +509,11 @@ export function DeviceSetupWizard() {
             <div className="flex flex-wrap gap-3">
               <button type="button" onClick={registerDevice} disabled={busy || !deviceName.trim()} className="btn-primary gap-2">
                 {busy && stage === 'register' ? <Activity className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
-                Register device
+                3. Register device
               </button>
               <button type="button" onClick={provision} disabled={busy || !credentials || !wifiSsid || !wifiPassword} className="btn-secondary gap-2">
                 <Usb className="h-4 w-4" />
-                Connect ESP32 & send provisioning
+                4. Provision from system
               </button>
               <button type="button" onClick={checkOnline} disabled={busy || !credentials} className="btn-ghost gap-2">
                 <RadioTower className="h-4 w-4" />
@@ -523,6 +556,10 @@ export function DeviceSetupWizard() {
 
           {serialLog.length > 0 && (
             <pre className="max-h-64 overflow-auto rounded-lg bg-slate-950 p-4 text-xs text-emerald-300">{serialLog.join('\n')}</pre>
+          )}
+
+          {flashLog.length > 0 && (
+            <pre className="max-h-64 overflow-auto rounded-lg bg-slate-950 p-4 text-xs text-cyan-100">{flashLog.join('\n\n')}</pre>
           )}
 
           {preflightResults.length > 0 && (

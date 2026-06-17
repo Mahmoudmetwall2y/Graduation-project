@@ -25,6 +25,7 @@ export interface ProvisioningPayload {
   bootstrap_url: string
   wifi_ssid: string
   wifi_pass: string
+  org_id?: string
   mqtt_host?: string
   mqtt_port?: number
   mqtt_user?: string
@@ -135,6 +136,11 @@ export function buildProvisioningPayload(input: {
     bootstrap_url: input.bootstrapUrl,
     wifi_ssid: input.wifiSsid,
     wifi_pass: input.wifiPassword,
+    org_id: input.credentials.org_id,
+    mqtt_host: input.credentials.mqtt_host,
+    mqtt_port: input.credentials.mqtt_port,
+    mqtt_user: input.credentials.mqtt_user,
+    mqtt_pass: input.credentials.mqtt_pass,
   }
 }
 
@@ -150,4 +156,3 @@ export function validateProvisioningPayload(payload: ProvisioningPayload) {
   }
   return null
 }
-

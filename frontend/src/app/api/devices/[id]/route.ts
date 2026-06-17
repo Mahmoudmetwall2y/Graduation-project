@@ -2,7 +2,7 @@ import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs'
 import { cookies } from 'next/headers'
 import { NextResponse } from 'next/server'
 
-const DEVICE_OFFLINE_THRESHOLD_MS = 90 * 1000
+const DEVICE_OFFLINE_THRESHOLD_MS = 25 * 1000
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 function normalizeDeviceRuntimeStatus<T extends { status?: string | null; last_seen_at?: string | null }>(

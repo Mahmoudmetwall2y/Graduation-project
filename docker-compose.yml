@@ -132,11 +132,56 @@ services:
       dockerfile: Dockerfile.builder
     container_name: asculticor-firmware-builder
     volumes:
-      # Source sketch — read-only; never baked into the image
-      - ./firmware/asculticor_esp32:/sketch:ro
+      # Source sketch — read-only; never baked into the image.
+      # Arduino sketches require the folder name to match the main .ino file.
+      - ./firmware/asculticor_esp32:/AscultiCor_esp32:ro
       # Output volume shared with the frontend (read-write here)
       - firmware_public:/out
     restart: "no"   # one-shot: exits after compilation
+
+  # ─────────────────────────────────────────────────────────────
+  # Firmware Flasher (long-running internal service)
+  # Lightweight HTTP service that auto-detects the ESP32 USB serial
+  # port and flashes / provisions it using pip-installed esptool.
+  # Uses Dockerfile.flasher (~80 MB) — NOT the builder image (~500 MB) —
+  # so rebuilding after flasher changes takes seconds, not minutes.
+  #
+  # ⚠️  Windows / Docker Desktop USB passthrough:
+  #   /dev/ttyUSB* is inside the WSL2 VM, not the Windows host.
+  #   Forward the USB device first:
+  #     usbipd list
+  #     usbipd bind   --busid <BUS-ID>
+  #     usbipd attach --wsl --busid <BUS-ID>
+  #   Then the port appears as /dev/ttyUSBx inside WSL2 and Docker.
+  #   On native Linux no extra steps are needed.
+  # ─────────────────────────────────────────────────────────────
+  firmware-flasher:
+    build:
+      context: ./firmware
+      dockerfile: Dockerfile.flasher
+    container_name: asculticor-firmware-flasher
+    entrypoint: []
+    environment:
+      - OUTPUT_DIR=/out
+      - VERSION=3.0.0
+      - FLASHER_PORT=8091
+      - FLASH_BAUD=460800
+    volumes:
+      - firmware_public:/out:ro
+      # The flasher needs host USB serial visibility for /dev/ttyUSB* and /dev/ttyACM*.
+      - /dev:/dev
+    privileged: true
+    networks:
+      - asculticor-network
+    depends_on:
+      firmware-builder:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8091/health', timeout=3).read()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
   # Frontend (Next.js)
   frontend:
@@ -180,6 +225,7 @@ services:
       - DEVICE_BOOTSTRAP_MQTT_PORT=${DEVICE_BOOTSTRAP_MQTT_PORT:-1883}
       - DEVICE_BOOTSTRAP_MQTT_TLS=${DEVICE_BOOTSTRAP_MQTT_TLS:-false}
       - DEVICE_DEFAULT_SESSION_DURATION_SEC=${DEVICE_DEFAULT_SESSION_DURATION_SEC:-15}
+      - ASCULTICOR_FIRMWARE_FLASHER_URL=${ASCULTICOR_FIRMWARE_FLASHER_URL:-http://firmware-flasher:8091}
       - NODE_ENV=production
     networks:
       - asculticor-network
@@ -195,6 +241,8 @@ services:
       firmware-builder:
         # Wait for the firmware binaries to be compiled before starting.
         condition: service_completed_successfully
+      firmware-flasher:
+        condition: service_started
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/api/health"]

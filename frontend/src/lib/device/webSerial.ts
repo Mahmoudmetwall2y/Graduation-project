@@ -22,8 +22,13 @@ export function toWebSerialErrorMessage(error: unknown) {
   const message = error instanceof Error ? error.message : 'Failed to provision over USB.'
   const lower = message.toLowerCase()
 
-  if (lower.includes('failed to open serial port') || lower.includes('already open')) {
-    return 'Could not open the ESP32 serial port. Close Arduino IDE Serial Monitor, PlatformIO, esptool, or any other app using the board, unplug/replug the ESP32, then try again.'
+  if (
+    lower.includes('failed to open serial port') ||
+    lower.includes('already open') ||
+    lower.includes('not readable') ||
+    lower.includes('not writable')
+  ) {
+    return 'Could not open the ESP32 serial port. Close Arduino IDE Serial Monitor, PlatformIO, esptool, or any other app using the board, unplug/replug the ESP32, then hold BOOT while selecting the port.'
   }
 
   if (lower.includes('permission') || lower.includes('denied') || lower.includes('not allowed')) {

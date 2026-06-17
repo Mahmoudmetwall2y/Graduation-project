@@ -5,7 +5,7 @@ import { randomUUID } from 'crypto'
 import bcrypt from 'bcryptjs'
 import { buildDeviceMqttCredentials } from '../../../lib/mqttCredentials'
 
-const DEVICE_OFFLINE_THRESHOLD_MS = 90 * 1000
+const DEVICE_OFFLINE_THRESHOLD_MS = 25 * 1000
 const VALID_DEVICE_TYPES = new Set(['esp32', 'esp32-s3', 'esp32-c3', 'sonocardia-kit', 'custom'])
 
 function isMissingMqttCredentialColumns(error: unknown) {

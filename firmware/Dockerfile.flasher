@@ -1,0 +1,42 @@
+# ═══════════════════════════════════════════════════════════════
+#  AscultiCor Firmware Flasher
+#
+#  Lightweight HTTP service (port 8091) that auto-detects the
+#  ESP32 USB serial port and flashes / provisions it.
+#
+#  Deliberately kept separate from firmware-builder:
+#    - Rebuilds in seconds (no Arduino core download)
+#    - Contains only esptool + pyserial — ~80 MB total image
+#
+#  NOTE — Windows / Docker Desktop USB passthrough:
+#    The container needs access to /dev/ttyUSB* and /dev/ttyACM*.
+#    On Docker Desktop for Windows those devices are inside the
+#    WSL2 / Hyper-V VM, not the Windows host. To make USB serial
+#    visible inside Docker you must forward the USB device with:
+#      usbipd list
+#      usbipd bind --busid <BUS-ID>
+#      usbipd attach --wsl --busid <BUS-ID>
+#    Then the port appears as /dev/ttyUSBx inside WSL2 and Docker.
+#    On native Linux no extra steps are needed.
+# ═══════════════════════════════════════════════════════════════
+
+FROM python:3.11-slim
+
+# esptool 4.7.x supports ESP32 Arduino core 3.x chips.
+# pyserial is needed for serial provisioning (non-flash serial commands).
+RUN pip install --no-cache-dir "esptool==4.7.0" "pyserial==3.5"
+
+# Copy the flasher HTTP server script
+COPY flasher_server.py /usr/local/bin/flasher_server.py
+
+ENV FLASHER_HOST=0.0.0.0 \
+    FLASHER_PORT=8091 \
+    FLASH_BAUD=460800 \
+    OUTPUT_DIR=/out \
+    VERSION=3.0.0 \
+    # When installed via pip, esptool is on PATH as "esptool"
+    ESPTOOL=esptool
+
+EXPOSE 8091
+
+CMD ["python3", "/usr/local/bin/flasher_server.py"]

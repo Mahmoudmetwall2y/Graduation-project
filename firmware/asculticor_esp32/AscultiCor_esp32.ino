@@ -74,12 +74,12 @@
 #define MAX_SESSION_DURATION_SEC  60
 #define INTER_SESSION_SEC       30        // Pause between sessions
 #define HEARTBEAT_INTERVAL_MS   5000
-#define DEVICE_STATUS_INTERVAL_MS 30000
+#define DEVICE_STATUS_INTERVAL_MS 10000
 #define MQTT_BUFFER_BYTES       4096
-#define MQTT_KEEPALIVE_SEC      60
+#define MQTT_KEEPALIVE_SEC      15
 #define WIFI_RETRY_MS           10000
 #define MQTT_RETRY_MS           5000
-#define SERIAL_COMMAND_BUFFER   256
+#define SERIAL_COMMAND_BUFFER   1024
 #define SERIAL_COMMAND_IDLE_MS  150
 #define ECG_PREFLIGHT_SAMPLES   300
 #define PCG_PREFLIGHT_SAMPLES   2048
@@ -515,33 +515,40 @@ bool fetchBootstrapConfig() {
 
   responseBody = http.getString();
   http.end();
+  Serial.printf("[BOOTSTRAP] HTTP %d, response bytes=%d\n", httpCode, responseBody.length());
 
   if (httpCode != HTTP_CODE_OK) {
     Serial.printf("[BOOTSTRAP] Server returned HTTP %d: %s\n", httpCode, responseBody.c_str());
     return false;
   }
 
-  StaticJsonDocument<512> responseDoc;
+  StaticJsonDocument<2048> responseDoc;
   DeserializationError err = deserializeJson(responseDoc, responseBody);
   if (err) {
     Serial.printf("[BOOTSTRAP] Invalid JSON response: %s\n", err.c_str());
     return false;
   }
 
-  JsonObject mqttConfig = responseDoc["mqtt"];
-  const char *flatMqttHost = responseDoc["mqtt_host"] | nullptr;
-  const char *flatMqttUser = responseDoc["mqtt_user"] | nullptr;
-  const char *flatMqttPass = responseDoc["mqtt_pass"] | nullptr;
-  const char *nestedMqttHost = mqttConfig["host"] | nullptr;
-  const char *nestedMqttUser = mqttConfig["username"] | nullptr;
-  const char *nestedMqttPass = mqttConfig["password"] | nullptr;
+  JsonObject mqttConfig = responseDoc["mqtt"].as<JsonObject>();
+  const char *flatMqttHost = responseDoc["mqtt_host"].as<const char *>();
+  const char *flatMqttUser = responseDoc["mqtt_user"].as<const char *>();
+  const char *flatMqttPass = responseDoc["mqtt_pass"].as<const char *>();
+  const char *nestedMqttHost = mqttConfig["host"].as<const char *>();
+  const char *nestedMqttUser = mqttConfig["username"].as<const char *>();
+  const char *nestedMqttPass = mqttConfig["password"].as<const char *>();
   const char *newMqttHost = flatMqttHost ? flatMqttHost : nestedMqttHost;
   const char *newMqttUser = flatMqttUser ? flatMqttUser : nestedMqttUser;
   const char *newMqttPass = flatMqttPass ? flatMqttPass : nestedMqttPass;
-  const char *newOrgId    = responseDoc["org_id"];
+  const char *newOrgId    = responseDoc["org_id"].as<const char *>();
   int newMqttPort         = responseDoc["mqtt_port"] | (mqttConfig["port"] | DEFAULT_MQTT_PORT);
 
   if (!newMqttHost || !newMqttUser || !newMqttPass || !newOrgId) {
+    Serial.printf("[BOOTSTRAP] Field presence: host=%s user=%s pass=%s org=%s overflow=%s\n",
+                  newMqttHost ? "yes" : "no",
+                  newMqttUser ? "yes" : "no",
+                  newMqttPass ? "yes" : "no",
+                  newOrgId ? "yes" : "no",
+                  responseDoc.overflowed() ? "yes" : "no");
     Serial.println("[BOOTSTRAP] Response missing required broker fields");
     return false;
   }
@@ -551,6 +558,14 @@ bool fetchBootstrapConfig() {
   strlcpy(mqtt_pass, newMqttPass, sizeof(mqtt_pass));
   strlcpy(org_id, newOrgId, sizeof(org_id));
   mqtt_port = newMqttPort;
+
+  saveCredential("mqtt_host", mqtt_host);
+  saveCredential("mqtt_user", mqtt_user);
+  saveCredential("mqtt_pass", mqtt_pass);
+  saveCredential("org_id", org_id);
+  char portBuf[8];
+  snprintf(portBuf, sizeof(portBuf), "%d", mqtt_port);
+  saveCredential("mqtt_port", portBuf);
 
   buildTopicBase();
   mqtt.setServer(mqtt_host, mqtt_port);
@@ -679,6 +694,7 @@ bool processJsonProvisioningCommand(String line) {
     saveJsonString(doc, "bootstrap_url", "bootstrap_url", true, &ok);
     saveJsonString(doc, "wifi_ssid", "wifi_ssid", true, &ok);
     saveJsonString(doc, "wifi_pass", "wifi_pass", true, &ok);
+    saveJsonString(doc, "org_id", "org_id", false, &ok);
     saveJsonString(doc, "mqtt_host", "mqtt_host", false, &ok);
     saveJsonString(doc, "mqtt_user", "mqtt_user", false, &ok);
     saveJsonString(doc, "mqtt_pass", "mqtt_pass", false, &ok);
@@ -1075,7 +1091,7 @@ void setupPcgTimer() {
 // ═══════════════════════════════════════════════════════════════
 void mqttCallback(char *topic, byte *payload, unsigned int length) {
   // Parse incoming control messages
-  StaticJsonDocument<256> doc;
+  StaticJsonDocument<384> doc;
   DeserializationError err = deserializeJson(doc, payload, length);
   if (err) return;
 
@@ -1162,9 +1178,9 @@ void publishDeviceStatus() {
   doc["quality_gate_enabled"] = true;
   doc["streaming"] = isStreaming;
 
-  char buf[256];
-  serializeJson(doc, buf);
-  mqtt.publish(statusTopic, buf, true);
+  char buf[384];
+  size_t payloadLen = serializeJson(doc, buf, sizeof(buf));
+  mqtt.publish(statusTopic, reinterpret_cast<const uint8_t *>(buf), payloadLen, true);
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -1322,8 +1338,8 @@ void sendHeartbeat() {
   doc["pcg_dropped_buffers"] = pcgDroppedBuffers;
 
   char buf[256];
-  serializeJson(doc, buf);
-  mqtt.publish(topic, buf, false);
+  size_t payloadLen = serializeJson(doc, buf, sizeof(buf));
+  mqtt.publish(topic, reinterpret_cast<const uint8_t *>(buf), payloadLen, false);
 }
 
 // ═══════════════════════════════════════════════════════════════

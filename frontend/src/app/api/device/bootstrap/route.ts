@@ -7,7 +7,7 @@ export const runtime = 'nodejs'
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const BOOTSTRAP_RATE_LIMIT_WINDOW_MS = 10 * 60 * 1000
-const BOOTSTRAP_RATE_LIMIT_MAX = 8
+const BOOTSTRAP_RATE_LIMIT_MAX = 120
 const bootstrapAttempts = new Map<string, number[]>()
 
 function isMissingMqttCredentialColumns(error: unknown) {
@@ -188,33 +188,12 @@ export async function POST(request: Request) {
       status: 'ok',
       device_id: device.id,
       org_id: device.org_id,
-      device_name: device.device_name,
-      mqtt: {
-        host: mqttHost,
-        port: mqttPort,
-        username: mqttUser,
-        password: mqttPass,
-        client_id: `asculticor_${device.id}`,
-        use_tls: mqttTls,
-        topic_prefix: `org/${device.org_id}/device/${device.id}`,
-      },
-      limits: {
-        ecg_sample_rate: 500,
-        pcg_sample_rate: 22050,
-        max_session_seconds: 60,
-      },
       mqtt_host: mqttHost,
       mqtt_port: mqttPort,
       mqtt_user: mqttUser,
       mqtt_pass: mqttPass,
       mqtt_tls: mqttTls,
       bootstrap_url: bootstrapUrl,
-      bootstrap_requires_host_override: isLoopbackHost(bootstrapHost),
-      mqtt_lan_exposure_enabled: mqttLanExposureEnabled,
-      provisioning_mode: usesPerDeviceMqtt ? 'bootstrap_recommended' : 'legacy_manual',
-      security_warning: !mqttTls
-        ? 'Bootstrap response contains MQTT credentials. Serve this endpoint over HTTPS in production to prevent cleartext credential exposure.'
-        : null,
     })
   } catch (error) {
     console.error('Error bootstrapping device credentials:', error)
