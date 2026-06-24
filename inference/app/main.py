@@ -58,7 +58,14 @@ async def lifespan(app: FastAPI):
             logger.warning("Set ENABLE_DEMO_MODE=false and mount real models for real-device use.")
             logger.warning("=" * 60)
         else:
-            logger.info("Real inference mode active — all 3 ML models loaded.")
+            status = mqtt_handler.inference_engine.get_model_status()
+            loaded = status['models_loaded']
+            total = status['models_total']
+            pending = [k for k, v in status['details'].items() if v.get('pending')]
+            logger.info(
+                f"Real inference mode active — {loaded}/{total} ML models loaded. "
+                f"Pending (disabled) slots: {pending}"
+            )
     except Exception as e:
         logger.error(f"Failed to start MQTT handler: {e}")
         raise
@@ -230,7 +237,13 @@ async def health_check(request: Request):
         models_loaded=model_info['models_loaded'],
         models_total=model_info['models_total'],
         models={
-            name: ModelDetail(loaded=detail['loaded'], error=detail['error'])
+            name: ModelDetail(
+                loaded=detail['loaded'],
+                error=(
+                    detail.get('error') or
+                    ("PENDING — model not yet delivered" if detail.get('pending') else None)
+                )
+            )
             for name, detail in model_info['details'].items()
         },
     )
@@ -317,11 +330,14 @@ async def simulate_inference(request: Request):
     if mqtt_handler:
         engine = mqtt_handler.inference_engine
         demo_mode_active = engine.demo_mode_active
+        model_status = engine.get_model_status()
         models_loaded = {
-            "pcg": engine.pcg_model is not None,
-            "severity": engine.severity_model is not None,
-            "ecg": engine.ecg_model is not None,
+            k: v['loaded']
+            for k, v in model_status['details'].items()
         }
+        models_pending = [
+            k for k, v in model_status['details'].items() if v.get('pending')
+        ]
 
     return {
         "status": "simulation_requires_real_device_or_mqtt_publish",
@@ -333,6 +349,7 @@ async def simulate_inference(request: Request):
         ),
         "demo_mode_active": demo_mode_active,
         "models_loaded": models_loaded,
+        "models_pending": models_pending,
         "docs": "docs/REAL_DEVICE_DEMO_RUNBOOK.md",
     }
 

@@ -1,6 +1,6 @@
-/*
+﻿/*
  * ╔══════════════════════════════════════════════════════════════╗
- * ║               SONOCARDIA — ESP32 Firmware                    ║
+ * ║               AscultiCor — ESP32 Firmware                    ║
  * ║       Real-Time Cardiac Monitoring (ECG + PCG)               ║
  * ╚══════════════════════════════════════════════════════════════╝
  *
@@ -1209,12 +1209,17 @@ void publishSessionMeta(const char *type, const char *extraKey = nullptr,
     doc["microphone"]         = "MAX9814";
     doc["gain_db"]            = 60;
   } else if (strcmp(type, "start_ecg") == 0) {
-    doc["sample_rate_hz"]   = ECG_SAMPLE_RATE;
-    doc["format"]           = "int16_mv";
-    doc["lead"]             = "MLII";
-    doc["chunk_samples"]    = ECG_BUFFER_SIZE;
-    doc["adc_resolution"]   = 12;
+    doc["sample_rate_hz"]      = ECG_SAMPLE_RATE;
+    doc["format"]              = "int16_mv";
+    doc["lead"]                = "MLII";
+    doc["n_leads"]             = 1;             // single-lead � AD8232, 3-electrode PCB
+    doc["chunk_samples"]       = ECG_BUFFER_SIZE;
+    doc["adc_resolution"]      = 12;
     doc["target_duration_sec"] = activeSessionDurationSec;
+    // Inference model meta � used for logging/compatibility check on the server.
+    // AuscultICor v26 SL is single-lead compatible; no hardware changes needed.
+    // RR-interval features are computed SERVER-SIDE from the raw ECG stream.
+    doc["ecg_model"]           = "AuscultICor_v26_SL";
   }
 
   if (extraKey && extraKey[0] != '\0') {
@@ -1384,6 +1389,17 @@ void processPcgBuffer() {
 // ═══════════════════════════════════════════════════════════════
 //  ECG STREAMING (timer-driven, process from main loop)
 // ═══════════════════════════════════════════════════════════════
+//
+//  Model compatibility note — AuscultICor v26 SL:
+//  ─────────────────────────────────────────────────────────────
+//  The inference server accepts the raw single-lead int16 ECG stream
+//  as published here (500 Hz, MLII lead, AD8232). It performs:
+//    1. Resampling: 500 Hz  ->  125 Hz  (model training rate)
+//    2. Bandpass filter: 0.5 - 50 Hz
+//    3. Windowing: 500-sample overlapping beat windows
+//    4. RR feature extraction: 9 HRV statistics estimated from
+//       R-peak detection on the server -- NO firmware changes needed.
+//  No additional channels, no hardware modifications required.
 void processEcgSample() {
   if (!ecgSampleReady) return;
   ecgSampleReady = false;

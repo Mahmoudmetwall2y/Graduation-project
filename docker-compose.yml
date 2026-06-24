@@ -73,14 +73,34 @@ services:
       - MQTT_PASSWORD=${MQTT_PASSWORD:?MQTT_PASSWORD is required}
       - MQTT_KEEPALIVE=60
 
-      # ML Settings — ECG values MUST match BiLSTM training config (MIT-BIH 360Hz/300-sample)
+      # ML Settings — ECG values MUST match FINAL_UNIFIED_MODEL training config (MIT-BIH 125Hz/500-sample)
       - PCG_SAMPLE_RATE=${PCG_SAMPLE_RATE:-22050}
       - PCG_TARGET_DURATION=${PCG_TARGET_DURATION:-10}
       - PCG_MAX_DURATION=${PCG_MAX_DURATION:-20}
-      - ECG_SAMPLE_RATE=${ECG_SAMPLE_RATE:-360}
-      - ECG_WINDOW_SIZE=${ECG_WINDOW_SIZE:-300}
+      - ECG_SAMPLE_RATE=${ECG_SAMPLE_RATE:-125}
+      - ECG_WINDOW_SIZE=${ECG_WINDOW_SIZE:-500}
       - ECG_MAX_WINDOWS=${ECG_MAX_WINDOWS:-12}
       - ECG_MAX_DURATION=${ECG_MAX_DURATION:-60}
+
+      # Model registry paths
+      - NEW_MODELS_DIR=/new-models
+      - MODELS_DIR=/app/models
+      # ─ Model 1: XGBoost PCG [ACTIVE] ──────────────────────────────────────
+      - MODEL_1_PATH=${MODEL_1_PATH:-/new-models/Xgboost/heart_sound_xgboost_model.pkl}
+      - MODEL_1_SCALER_PATH=${MODEL_1_SCALER_PATH:-/new-models/Xgboost/final_scaler.pkl}
+      - MODEL_1_ENCODER_PATH=${MODEL_1_ENCODER_PATH:-}
+      - MODEL_1_ENABLED=${MODEL_1_ENABLED:-true}
+      - MODEL_1_VERSION=${MODEL_1_VERSION:-v2.0.0}
+      # ─ Model 2: ECG AuscultICor_Final [ACTIVE] ───────────────────────────
+      - MODEL_2_PATH=${MODEL_2_PATH:-/new-models/ecg_mitbih/FINAL_UNIFIED_MODEL.keras}
+      - MODEL_2_META_PATH=${MODEL_2_META_PATH:-/new-models/ecg_mitbih/label_encoder.pkl}
+      - MODEL_2_ENABLED=${MODEL_2_ENABLED:-true}
+      - MODEL_2_VERSION=${MODEL_2_VERSION:-v2.0.0}
+      # ─ Model 3: CNN Severity [PENDING] ──────────────────────────────────
+      # Set MODEL_3_ENABLED=true + MODEL_3_PATH once team delivers the severity model
+      - MODEL_3_PATH=${MODEL_3_PATH:-}
+      - MODEL_3_ENABLED=${MODEL_3_ENABLED:-false}
+      - MODEL_3_VERSION=${MODEL_3_VERSION:-pending}
 
       # Processing
       - STREAM_TIMEOUT_SEC=${STREAM_TIMEOUT_SEC:-20}
@@ -96,9 +116,9 @@ services:
       - SECURITY_HEADERS_ENABLED=${SECURITY_HEADERS_ENABLED:-true}
       - TRUSTED_HOSTS=${TRUSTED_HOSTS:-*.asculticor.com,localhost,127.0.0.1},inference,asculticor-inference
       - INFERENCE_INTERNAL_TOKEN=${INFERENCE_INTERNAL_TOKEN:?INFERENCE_INTERNAL_TOKEN is required}
-      - MODELS_DIR=/app/models
     volumes:
-      - ./models:/app/models:ro
+      - ./models:/app/models:ro        # legacy models (kept for reference)
+      - ./new-models:/new-models:ro    # new trained model artifacts
       - inference_cache:/app/cache
     networks:
       - asculticor-network

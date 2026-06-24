@@ -15,18 +15,230 @@ logger = logging.getLogger(__name__)
 PREPROCESSING_VERSION = "v1.0.0"
 
 
+
+# ─── YAMNet lazy loader ───────────────────────────────────────────────────────
+# Loaded once on first PCGPreprocessor.process() call.
+# Requires: tensorflow, tensorflow_hub  (already in inference/requirements.txt)
+_yamnet_model = None
+
+def _get_yamnet():
+    """Return the cached YAMNet model, loading it on first call."""
+    global _yamnet_model
+    if _yamnet_model is None:
+        try:
+            import tensorflow_hub as hub
+            logger.info("Loading YAMNet from TF Hub (first call)…")
+            _yamnet_model = hub.load("https://tfhub.dev/google/yamnet/1")
+            logger.info("YAMNet loaded OK")
+        except Exception as exc:
+            logger.error(f"Failed to load YAMNet: {exc}")
+            raise RuntimeError(
+                "YAMNet is required for PCG classification. "
+                "Ensure tensorflow-hub is installed and network access is available."
+            ) from exc
+    return _yamnet_model
+
+
 class PCGPreprocessor:
     """
-    Deterministic PCG preprocessing for XGBoost classifier.
+    Deterministic PCG preprocessing for the NEW XGBoost model.
+
+    Produces a 1224-feature vector:
+      • 200 traditional librosa features (13-MFCC + spectral + mel + contrast + chroma)
+      • 1024-dim YAMNet neural embedding (mean-pooled across frames)
+
+    This matches the training pipeline in:
+      new-models/Xgboost/preprocessing/YAMNet_1presplit.py (and _2, _3, _4)
+    and the scaler in:
+      new-models/Xgboost/final_scaler.pkl  (n_features_in_ = 1224)
+
+    Audio requirements (from training scripts):
+      - Traditional track : 22 050 Hz, 10 s, bandpass 20-400 Hz, librosa.normalize
+      - YAMNet track      : 16 000 Hz, 3 s (48 000 samples), peak-normalized
     """
-    
+
+    # Traditional track settings (librosa path)
+    SAMPLE_RATE_TRAD: int = 22_050
+    DURATION_SEC:     float = 10.0
+
+    # YAMNet track settings
+    SAMPLE_RATE_YAM:  int = 16_000
+    DURATION_YAM_S:   float = 3.0          # 48 000 samples at 16 kHz
+
+    def __init__(
+        self,
+        sample_rate: int = 22_050,
+        target_duration: float = 10.0,
+        bandpass_low: float = 20.0,
+        bandpass_high: float = 400.0,
+    ):
+        self.sample_rate = sample_rate
+        self.target_duration = target_duration
+        self.target_samples = int(sample_rate * target_duration)
+        self.bandpass_low = bandpass_low
+        self.bandpass_high = bandpass_high
+        logger.info(
+            f"PCGPreprocessor (YAMNet, 1224-feature) initialized: "
+            f"sr={sample_rate}, duration={target_duration}s"
+        )
+
+    # ── public API ────────────────────────────────────────────────────────────
+
+    def process(self, audio: np.ndarray, original_sr: Optional[int] = None) -> np.ndarray:
+        """
+        Process raw PCG audio to a 1224-feature numpy array.
+
+        Args:
+            audio:       Raw float32 audio samples.
+            original_sr: Source sample rate.  Will resample as needed.
+
+        Returns:
+            numpy array of shape (1224,)
+        """
+        try:
+            import tensorflow as tf
+        except ImportError as exc:
+            raise RuntimeError(
+                "tensorflow is required for PCG classification."
+            ) from exc
+
+        # ── Traditional track (22 050 Hz, 10 s) ──────────────────────────────
+        audio_trad = self._prepare_traditional(audio, original_sr)
+        trad_features = self._extract_traditional(audio_trad)   # (200,)
+
+        # ── YAMNet track (16 000 Hz, 3 s) ─────────────────────────────────────
+        audio_yam = self._prepare_yamnet(audio, original_sr)    # (48 000,)
+        audio_tf = tf.convert_to_tensor(audio_yam, dtype=tf.float32)
+        _scores, embeddings, _spec = _get_yamnet()(audio_tf)
+        yamnet_embedding = np.mean(embeddings.numpy(), axis=0)  # (1024,)
+
+        combined = np.concatenate([trad_features, yamnet_embedding]).astype(np.float32)
+        assert combined.shape == (1224,), (
+            f"Feature shape mismatch: expected (1224,), got {combined.shape}"
+        )
+        logger.info(f"PCG preprocessing complete: {combined.shape[0]} features")
+        return combined
+
+    def features_to_array(self, features: np.ndarray) -> np.ndarray:
+        """
+        Pass-through: process() already returns a flat array.
+        Kept for API compatibility with inference.py.
+        """
+        return features
+
+    # ── private helpers ───────────────────────────────────────────────────────
+
+    def _prepare_traditional(
+        self, audio: np.ndarray, original_sr: Optional[int]
+    ) -> np.ndarray:
+        """Resample → bandpass → pad/crop → peak-normalize (22 050 Hz, 10 s)."""
+        if original_sr and original_sr != self.SAMPLE_RATE_TRAD:
+            audio = librosa.resample(
+                audio, orig_sr=original_sr, target_sr=self.SAMPLE_RATE_TRAD
+            )
+        audio = self._bandpass_filter(audio, self.SAMPLE_RATE_TRAD)
+        audio = librosa.util.normalize(audio)
+        target = int(self.SAMPLE_RATE_TRAD * self.DURATION_SEC)
+        if len(audio) < target:
+            audio = np.pad(audio, (0, target - len(audio)))
+        else:
+            audio = audio[:target]
+        return audio
+
+    def _prepare_yamnet(
+        self, audio: np.ndarray, original_sr: Optional[int]
+    ) -> np.ndarray:
+        """Resample → pad/crop → peak-normalize (16 000 Hz, 3 s = 48 000 samples)."""
+        sr_src = original_sr if original_sr else self.sample_rate
+        if sr_src != self.SAMPLE_RATE_YAM:
+            audio = librosa.resample(
+                audio, orig_sr=sr_src, target_sr=self.SAMPLE_RATE_YAM
+            )
+        target = int(self.SAMPLE_RATE_YAM * self.DURATION_YAM_S)  # 48 000
+        if len(audio) < target:
+            audio = np.pad(audio, (0, target - len(audio)))
+        else:
+            audio = audio[:target]
+        max_val = np.max(np.abs(audio))
+        if max_val > 0:
+            audio = audio / max_val
+        return audio.astype(np.float32)
+
+    def _bandpass_filter(self, audio: np.ndarray, sr: int) -> np.ndarray:
+        """Butterworth bandpass (SOS form, same as training script)."""
+        from scipy.signal import butter, sosfilt
+        nyq = sr / 2.0
+        sos = butter(
+            4,
+            [self.bandpass_low / nyq, self.bandpass_high / nyq],
+            btype="band",
+            output="sos",
+        )
+        return sosfilt(sos, audio)
+
+    def _extract_traditional(self, audio: np.ndarray) -> np.ndarray:
+        """
+        Extract 200-dim traditional feature vector matching extract_features()
+        in the YAMNet training scripts.
+
+        Feature breakdown (200 total):
+          13-MFCC mean + std              = 26
+          spectral centroid  mean + std   =  2
+          spectral rolloff   mean + std   =  2
+          spectral bandwidth mean + std   =  2
+          zero-crossing rate mean + std   =  2
+          chroma (12)        mean + std   = 24
+          spectral contrast (7) mean+std  = 14
+          mel-spectrogram (128) mean only = 128
+                                      ─────────
+                                          200
+        Then z-score standardized across the 200 values (matching training).
+        """
+        sr = self.SAMPLE_RATE_TRAD
+
+        mfcc     = librosa.feature.mfcc(y=audio, sr=sr, n_mfcc=13)
+        sc       = librosa.feature.spectral_centroid(y=audio, sr=sr)[0]
+        rolloff  = librosa.feature.spectral_rolloff(y=audio, sr=sr)[0]
+        bw       = librosa.feature.spectral_bandwidth(y=audio, sr=sr)[0]
+        zcr      = librosa.feature.zero_crossing_rate(y=audio)[0]
+        chroma   = librosa.feature.chroma_stft(y=audio, sr=sr)
+        contrast = librosa.feature.spectral_contrast(y=audio, sr=sr)
+        mel      = librosa.feature.melspectrogram(y=audio, sr=sr)
+        mel_db   = librosa.power_to_db(mel)
+
+        feat = np.concatenate([
+            np.mean(mfcc, axis=1), np.std(mfcc, axis=1),       # 26
+            [np.mean(sc),   np.std(sc)],                         #  2
+            [np.mean(rolloff), np.std(rolloff)],                 #  2
+            [np.mean(bw),   np.std(bw)],                         #  2
+            [np.mean(zcr),  np.std(zcr)],                        #  2
+            np.mean(chroma, axis=1), np.std(chroma, axis=1),    # 24
+            np.mean(contrast, axis=1), np.std(contrast, axis=1), # 14
+            np.mean(mel_db, axis=1),                             # 128
+        ])
+
+        # Per-vector z-score standardization (exact match to training script)
+        eps = 1e-8
+        feat = (feat - np.mean(feat)) / (np.std(feat) + eps)
+        return feat.astype(np.float32)
+
+
+class PCGPreprocessorLegacy:
+    """
+    Legacy PCGPreprocessor — produces 558 features (40-MFCC + full librosa set).
+
+    This was the preprocessing for models/model1_xgboost/xgboost_model.pkl.
+    Kept for reference and backward compatibility testing.
+    NOT used in production since the registry now points to the new 1224-feature model.
+    """
+
     def __init__(
         self,
         sample_rate: int = 22050,
         target_duration: float = 10.0,
         bandpass_low: float = 20.0,
         bandpass_high: float = 400.0,
-        n_mfcc: int = 13
+        n_mfcc: int = 40,
     ):
         self.sample_rate = sample_rate
         self.target_duration = target_duration
@@ -34,189 +246,59 @@ class PCGPreprocessor:
         self.bandpass_low = bandpass_low
         self.bandpass_high = bandpass_high
         self.n_mfcc = n_mfcc
-        
-        logger.info(f"PCGPreprocessor initialized: sr={sample_rate}, duration={target_duration}s")
-    
-    def process(self, audio: np.ndarray, original_sr: Optional[int] = None) -> Dict[str, np.ndarray]:
-        """
-        Process PCG audio to features for XGBoost.
-        
-        Args:
-            audio: Raw audio samples
-            original_sr: Original sample rate (will resample if different)
-        
-        Returns:
-            Dictionary of features
-        """
-        try:
-            # Resample if needed
-            if original_sr and original_sr != self.sample_rate:
-                audio = librosa.resample(audio, orig_sr=original_sr, target_sr=self.sample_rate)
-                logger.info(f"Resampled from {original_sr} to {self.sample_rate} Hz")
 
-            # Filter before selecting the analysis window so the centered crop
-            # is taken from a clinically cleaner signal.
-            audio = self._bandpass_filter(audio)
-
-            # Standardize duration (pad or centered crop)
-            if len(audio) < self.target_samples:
-                # Pad with zeros
-                audio = np.pad(audio, (0, self.target_samples - len(audio)), mode='constant')
-            elif len(audio) > self.target_samples:
-                audio = self._center_crop(audio, self.target_samples)
-            
-            # Normalize
-            audio = self._normalize(audio)
-            
-            # Extract features
-            features = self._extract_features(audio)
-            
-            logger.info(f"PCG preprocessing complete: {len(features)} features")
-            return features
-            
-        except Exception as e:
-            logger.error(f"PCG preprocessing error: {e}")
-            raise
-
-    @staticmethod
-    def _center_crop(audio: np.ndarray, target_samples: int) -> np.ndarray:
-        """Crop the stable center of a longer clip to reduce start/end handling noise."""
-        start = max(0, (len(audio) - target_samples) // 2)
-        end = start + target_samples
-        return audio[start:end]
-    
-    def _bandpass_filter(self, audio: np.ndarray) -> np.ndarray:
-        """Apply Butterworth bandpass filter."""
-        nyquist = self.sample_rate / 2.0
-        low = self.bandpass_low / nyquist
-        high = self.bandpass_high / nyquist
-        
-        b, a = signal.butter(4, [low, high], btype='band')
-        filtered = signal.filtfilt(b, a, audio)
-        return filtered
-    
-    def _normalize(self, audio: np.ndarray) -> np.ndarray:
-        """Z-score normalization."""
-        mean = np.mean(audio)
+    def process(self, audio: np.ndarray, original_sr: Optional[int] = None) -> np.ndarray:
+        if original_sr and original_sr != self.sample_rate:
+            audio = librosa.resample(audio, orig_sr=original_sr, target_sr=self.sample_rate)
+        from scipy.signal import butter, filtfilt
+        nyq = self.sample_rate / 2.0
+        b, a = butter(4, [self.bandpass_low / nyq, self.bandpass_high / nyq], btype="band")
+        audio = filtfilt(b, a, audio)
+        if len(audio) < self.target_samples:
+            audio = np.pad(audio, (0, self.target_samples - len(audio)))
+        else:
+            audio = audio[:self.target_samples]
         std = np.std(audio)
         if std > 0:
-            return (audio - mean) / std
-        return audio - mean
-    
-    def _extract_features(self, audio: np.ndarray) -> Dict[str, np.ndarray]:
-        """
-        Extract acoustic features matching training pipeline (558 features):
-        - MFCC (40)
-        - Chroma (12)
-        - Mel Spectrogram (128)
-        - Spectral Centroid, Bandwidth, Rolloff, ZCR, RMS
-        """
-        features = {}
-        target_len = self.target_samples
-        n_fft = 2048
-        hop_length = 512
-        
-        # 1. MFCCs (40)
-        mfcc = librosa.feature.mfcc(y=audio, sr=self.sample_rate, n_mfcc=40, n_fft=n_fft, hop_length=hop_length)
-        features['mfcc_mean'] = np.mean(mfcc, axis=1)
-        features['mfcc_std'] = np.std(mfcc, axis=1)
-        
-        # 2. Delta MFCCs
-        delta_mfcc = librosa.feature.delta(mfcc)
-        features['delta_mfcc_mean'] = np.mean(delta_mfcc, axis=1)
-        features['delta_mfcc_std'] = np.std(delta_mfcc, axis=1)
-        
-        # 3. Delta-Delta MFCCs
-        delta2_mfcc = librosa.feature.delta(mfcc, order=2)
-        features['delta2_mfcc_mean'] = np.mean(delta2_mfcc, axis=1)
-        features['delta2_mfcc_std'] = np.std(delta2_mfcc, axis=1)
-        
-        # 4. Spectral Centroid
-        sc = librosa.feature.spectral_centroid(y=audio, sr=self.sample_rate)
-        features['sc_mean'] = np.array([np.mean(sc)])
-        features['sc_std'] = np.array([np.std(sc)])
-        
-        # 5. Spectral Rolloff
-        sr_ = librosa.feature.spectral_rolloff(y=audio, sr=self.sample_rate)
-        features['sr_mean'] = np.array([np.mean(sr_)])
-        features['sr_std'] = np.array([np.std(sr_)])
-        
-        # 6. Spectral Bandwidth
-        sb = librosa.feature.spectral_bandwidth(y=audio, sr=self.sample_rate)
-        features['sb_mean'] = np.array([np.mean(sb)])
-        features['sb_std'] = np.array([np.std(sb)])
-        
-        # 7. Zero-Crossing Rate
-        zcr = librosa.feature.zero_crossing_rate(audio)
-        features['zcr_mean'] = np.array([np.mean(zcr)])
-        features['zcr_std'] = np.array([np.std(zcr)])
-        
-        # 8. Chroma Features (12)
-        chroma = librosa.feature.chroma_stft(y=audio, sr=self.sample_rate, n_fft=n_fft, hop_length=hop_length)
-        features['chroma_mean'] = np.mean(chroma, axis=1)
-        features['chroma_std'] = np.std(chroma, axis=1)
-        
-        # 9. Mel Spectrogram statistics (128)
-        mel = librosa.feature.melspectrogram(y=audio, sr=self.sample_rate, n_fft=n_fft, hop_length=hop_length, n_mels=128)
-        mel_db = librosa.power_to_db(mel, ref=np.max)
-        features['mel_mean'] = np.mean(mel_db, axis=1)
-        features['mel_std'] = np.std(mel_db, axis=1)
-        
-        # 10. RMS Energy
-        rms = librosa.feature.rms(y=audio)
-        features['rms_mean'] = np.array([np.mean(rms)])
-        features['rms_std'] = np.array([np.std(rms)])
-        
-        # 11. Spectral Contrast
-        contrast = librosa.feature.spectral_contrast(y=audio, sr=self.sample_rate, n_fft=n_fft, hop_length=hop_length)
-        features['contrast_mean'] = np.mean(contrast, axis=1)
-        features['contrast_std'] = np.std(contrast, axis=1)
+            audio = (audio - np.mean(audio)) / std
+        return self._extract_features_to_array(audio)
 
-        # 12. Spectral Flatness
-        flatness = librosa.feature.spectral_flatness(y=audio)
-        features['flatness_mean'] = np.array([np.mean(flatness)])
-        features['flatness_std'] = np.array([np.std(flatness)])
-
-        # 13. Tonnetz
-        tonnetz = librosa.feature.tonnetz(y=librosa.effects.harmonic(audio), sr=self.sample_rate)
-        features['tonnetz_mean'] = np.mean(tonnetz, axis=1)
-        features['tonnetz_std'] = np.std(tonnetz, axis=1)
-        
+    def features_to_array(self, features: np.ndarray) -> np.ndarray:
         return features
-    
-    def features_to_array(self, features: Dict[str, np.ndarray]) -> np.ndarray:
-        """Convert feature dictionary to flat array for model input."""
-        flat = []
-        
-        # Ensure order matches validate_models.py exactly
-        flat.extend(features['mfcc_mean'])
-        flat.extend(features['mfcc_std'])
-        flat.extend(features['delta_mfcc_mean'])
-        flat.extend(features['delta_mfcc_std'])
-        flat.extend(features['delta2_mfcc_mean'])
-        flat.extend(features['delta2_mfcc_std'])
-        flat.extend(features['sc_mean'])
-        flat.extend(features['sc_std'])
-        flat.extend(features['sr_mean'])
-        flat.extend(features['sr_std'])
-        flat.extend(features['sb_mean'])
-        flat.extend(features['sb_std'])
-        flat.extend(features['zcr_mean'])
-        flat.extend(features['zcr_std'])
-        flat.extend(features['chroma_mean'])
-        flat.extend(features['chroma_std'])
-        flat.extend(features['mel_mean'])
-        flat.extend(features['mel_std'])
-        flat.extend(features['rms_mean'])
-        flat.extend(features['rms_std'])
-        flat.extend(features['contrast_mean'])
-        flat.extend(features['contrast_std'])
-        flat.extend(features['flatness_mean'])
-        flat.extend(features['flatness_std'])
-        flat.extend(features['tonnetz_mean'])
-        flat.extend(features['tonnetz_std'])
-        
-        return np.array(flat)
+
+    def _extract_features_to_array(self, audio: np.ndarray) -> np.ndarray:
+        n_fft, hop = 2048, 512
+        sr = self.sample_rate
+        mfcc     = librosa.feature.mfcc(y=audio, sr=sr, n_mfcc=40, n_fft=n_fft, hop_length=hop)
+        d_mfcc   = librosa.feature.delta(mfcc)
+        d2_mfcc  = librosa.feature.delta(mfcc, order=2)
+        sc       = librosa.feature.spectral_centroid(y=audio, sr=sr)
+        rolloff  = librosa.feature.spectral_rolloff(y=audio, sr=sr)
+        bw       = librosa.feature.spectral_bandwidth(y=audio, sr=sr)
+        zcr      = librosa.feature.zero_crossing_rate(audio)
+        chroma   = librosa.feature.chroma_stft(y=audio, sr=sr, n_fft=n_fft, hop_length=hop)
+        mel      = librosa.feature.melspectrogram(y=audio, sr=sr, n_fft=n_fft, hop_length=hop, n_mels=128)
+        mel_db   = librosa.power_to_db(mel, ref=np.max)
+        rms      = librosa.feature.rms(y=audio)
+        contrast = librosa.feature.spectral_contrast(y=audio, sr=sr, n_fft=n_fft, hop_length=hop)
+        flatness = librosa.feature.spectral_flatness(y=audio)
+        tonnetz  = librosa.feature.tonnetz(y=librosa.effects.harmonic(audio), sr=sr)
+        flat = np.concatenate([
+            np.mean(mfcc, axis=1),    np.std(mfcc, axis=1),
+            np.mean(d_mfcc, axis=1),  np.std(d_mfcc, axis=1),
+            np.mean(d2_mfcc, axis=1), np.std(d2_mfcc, axis=1),
+            [np.mean(sc)],   [np.std(sc)],
+            [np.mean(rolloff)], [np.std(rolloff)],
+            [np.mean(bw)],   [np.std(bw)],
+            [np.mean(zcr)],  [np.std(zcr)],
+            np.mean(chroma, axis=1), np.std(chroma, axis=1),
+            np.mean(mel_db, axis=1), np.std(mel_db, axis=1),
+            [np.mean(rms)],  [np.std(rms)],
+            np.mean(contrast, axis=1), np.std(contrast, axis=1),
+            [np.mean(flatness)], [np.std(flatness)],
+            np.mean(tonnetz, axis=1), np.std(tonnetz, axis=1),
+        ])
+        return flat.astype(np.float32)
 
 
 class PCGSeverityPreprocessor:
@@ -308,14 +390,23 @@ class PCGSeverityPreprocessor:
 
 class ECGPreprocessor:
     """
-    Deterministic ECG preprocessing for BiLSTM.
-    Sample rate and window size match the MIT-BIH training configuration.
+    Deterministic ECG preprocessing for the AuscultICor v26 SL model.
+
+    Default parameters match the AuscultICor_v26_SL.keras training configuration:
+      sample_rate = 125 Hz  (MIT-BIH native sampling rate)
+      window_size = 500     (samples per beat window after resampling)
+
+    The MQTT handler receives raw ECG from the ESP32 (500 Hz capture rate)
+    and resamples it to 125 Hz before windowing.
+
+    NOTE: Do NOT change sample_rate or window_size without retraining the model.
+    Both values are also configurable via env vars ECG_SAMPLE_RATE / ECG_WINDOW_SIZE.
     """
     
     def __init__(
         self,
-        sample_rate: int = 360,   # MIT-BIH native rate (matches training)
-        window_size: int = 300,   # matches WINDOW_SIZE in training script
+        sample_rate: int = 125,    # MIT-BIH native rate (matches AuscultICor v26 SL)
+        window_size: int = 500,    # samples per beat window (matches AuscultICor v26 SL)
         bandpass_low: float = 0.5,
         bandpass_high: float = 50.0
     ):

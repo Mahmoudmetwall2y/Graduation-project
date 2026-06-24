@@ -56,6 +56,18 @@ inference/models/*.pt
 inference/models/*.pth
 !inference/models/.gitkeep
 
+# New-models directory — large trained artifact files (do not commit)
+new-models/**/*.pkl
+new-models/**/*.keras
+new-models/**/*.h5
+new-models/**/*.pt
+new-models/**/*.pth
+# Allow config/documentation files inside new-models
+!new-models/**/config.json
+!new-models/**/*.py
+!new-models/**/*.md
+!new-models/**/.gitkeep
+
 specs/
 
 # Data
