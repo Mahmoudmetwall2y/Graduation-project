@@ -1,4 +1,4 @@
--- 025_visitor_role.sql
+-- 029_visitor_role.sql
 -- Rename 'operator' role to 'visitor' and tighten the role constraint
 
 -- Step 1: Drop existing check constraint
