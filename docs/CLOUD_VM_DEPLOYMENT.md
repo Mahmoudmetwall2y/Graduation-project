@@ -246,6 +246,8 @@ and add these secrets:
 - `PRODUCTION_SSH_USER`
 - `PRODUCTION_SSH_PRIVATE_KEY`
 - `PRODUCTION_SSH_HOST_KEY`
+- `TS_OAUTH_CLIENT_ID`
+- `TS_OAUTH_SECRET`
 
 Install `scripts/deploy-production.sh` on the VM as
 `/usr/local/sbin/asculticor-deploy`, owned by root and executable. The script
@@ -261,3 +263,26 @@ are active; the monitor deliberately does not bypass certificate validation.
 After all SSH secrets are configured, set the repository variable
 `PRODUCTION_DEPLOY_ENABLED=true`. Until then, production deployment jobs are
 skipped so incomplete secret configuration cannot create noisy failures.
+
+The production SSH host is the server's Tailscale address (`100.98.95.38`),
+not its public IPv4 address. Create a Tailscale OAuth client with permission to
+create ephemeral nodes tagged `tag:ci`. The tailnet policy must define that tag
+and allow it to reach only TCP port 22 on the production Tailscale address:
+
+```json
+{
+  "tagOwners": {
+    "tag:ci": ["autogroup:admin"]
+  },
+  "grants": [
+    {
+      "src": ["tag:ci"],
+      "dst": ["100.98.95.38"],
+      "ip": ["tcp:22"]
+    }
+  ]
+}
+```
+
+Merge these entries into the existing tailnet policy; do not replace unrelated
+rules. The GitHub runner is ephemeral and logs out when the job completes.
