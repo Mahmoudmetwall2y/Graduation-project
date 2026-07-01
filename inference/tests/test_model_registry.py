@@ -245,11 +245,17 @@ class TestInferenceEngineMocked:
 
             with (
                 patch("joblib.load", side_effect=[fake_xgb, fake_scaler]),
-                patch("tensorflow.keras.models.load_model", return_value=fake_keras),
+                patch(
+                    "tensorflow.keras.models.load_model", return_value=fake_keras
+                ) as load_model_mock,
             ):
                 engine = inf_mod.InferenceEngine(enable_demo_mode=False)
                 engine.pcg_preprocessor.process = MagicMock(
                     return_value=np.zeros(1224, dtype=np.float32)
+                )
+
+                load_model_mock.assert_called_once_with(
+                    str(ecg_path), compile=False
                 )
 
         yield engine, fake_xgb, fake_keras
