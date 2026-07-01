@@ -1,0 +1,57 @@
+name: Deploy Production
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: ["feature/my-feature"]
+  workflow_dispatch:
+
+concurrency:
+  group: asculticor-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Validate deployment secrets
+        env:
+          PROD_HOST: ${{ secrets.PRODUCTION_SSH_HOST }}
+          PROD_USER: ${{ secrets.PRODUCTION_SSH_USER }}
+          PROD_KEY: ${{ secrets.PRODUCTION_SSH_PRIVATE_KEY }}
+          PROD_HOST_KEY: ${{ secrets.PRODUCTION_SSH_HOST_KEY }}
+        run: |
+          test -n "$PROD_HOST"
+          test -n "$PROD_USER"
+          test -n "$PROD_KEY"
+          test -n "$PROD_HOST_KEY"
+
+      - name: Configure SSH
+        env:
+          PROD_KEY: ${{ secrets.PRODUCTION_SSH_PRIVATE_KEY }}
+          PROD_HOST_KEY: ${{ secrets.PRODUCTION_SSH_HOST_KEY }}
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$PROD_KEY" > ~/.ssh/asculticor_deploy
+          chmod 600 ~/.ssh/asculticor_deploy
+          printf '%s\n' "$PROD_HOST_KEY" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Deploy verified revision
+        env:
+          PROD_HOST: ${{ secrets.PRODUCTION_SSH_HOST }}
+          PROD_USER: ${{ secrets.PRODUCTION_SSH_USER }}
+        run: |
+          ssh -i ~/.ssh/asculticor_deploy \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            "$PROD_USER@$PROD_HOST" \
+            /usr/local/sbin/asculticor-deploy

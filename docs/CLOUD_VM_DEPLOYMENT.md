@@ -235,3 +235,25 @@ After the VM is live, the first workflow to activate is the LLM queue replacemen
 - run `n8n` on the same VM
 - let `n8n` poll `llm_reports`
 - replace the current GitHub cron path
+
+## 12. Controlled GitHub Deployment
+
+The production workflow runs only after the `CI` workflow succeeds on
+`feature/my-feature`. Configure a protected GitHub `production` environment
+and add these secrets:
+
+- `PRODUCTION_SSH_HOST`
+- `PRODUCTION_SSH_USER`
+- `PRODUCTION_SSH_PRIVATE_KEY`
+- `PRODUCTION_SSH_HOST_KEY`
+
+Install `scripts/deploy-production.sh` on the VM as
+`/usr/local/sbin/asculticor-deploy`, owned by root and executable. The script
+requires a clean deployment checkout, performs a fast-forward-only Git update,
+validates Compose, rebuilds the stack, waits for health endpoints, and rebuilds
+the previous Git revision if the new deployment fails health checks.
+
+Set the repository variable `PRODUCTION_HEALTH_URL` to the trusted public
+endpoint, for example `https://app.example.com/api/health`. The scheduled
+monitor checks it every ten minutes. Keep this unset until trusted DNS and TLS
+are active; the monitor deliberately does not bypass certificate validation.

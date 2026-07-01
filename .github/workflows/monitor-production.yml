@@ -1,0 +1,25 @@
+name: Monitor Production
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  health:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check public health endpoint
+        env:
+          HEALTH_URL: ${{ vars.PRODUCTION_HEALTH_URL }}
+        run: |
+          if [ -z "$HEALTH_URL" ]; then
+            echo "Repository variable PRODUCTION_HEALTH_URL is not configured; skipping."
+            exit 0
+          fi
+          curl --fail-with-body --silent --show-error \
+            --retry 3 --retry-all-errors --retry-delay 10 \
+            --max-time 30 "$HEALTH_URL"
