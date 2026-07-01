@@ -252,7 +252,12 @@ class InferenceEngine:
             # Required for v26 — model contains Lambda layers with Python bytecode.
             # This is safe here because we control the model file.
             keras.config.enable_unsafe_deserialization()
-            self.ecg_model = keras.models.load_model(str(cfg.artifact_path))
+            # Inference does not need the optimizer or training-only custom
+            # losses. Skipping compilation also keeps exported models portable
+            # when those Python loss functions are not present in production.
+            self.ecg_model = keras.models.load_model(
+                str(cfg.artifact_path), compile=False
+            )
             logger.info(f"[Model 2] Loaded ECG model from {cfg.artifact_path}")
 
             # Load metadata dict (label_encoder_SL.pkl)
