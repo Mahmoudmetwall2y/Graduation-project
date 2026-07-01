@@ -18,7 +18,9 @@ httpx==0.24.1
 # ML & Signal Processing
 numpy>=2.0.0,<3.0.0
 scipy>=1.13.0,<2.0.0
-scikit-learn==1.6.1
+# Match the version used to serialize final_scaler.pkl. Loading scikit-learn
+# pickle artifacts across versions is unsupported and can change predictions.
+scikit-learn==1.8.0
 xgboost>=2.0.2,<3.0.0
 tensorflow>=2.18.0,<2.20.0
 tensorflow-hub>=0.16.0    # Required for YAMNet PCG embedding (PCGPreprocessor)
