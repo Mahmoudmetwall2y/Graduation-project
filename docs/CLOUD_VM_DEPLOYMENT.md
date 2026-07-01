@@ -257,3 +257,7 @@ Set the repository variable `PRODUCTION_HEALTH_URL` to the trusted public
 endpoint, for example `https://app.example.com/api/health`. The scheduled
 monitor checks it every ten minutes. Keep this unset until trusted DNS and TLS
 are active; the monitor deliberately does not bypass certificate validation.
+
+After all SSH secrets are configured, set the repository variable
+`PRODUCTION_DEPLOY_ENABLED=true`. Until then, production deployment jobs are
+skipped so incomplete secret configuration cannot create noisy failures.
