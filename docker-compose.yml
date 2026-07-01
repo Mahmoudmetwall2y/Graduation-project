@@ -92,8 +92,8 @@ services:
       - MODEL_1_ENABLED=${MODEL_1_ENABLED:-true}
       - MODEL_1_VERSION=${MODEL_1_VERSION:-v2.0.0}
       # ─ Model 2: ECG AuscultICor_Final [ACTIVE] ───────────────────────────
-      - MODEL_2_PATH=${MODEL_2_PATH:-/new-models/ecg_mitbih/FINAL_UNIFIED_MODEL.keras}
-      - MODEL_2_META_PATH=${MODEL_2_META_PATH:-/new-models/ecg_mitbih/label_encoder.pkl}
+      - MODEL_2_PATH=${MODEL_2_PATH:-/new-models/ecg_mitbih_single_lead/AuscultICor_v26_SL.keras}
+      - MODEL_2_META_PATH=${MODEL_2_META_PATH:-/new-models/ecg_mitbih_single_lead/label_encoder_SL.pkl}
       - MODEL_2_ENABLED=${MODEL_2_ENABLED:-true}
       - MODEL_2_VERSION=${MODEL_2_VERSION:-v2.0.0}
       # ─ Model 3: PyTorch CNN Murmur Characterization [ACTIVE] ────────────
