@@ -49,24 +49,8 @@ out/
 *.egg-info/
 *.tsbuildinfo
 
-# Models (large files)
-inference/models/*.pkl
-inference/models/*.h5
-inference/models/*.pt
-inference/models/*.pth
-!inference/models/.gitkeep
-
-# New-models directory — large trained artifact files (do not commit)
-new-models/**/*.pkl
-new-models/**/*.keras
-new-models/**/*.h5
-new-models/**/*.pt
-new-models/**/*.pth
-# Allow config/documentation files inside new-models
-!new-models/**/config.json
-!new-models/**/*.py
-!new-models/**/*.md
-!new-models/**/.gitkeep
+# Runtime model artifacts are versioned with the application so a clean
+# production clone contains everything required by the inference service.
 
 specs/
 
