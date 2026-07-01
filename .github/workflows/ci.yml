@@ -94,6 +94,9 @@ jobs:
           test -f supabase/migrations/024_add_patient_email.sql
           test -f supabase/migrations/025_auto_generate_patient_mrn.sql
           test -f supabase/migrations/026_device_mqtt_credentials.sql
+          test -f supabase/migrations/027_live_metrics_cleanup.sql
+          test -f supabase/migrations/028_device_name_unique_per_org.sql
+          test -f supabase/migrations/029_visitor_role.sql
           test -f supabase/migrations/apply_this_in_supabase.sql
 
       - name: SQL script non-empty check
@@ -105,4 +108,7 @@ jobs:
           test -s supabase/migrations/024_add_patient_email.sql
           test -s supabase/migrations/025_auto_generate_patient_mrn.sql
           test -s supabase/migrations/026_device_mqtt_credentials.sql
+          test -s supabase/migrations/027_live_metrics_cleanup.sql
+          test -s supabase/migrations/028_device_name_unique_per_org.sql
+          test -s supabase/migrations/029_visitor_role.sql
           test -s supabase/migrations/apply_this_in_supabase.sql

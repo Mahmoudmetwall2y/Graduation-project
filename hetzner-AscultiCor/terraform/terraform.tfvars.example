@@ -1,0 +1,15 @@
+hcloud_token = "replace-with-hetzner-cloud-api-token"
+admin_cidrs = ["203.0.113.10/32"]
+ssh_key_name = "asculticor-deploy"
+server_type = "cx33"
+location = "fsn1"
+enable_web_ports = true
+enable_backups = false
+
+# Create these under Hetzner Console -> Security -> S3 credentials.
+object_storage_access_key = "replace-with-s3-access-key"
+object_storage_secret_key = "replace-with-s3-secret-key"
+object_storage_location = "fsn1"
+
+# Bucket names are globally unique across Hetzner Object Storage.
+backup_bucket_name = "asculticor-production-backups"
