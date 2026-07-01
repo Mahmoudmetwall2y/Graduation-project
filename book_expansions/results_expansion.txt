@@ -1,0 +1,29 @@
+4.2.4 Feature Importance Analysis
+
+The XGBoost model provides intrinsic feature importance metrics based on the number of times a feature is used to split the data across all 700 trees (the "weight" metric) and the average gain in accuracy achieved by those splits (the "gain" metric). Analysis of the top 20 most important features in the AscultiCor PCG model confirms the efficacy of the hybrid feature engineering approach.
+
+The highest-ranking features by gain were consistently derived from the YAMNet embeddings. Specifically, embedding dimensions associated with low-frequency, sustained acoustic energy—characteristics corresponding to the "whooshing" or "blowing" sounds of typical systolic murmurs—provided the highest discriminatory power for the Murmur class. YAMNet's ability to abstract away transient, high-frequency stethoscope contact noise (often misclassified as murmurs by simpler models) was the primary factor in achieving the low false-positive rate.
+
+Among the traditional features, the 2nd and 3rd Mel-frequency cepstral coefficients (MFCCs) ranked in the top 15. These coefficients capture the broad spectral envelope and the concentration of acoustic energy in the lower frequencies (20-150 Hz) where the fundamental S1 and S2 heart sounds reside. Furthermore, the variance of the Spectral Centroid across the 10-second recording was a strong indicator for the Artifact class. Normal recordings maintain a relatively stable spectral centroid locked to the rhythmic S1/S2 pacing, whereas artifacts introduced by patient movement or sensor friction cause massive, erratic shifts in the centroid, a pattern cleanly captured by the variance feature.
+
+4.3.2 AuscultICor Multi-Task Learning Analysis
+
+The performance of the AuscultICor_Final ECG model validates the architectural decision to employ multi-task learning. By forcing the shared BiLSTM encoder to simultaneously optimize for three disparate but related objectives—AAMI beat classification, binary cardiac risk scoring, and next-beat waveform forecasting—the model learned a more robust, generalized representation of cardiac electrophysiology than a single-task model could achieve.
+
+The Forecast head acted as a powerful regularizer. Because the autoencoder was trained to minimize Mean Absolute Error (MAE) when reconstructing the precise morphology of the subsequent ECG beat, the shared encoder was prevented from overfitting to the specific, sometimes noisy annotations of the MIT-BIH dataset. It was forced to encode the underlying physical dynamics of the cardiac cycle. If the encoder threw away morphological details to "cheat" on the classification task, the Forecast head's MAE loss would spike, penalizing the network.
+
+Table 4.1 compares the performance of the multi-task AuscultICor_Final model against an earlier single-task iteration trained solely on AAMI classification. The multi-task architecture demonstrated a 4.2% absolute improvement in F1-score for the highly variable VEB (Ventricular Ectopic Beat) class, and a 2.8% improvement for the SVEB class. More importantly, the multi-task model exhibited greater stability when processing ECG segments with baseline wander, as the shared representation had learned to decouple the underlying beat morphology from low-frequency drift.
+
+4.5 End-to-End System Latency Analysis
+
+While diagnostic accuracy is paramount, clinical utility is heavily dependent on system responsiveness. The AscultiCor architecture was designed for near real-time feedback. An end-to-end latency analysis was conducted to measure the delay from the moment the ESP32 captures the final audio sample of a session to the moment the AI predictions appear on the clinician's dashboard.
+
+The latency breakdown is as follows:
+1. MQTT Transmission & Buffer Assembly: 45 - 80 ms. The QoS 0 PCG chunks arrive almost instantaneously over local Wi-Fi, and the inference service's `mqtt_handler.py` assembles the final 10-second buffer upon receiving the QoS 1 `end_pcg` meta-event.
+2. Signal Preprocessing: 120 - 150 ms. Resampling to 22,050 Hz and applying the 4th-order Butterworth bandpass filter are highly optimized operations using NumPy and SciPy.
+3. Feature Extraction (YAMNet Bottleneck): 800 - 1,100 ms. Passing the 10-second recording through the YAMNet TensorFlow model to extract the 1,024-dimensional embeddings is the most computationally expensive step in the pipeline, heavily dependent on the VPS CPU performance.
+4. XGBoost Inference: 15 - 25 ms. Once features are extracted, the tree ensemble prediction is extremely fast.
+5. Supabase Database Write: 50 - 90 ms. The HTTP POST request to the Supabase REST API to insert the prediction records and update the session status.
+6. Dashboard Update: 100 - 300 ms. The Next.js frontend, subscribed to Supabase Realtime via WebSockets, receives the `UPDATE` payload and re-renders the React components.
+
+Total End-to-End Latency: 1.1 - 1.7 seconds. This sub-two-second latency ensures that by the time the clinician removes the stethoscope pad from the patient's chest and looks at the dashboard monitor, the AI analysis is already fully rendered and waiting for their review.

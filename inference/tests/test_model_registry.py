@@ -4,8 +4,8 @@ Smoke tests for the model registry and inference engine.
 These tests verify the integration without requiring real model files
 by patching the filesystem and ML library calls. They confirm:
 
-  1. Registry loads with correct slot definitions (2 active + 1 pending).
-  2. Disabled Model 3 does not crash the system on startup.
+  1. Registry loads all three slot definitions and the Model 3 contract.
+  2. Model 3 can still be disabled without crashing the system.
   3. Missing artifact on an ENABLED model raises a clear, logged error.
   4. Inference response handles 2 active models correctly.
   5. Enabling a missing model produces a clear error (not a crash).
@@ -55,6 +55,12 @@ def _env_with_demo(demo: bool = True, **extra):
         "MODEL_1_VERSION": "v2.0.0",
         "MODEL_2_VERSION": "v2.0.0",
         "MODEL_3_VERSION": "pending",
+        # Unit tests must never deserialize repository artifacts implicitly.
+        "MODEL_1_PATH": "/nonexistent/test/model1.pkl",
+        "MODEL_1_SCALER_PATH": "/nonexistent/test/scaler.pkl",
+        "MODEL_2_PATH": "/nonexistent/test/model2.keras",
+        "MODEL_2_META_PATH": "/nonexistent/test/model2-meta.pkl",
+        "MODEL_3_PATH": "/nonexistent/test/model3.pkl",
         "PCG_SAMPLE_RATE": "22050",
         "PCG_TARGET_DURATION": "10",
         "ECG_SAMPLE_RATE": "125",
@@ -82,8 +88,8 @@ class TestModelRegistry:
                 f"{list(reg.MODEL_REGISTRY.keys())}"
             )
 
-    def test_two_slots_are_enabled(self):
-        """Exactly 2 model slots should be enabled by default."""
+    def test_model3_can_be_disabled(self):
+        """The test environment can explicitly leave only Models 1 and 2 active."""
         with patch.dict(os.environ, _env_with_demo()):
             import importlib
             import inference.app.model_registry as reg
@@ -91,8 +97,8 @@ class TestModelRegistry:
             enabled = reg.list_active_models()
             assert len(enabled) == 2, f"Expected 2 active, got {[m.key for m in enabled]}"
 
-    def test_model3_is_pending(self):
-        """Model 3 severity slot must be disabled/pending by default."""
+    def test_disabled_model3_is_reported_pending(self):
+        """A disabled Model 3 is represented as unavailable in the registry."""
         with patch.dict(os.environ, _env_with_demo()):
             import importlib
             import inference.app.model_registry as reg
@@ -140,19 +146,23 @@ class TestInferenceEngineDemo:
             import inference.app.inference as inf_mod
             importlib.reload(reg)
             importlib.reload(inf_mod)
-            yield inf_mod.InferenceEngine(enable_demo_mode=True)
+            engine = inf_mod.InferenceEngine(enable_demo_mode=True)
+            engine.pcg_preprocessor.process = MagicMock(
+                return_value=np.zeros(1224, dtype=np.float32)
+            )
+            yield engine
 
     def test_engine_starts_in_demo_mode(self, engine):
         """Engine must start without errors in demo mode."""
         assert engine.demo_mode_active is True
 
-    def test_model3_pending_does_not_crash(self, engine):
-        """predict_murmur_severity must return a pending stub, not crash."""
+    def test_model3_disabled_does_not_crash(self, engine):
+        """A deliberately disabled severity model returns a clear response."""
         dummy_audio = np.zeros(22050, dtype=np.float32)
         result = engine.predict_murmur_severity(dummy_audio, 22050)
         assert result is not None, "Should return a response, not None"
-        assert result.get("status") == "pending", (
-            f"Expected status='pending', got: {result}"
+        assert result.get("status") == "disabled", (
+            f"Expected status='disabled', got: {result}"
         )
 
     def test_pcg_demo_prediction_returns_3_classes(self, engine):
@@ -238,6 +248,9 @@ class TestInferenceEngineMocked:
                 patch("tensorflow.keras.models.load_model", return_value=fake_keras),
             ):
                 engine = inf_mod.InferenceEngine(enable_demo_mode=False)
+                engine.pcg_preprocessor.process = MagicMock(
+                    return_value=np.zeros(1224, dtype=np.float32)
+                )
 
         yield engine, fake_xgb, fake_keras
 
@@ -249,12 +262,12 @@ class TestInferenceEngineMocked:
             f"Expected 2 loaded, got {status['models_loaded']}: {status['details']}"
         )
 
-    def test_model3_pending_no_crash(self, engine_with_mocks):
-        """Model 3 must still return pending without crashing."""
+    def test_model3_disabled_no_crash(self, engine_with_mocks):
+        """Model 3 can be disabled without affecting the other models."""
         engine, _, _ = engine_with_mocks
         audio = np.zeros(22050, dtype=np.float32)
         result = engine.predict_murmur_severity(audio, 22050)
-        assert result.get("status") == "pending"
+        assert result.get("status") == "disabled"
 
     def test_pcg_prediction_uses_new_model(self, engine_with_mocks):
         """PCG prediction must call the mocked XGBoost model."""
@@ -308,3 +321,46 @@ class TestMissingEnabledModel:
         # Must report model as not loaded
         status = engine.get_model_status()
         assert not status["details"]["pcg_xgboost"]["loaded"]
+
+
+class TestDeliveredSeverityCNN:
+    """Validate the architecture and labels against the delivered checkpoint."""
+
+    def test_registry_has_six_confirmed_heads(self):
+        env = _env_with_demo(MODEL_3_ENABLED="true")
+        with patch.dict(os.environ, env):
+            import importlib
+            import inference.app.model_registry as reg
+            importlib.reload(reg)
+            mapping = reg.get_model_config("severity_cnn").label_mapping
+
+        assert set(mapping["classes"]) == {
+            "timing", "shape", "grading", "pitch", "quality", "location"
+        }
+        assert {key: len(value) for key, value in mapping["classes"].items()} == {
+            "timing": 5, "shape": 5, "grading": 4,
+            "pitch": 4, "quality": 4, "location": 8,
+        }
+
+    def test_delivered_checkpoint_matches_runtime_architecture(self):
+        torch = pytest.importorskip("torch")
+        artifact = Path(__file__).parents[2] / "new-models" / "CNN" / "best_model.pkl"
+        if not artifact.exists():
+            pytest.skip("Delivered CNN artifact is not present in this checkout")
+
+        from inference.app.severity_cnn import MurmurSeverityCNN
+
+        head_sizes = {
+            "timing": 5, "shape": 5, "grading": 4,
+            "pitch": 4, "quality": 4, "location": 8,
+        }
+        model = MurmurSeverityCNN(head_sizes, input_channels=4)
+        state_dict = torch.load(str(artifact), map_location="cpu", weights_only=True)
+        model.load_state_dict(state_dict, strict=True)
+        model.eval()
+
+        with torch.inference_mode():
+            outputs = model(torch.zeros(1, 4, 128, 216))
+        assert {key: tuple(value.shape) for key, value in outputs.items()} == {
+            key: (1, size) for key, size in head_sizes.items()
+        }

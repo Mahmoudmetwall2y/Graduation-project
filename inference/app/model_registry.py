@@ -16,15 +16,8 @@ From inference.py (or any other module):
     if cfg.enabled:
         model_path = cfg.artifact_path  # resolved from env var
 
-How to add Model 3 later
-------------------------
-1. Place the severity-CNN model file in /new-models/<filename>.
-2. Set MODEL_3_PATH in your .env file:
-       MODEL_3_PATH=/new-models/<pending-severity-model-file>
-3. Set MODEL_3_ENABLED=true in your .env file.
-4. Search for TODO(model3) tags in this file and in inference.py,
-   fill in the preprocessing function name and label mapping.
-5. Restart the inference service — no other code changes required.
+Model 3 is the delivered PyTorch state_dict at
+new-models/CNN/best_model.pkl; its architecture lives in severity_cnn.py.
 """
 
 import os
@@ -226,51 +219,44 @@ def _build_registry() -> Dict[str, ModelConfig]:
         ),
     )
 
-    # ── Model 3: CNN Murmur Severity — PENDING ────────────────────────────────
-    # Status:   DISABLED — the team is still preparing this model.
-    # Formerly: Model 2 (CNN severity, multi-output) in the old 3-model setup.
-    #
-    # To enable Model 3 when the team delivers it:
-    # ─────────────────────────────────────────────
-    # 1. Place the model file in /new-models/<filename>.
-    # 2. Set in .env:
-    #        MODEL_3_PATH=/new-models/<severity-model-file>
-    #        MODEL_3_ENABLED=true
-    #        MODEL_3_VERSION=v2.0.0
-    # 3. If the model needs a label encoder or config JSON, set:
-    #        MODEL_3_CONFIG_PATH=/new-models/<severity-config.json>
-    # 4. TODO(model3-preprocessing): In inference.py, uncomment the severity
-    #    preprocessor initialization and the _load_severity_model() block.
-    # 5. TODO(model3-labels): Verify or update the label_mapping below to match
-    #    the new model's training output classes.
-    # 6. TODO(model3-inference): In inference.py predict_murmur_severity(),
-    #    remove the early-return pending stub and re-enable the real inference path.
-    # 7. Restart the inference service — no further changes needed.
-    # ─────────────────────────────────────────────────────────────────────────
+    # ── Model 3: PyTorch CNN Murmur Characterization ─────────────────────────
+    # Artifact: new-models/CNN/best_model.pkl (state_dict, four input channels).
+    # Class order is taken from the delivered per-head confusion matrices.
     model3 = ModelConfig(
         key="severity_cnn",
-        name="CNN Murmur Severity Classifier (PENDING — not yet delivered)",
+        name="CNN Murmur Characterization Classifier",
         task="murmur_severity_classification",
-        version=_env_str("MODEL_3_VERSION", "pending"),
-        enabled=_env_bool("MODEL_3_ENABLED", "false"),
+        version=_env_str("MODEL_3_VERSION", "v1.0.0"),
+        enabled=_env_bool("MODEL_3_ENABLED", "true"),
         artifact_path=_env_path(
             "MODEL_3_PATH",
-            None,  # TODO(model3): Set MODEL_3_PATH when file is ready
+            str(NEW_MODELS_DIR / "CNN" / "best_model.pkl"),
         ),
-        aux_paths={
-            # TODO(model3-config): Set MODEL_3_CONFIG_PATH when config JSON is ready
-            "config": _env_path("MODEL_3_CONFIG_PATH", None),
-        },
+        aux_paths={},
         label_mapping={
-            # TODO(model3-labels): Populate when the team delivers the model.
-            # Reference for the OLD severity model (model2_cnn_severity):
-            # label_keys: systolic_timing, systolic_shape, systolic_grading,
-            #             systolic_pitch, systolic_quality, murmur_locations, murmur_present
+            "head_to_output": {
+                "timing": "systolic_timing",
+                "shape": "systolic_shape",
+                "grading": "systolic_grading",
+                "pitch": "systolic_pitch",
+                "quality": "systolic_quality",
+                "location": "murmur_locations",
+            },
+            "classes": {
+                "timing": ["Early-systolic", "Holosystolic", "Late-systolic", "Mid-systolic", "Unknown"],
+                "shape": ["Crescendo", "Decrescendo", "Diamond", "Plateau", "Unknown"],
+                "grading": ["I/VI", "II/VI", "III/VI", "Unknown"],
+                "pitch": ["High", "Low", "Medium", "Unknown"],
+                "quality": ["Blowing", "Harsh", "Musical", "Unknown"],
+                "location": ["AV", "Left_heart", "MV", "MV_with_right", "Multiple_valves", "PV", "Right_heart", "TV"],
+            },
+            "input_channels": 4,
+            "channel_order": ["AV", "MV", "PV", "TV"],
         },
         notes=(
-            "PENDING — model file not yet delivered. "
-            "Set MODEL_3_ENABLED=true and MODEL_3_PATH once ready. "
-            "See TODO(model3) tags in this file and inference.py."
+            "Active. Delivered PyTorch state_dict with six output heads: timing, "
+            "shape, grading, pitch, quality, and location. Four spectrogram "
+            "channels correspond to AV/MV/PV/TV auscultation positions."
         ),
     )
 

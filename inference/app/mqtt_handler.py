@@ -953,10 +953,11 @@ class MQTTHandler:
                     _executor,
                     self.inference_engine.predict_murmur_severity,
                     audio,
-                    buffer.sample_rate
+                    buffer.sample_rate,
+                    buffer.valve_position,
                 )
 
-                if severity_result:
+                if severity_result and not severity_result.get('error'):
                     severity_id = await loop.run_in_executor(
                         _executor,
                         self.supabase.create_murmur_severity,
@@ -985,6 +986,11 @@ class MQTTHandler:
                         severity_result.get('preprocessing_version', 'v1.0.0'),
                         severity_result,
                         severity_result.get('latency_ms', 0)
+                    )
+                elif severity_result:
+                    logger.error(
+                        f"Severity inference unavailable for session {session_id}: "
+                        f"{severity_result.get('detail', severity_result.get('error'))}"
                     )
 
             # Audit log

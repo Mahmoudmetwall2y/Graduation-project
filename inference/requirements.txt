@@ -22,6 +22,8 @@ scikit-learn==1.6.1
 xgboost>=2.0.2,<3.0.0
 tensorflow>=2.18.0,<2.20.0
 tensorflow-hub>=0.16.0    # Required for YAMNet PCG embedding (PCGPreprocessor)
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.7.1+cpu           # Required for the delivered Model 3 checkpoint
 librosa==0.10.1
 soundfile==0.12.1
 
