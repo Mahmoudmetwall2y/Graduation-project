@@ -1,0 +1,21 @@
+3.6.2 NGINX Configuration Detail and Security Headers
+
+The NGINX reverse proxy serves as the singular public entry point for all incoming traffic to the AscultiCor system, shielding the internal microservices from direct internet exposure. The DevOps team engineered a highly secure `nginx.conf` template that mandates Transport Layer Security (TLS) for all external connections.
+
+All HTTP traffic arriving on port 80 is immediately intercepted by a `server` block that issues a HTTP 301 Permanent Redirect to the corresponding HTTPS URL on port 443. The HTTPS virtual host terminates the TLS connection using Let's Encrypt certificates or self-signed certificates in development. To protect against protocol downgrade attacks, NGINX injects the `Strict-Transport-Security` (HSTS) header, instructing browsers to only connect via HTTPS for the next year. 
+
+Further security hardening is achieved through the injection of standard security headers on every response: `X-Frame-Options: DENY` prevents the dashboard from being embedded in a malicious iframe (Clickjacking defense), and `X-Content-Type-Options: nosniff` prevents the browser from incorrectly executing user-uploaded files as malicious scripts.
+
+NGINX also handles the complex routing required by the MQTT broker's WebSockets interface. The Mosquitto broker exposes MQTT over WebSockets on port 9001 to support real-time data streaming directly to the browser. NGINX proxies incoming requests on the `/mqtt` path to the Mosquitto container, explicitly injecting the `Upgrade: websocket` and `Connection: "Upgrade"` headers required to elevate the standard HTTP connection to a persistent WebSocket tunnel.
+
+3.6.5 Production Deployment Runbook
+
+The deployment of the AscultiCor platform to a production Linux VPS is fully automated via Docker Compose, but requires a strict initialization sequence orchestrated by the DevOps team. The deployment runbook begins with the provisioning of a fresh Ubuntu 24.04 LTS server. 
+
+First, the server's firewall (UFW) is configured to deny all incoming traffic except for SSH (port 22), HTTP (port 80), and HTTPS (port 443). The Docker Engine and Docker Compose plugin are installed via the official apt repositories. 
+
+The operator then clones the AscultiCor repository and creates the required `.env` file from the provided `.env.example` template. This file must be populated with high-entropy cryptographic secrets, including the `SUPABASE_JWT_SECRET`, the `MQTT_DEVICE_PASSWORD_PEPPER`, and the `ASCULTICOR_INTERNAL_API_TOKEN`. Crucially, the DevOps security smoke test (`security-smoke.ps1`) verifies that this `.env` file is never accidentally committed to version control by ensuring it is present in the `.gitignore` file.
+
+With the configuration complete, the operator executes `docker compose up -d`. Docker Compose reads the `docker-compose.yml` file, creates the isolated `asculticor-network` bridge, provisions the persistent named volumes for the Mosquitto broker and inference cache, and pulls the necessary base images. 
+
+Once the containers are running, a Let's Encrypt Certbot container is temporarily spun up to execute the ACME HTTP-01 challenge, verifying domain ownership and provisioning the production TLS certificates. These certificates are mapped into the NGINX container's volume, and NGINX is hot-reloaded to apply the encryption. Finally, the operator verifies system health by logging into the Next.js dashboard and observing the successful execution of the n8n Workflow 00 (Connectivity Check), which confirms that all microservices are communicating correctly across the internal Docker network.

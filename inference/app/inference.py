@@ -9,7 +9,7 @@ Model slots
 -----------
   Model 1 – pcg_xgboost   : XGBoost PCG heart-sound classifier (ACTIVE)
   Model 2 – ecg_bilstm    : ECG AuscultICor v26 SL — single-lead, multi-head (ACTIVE)
-  Model 3 – severity_cnn  : CNN murmur severity (PENDING — see TODO(model3))
+  Model 3 – severity_cnn  : PyTorch multi-head murmur characterization (ACTIVE)
 
 Falls back to deterministic demo mode if all enabled models fail to load
 and ENABLE_DEMO_MODE=true.
@@ -62,12 +62,7 @@ class InferenceEngine:
       system falls back to demo mode if all enabled models fail.
     * Demo mode remains fully functional for offline development.
 
-    Adding Model 3 later
-    --------------------
-    1. Complete the TODO(model3) steps in model_registry.py.
-    2. Uncomment the _load_severity_model() call in _load_models().
-    3. Remove the pending stub from predict_murmur_severity().
-    4. Set MODEL_3_ENABLED=true in .env and restart.
+    Model 3 is loaded from its PyTorch state_dict independently of Models 1/2.
     """
 
     def __init__(self, enable_demo_mode: bool = True):
@@ -91,13 +86,9 @@ class InferenceEngine:
         self.ecg_meta: Dict[str, Any] = {}   # metadata dict from label_encoder.pkl
         self.ecg_classes: list = []          # resolved class list
 
-        # ── Model 3: CNN Severity (PENDING) ──────────────────────────────────
-        # TODO(model3-preprocessing): When the team delivers the severity model,
-        # initialize PCGSeverityPreprocessor here and uncomment _load_severity_model()
-        # in _load_models() below.
+        # ── Model 3: CNN Murmur Characterization ────────────────────────────
         self.severity_model = None
-        self.severity_encoders: Dict = {}
-        self.severity_config: Dict = {}
+        self.severity_device = None
 
         # ── Signal preprocessors ─────────────────────────────────────────────
         pcg_sr = int(os.getenv("PCG_SAMPLE_RATE", 22050))
@@ -120,8 +111,7 @@ class InferenceEngine:
             window_size=ecg_ws,
         )
 
-        # TODO(model3-preprocessing): Uncomment when severity model is ready:
-        # self.severity_preprocessor = PCGSeverityPreprocessor(sample_rate=pcg_sr)
+        self.severity_preprocessor = PCGSeverityPreprocessor(sample_rate=pcg_sr)
 
         # Load all enabled models
         self._load_models()
@@ -159,10 +149,7 @@ class InferenceEngine:
         """
         self._load_pcg_model()
         self._load_ecg_model()
-
-        # TODO(model3): Uncomment the line below when the CNN severity model is ready.
-        # After uncommenting, also remove the pending stub in predict_murmur_severity().
-        # self._load_severity_model()
+        self._load_severity_model()
 
         # Log pending slots explicitly
         for cfg in list_pending_models():
@@ -312,12 +299,54 @@ class InferenceEngine:
             }
 
 
-    # TODO(model3): When the team delivers the CNN severity model, implement
-    # _load_severity_model() here following the same pattern as the methods above.
-    # Then uncomment its call in _load_models().
-    # Reference: the OLD severity model lived at models/model2_cnn_severity/best_model.keras
-    # and used PCGSeverityPreprocessor + per-head label encoders stored as encoder_*.pkl.
-    # The new model may differ — verify its input shape and label keys before wiring.
+    def _load_severity_model(self):
+        """Load Model 3 from its delivered PyTorch state_dict checkpoint."""
+        cfg = get_model_config("severity_cnn")
+        if not cfg.enabled:
+            logger.info("[Model 3] severity_cnn is disabled — skipping.")
+            return
+
+        try:
+            if cfg.artifact_path is None or not cfg.artifact_path.exists():
+                raise FileNotFoundError(
+                    f"Model 3 (CNN) artifact not found at: {cfg.artifact_path}. "
+                    "Set MODEL_3_PATH in your .env file."
+                )
+
+            import torch
+            from .severity_cnn import MurmurSeverityCNN
+
+            classes = cfg.label_mapping["classes"]
+            model = MurmurSeverityCNN(
+                {key: len(labels) for key, labels in classes.items()},
+                input_channels=int(cfg.label_mapping.get("input_channels", 4)),
+            )
+            checkpoint = torch.load(
+                str(cfg.artifact_path), map_location="cpu", weights_only=True
+            )
+            if isinstance(checkpoint, dict) and "state_dict" in checkpoint:
+                checkpoint = checkpoint["state_dict"]
+            if not isinstance(checkpoint, dict):
+                raise TypeError("CNN checkpoint must contain a PyTorch state_dict")
+
+            model.load_state_dict(checkpoint, strict=True)
+            model.eval()
+            self.severity_model = model
+            self.severity_device = torch.device("cpu")
+            self.model_status["severity_cnn"] = {
+                "loaded": True, "error": None,
+                "enabled": True, "pending": False,
+            }
+            logger.info(
+                f"[Model 3] severity_cnn loaded successfully (version={cfg.version})"
+            )
+        except Exception as exc:
+            err = str(exc)
+            logger.error(f"[Model 3] severity_cnn FAILED to load: {err}")
+            self.model_status["severity_cnn"] = {
+                "loaded": False, "error": err,
+                "enabled": True, "pending": False,
+            }
 
     def _finalize_mode(self):
         """Decide whether to run in real or demo mode based on what loaded."""
@@ -548,59 +577,24 @@ class InferenceEngine:
             raise
 
 
-    # ─── Murmur Severity (PENDING — Model 3) ──────────────────────────────────
+    # ─── Murmur Characterization (Model 3) ───────────────────────────────────
 
     def predict_murmur_severity(
         self,
         audio: np.ndarray,
         sample_rate: int,
+        valve_position: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
-        """
-        Run murmur severity analysis (Model 3 — CNN, PENDING).
-
-        Currently returns a 'pending' stub response because the CNN severity
-        model has not yet been delivered by the team.
-
-        TODO(model3-inference): When Model 3 is ready:
-          1. Complete model_registry.py TODO(model3) steps.
-          2. Implement _load_severity_model() and call it in _load_models().
-          3. Remove the pending stub below and restore the real inference path.
-          4. Initialize self.severity_preprocessor in __init__.
-          5. Set MODEL_3_ENABLED=true in .env and restart.
-
-        Reference (old real inference path, preserved for easy restoration):
-        -----------------------------------------------------------------------
-          spectrogram = self.severity_preprocessor.process(audio, sample_rate)
-          spectrogram = np.expand_dims(spectrogram, axis=0)
-          spectrogram = np.expand_dims(spectrogram, axis=-1)
-          predictions = self.severity_model.predict(spectrogram)
-          label_keys = self.severity_config.get('label_keys', list(self.severity_encoders.keys()))
-          result = {}
-          for i, key in enumerate(label_keys):
-              pred_arr = predictions[key][0] if isinstance(predictions, dict) else predictions[i][0]
-              encoder = self.severity_encoders.get(key)
-              labels = list(encoder.classes_) if encoder else [f'class_{j}' for j in range(len(pred_arr))]
-              result[key] = self._parse_head(pred_arr, labels)
-        -----------------------------------------------------------------------
-        """
+        """Run the delivered six-head PyTorch CNN on PCG audio."""
         cfg = get_model_config("severity_cnn")
 
         if not cfg.enabled:
-            # Model 3 is disabled/pending — return a clear informational response
-            logger.info(
-                "[Model 3] predict_murmur_severity called but severity_cnn is PENDING. "
-                "Returning pending stub response."
-            )
+            logger.info("[Model 3] predict_murmur_severity called while disabled.")
             return {
-                "status": "pending",
+                "status": "disabled",
                 "model_name": "murmur_severity_cnn",
                 "model_version": cfg.version,
-                "message": (
-                    "The murmur severity model (Model 3) is not yet available. "
-                    "The team is preparing this model. "
-                    "Set MODEL_3_ENABLED=true in .env once the model file is placed "
-                    "in /new-models/."
-                ),
+                "message": "The murmur characterization model is disabled by configuration.",
                 "demo_mode": self.demo_mode_active,
             }
 
@@ -612,15 +606,43 @@ class InferenceEngine:
                 "demo_mode": False,
             }
 
-        # Real inference path (reachable once Model 3 is enabled and loaded)
         start_time = time.time()
         try:
             if self.demo_mode_active:
                 result = self._demo_severity_prediction()
             else:
-                # TODO(model3-inference): Replace this block with the real
-                # inference call once the model and preprocessor are wired up.
-                result = self._demo_severity_prediction()
+                import torch
+
+                channel_order = tuple(cfg.label_mapping.get(
+                    "channel_order", ["AV", "MV", "PV", "TV"]
+                ))
+                model_input = self.severity_preprocessor.process_multichannel(
+                    audio,
+                    sample_rate,
+                    valve_position=valve_position,
+                    channel_order=channel_order,
+                )
+                tensor = torch.from_numpy(model_input).unsqueeze(0).to(
+                    self.severity_device, dtype=torch.float32
+                )
+                with torch.inference_mode():
+                    logits = self.severity_model(tensor)
+
+                classes = cfg.label_mapping["classes"]
+                output_names = cfg.label_mapping["head_to_output"]
+                result = {}
+                for head, head_logits in logits.items():
+                    probabilities = torch.softmax(head_logits, dim=-1)[0].cpu().numpy()
+                    result[output_names[head]] = self._parse_head(
+                        probabilities, classes[head]
+                    )
+                normalized_position = (valve_position or "").strip().upper()
+                result["valve_position"] = valve_position
+                result["input_strategy"] = (
+                    "position_channel_with_missing_channels_floored"
+                    if normalized_position in channel_order
+                    else "single_recording_replicated_across_channels"
+                )
 
             latency = int((time.time() - start_time) * 1000)
             result.update({

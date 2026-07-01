@@ -96,11 +96,10 @@ services:
       - MODEL_2_META_PATH=${MODEL_2_META_PATH:-/new-models/ecg_mitbih/label_encoder.pkl}
       - MODEL_2_ENABLED=${MODEL_2_ENABLED:-true}
       - MODEL_2_VERSION=${MODEL_2_VERSION:-v2.0.0}
-      # ─ Model 3: CNN Severity [PENDING] ──────────────────────────────────
-      # Set MODEL_3_ENABLED=true + MODEL_3_PATH once team delivers the severity model
-      - MODEL_3_PATH=${MODEL_3_PATH:-}
-      - MODEL_3_ENABLED=${MODEL_3_ENABLED:-false}
-      - MODEL_3_VERSION=${MODEL_3_VERSION:-pending}
+      # ─ Model 3: PyTorch CNN Murmur Characterization [ACTIVE] ────────────
+      - MODEL_3_PATH=${MODEL_3_PATH:-/new-models/CNN/best_model.pkl}
+      - MODEL_3_ENABLED=${MODEL_3_ENABLED:-true}
+      - MODEL_3_VERSION=${MODEL_3_VERSION:-v1.0.0}
 
       # Processing
       - STREAM_TIMEOUT_SEC=${STREAM_TIMEOUT_SEC:-20}

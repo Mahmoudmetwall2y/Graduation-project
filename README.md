@@ -1,7 +1,8 @@
 # AscultiCor - AI-Powered Cardiac Monitoring Platform
 
 AscultiCor is a full-stack, real-time cardiac auscultation and monitoring platform that combines IoT hardware (ESP32), MQTT messaging, ML inference, and a modern web dashboard. It enables clinicians to monitor patients' heart sounds (PCG) and electrocardiograms (ECG) with AI-assisted classification.
-
+94.130.24.242
+ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAID2L9wjFUbzKKZELEeNQCdnSNPWbw+CKY/cVSRF3FzGK asculticor-deploy
 ## Architecture Overview
 
 Data flow:

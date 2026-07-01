@@ -93,7 +93,9 @@ tmp/
 temp/
 cache/
 .cache/
-
+Asculticor_Gra*
+Chapter*
+CHAPTER*
 # Build artifacts
 frontend/.next/
 frontend/out/
@@ -106,6 +108,7 @@ frontend/output.css
 *.zip
 *.tar.gz
 minikube-*
+*.docx
 
 # System files
 nul

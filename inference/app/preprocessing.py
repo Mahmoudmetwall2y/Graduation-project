@@ -378,6 +378,35 @@ class PCGSeverityPreprocessor:
         except Exception as e:
             logger.error(f"Severity preprocessing error: {e}")
             raise
+
+    def process_multichannel(
+        self,
+        audio: np.ndarray,
+        original_sr: Optional[int] = None,
+        valve_position: Optional[str] = None,
+        channel_order: tuple = ("AV", "MV", "PV", "TV"),
+    ) -> np.ndarray:
+        """Build the four-channel tensor expected by the delivered CNN.
+
+        A session currently contains one auscultation position. When that
+        position is known, its spectrogram is placed in the corresponding
+        channel and unavailable positions are filled with the spectrogram
+        floor. If metadata is absent, the recording is replicated so inference
+        can still run while making the fallback explicit to the caller.
+        """
+        spectrogram = self.process(audio, original_sr).astype(np.float32)
+        normalized_position = (valve_position or "").strip().upper()
+
+        if normalized_position in channel_order:
+            channels = np.full(
+                (len(channel_order), *spectrogram.shape),
+                float(np.min(spectrogram)),
+                dtype=np.float32,
+            )
+            channels[channel_order.index(normalized_position)] = spectrogram
+            return channels
+
+        return np.repeat(spectrogram[np.newaxis, ...], len(channel_order), axis=0)
     
     def _normalize(self, audio: np.ndarray) -> np.ndarray:
         """Z-score normalization."""

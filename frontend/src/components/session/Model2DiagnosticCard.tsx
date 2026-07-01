@@ -27,7 +27,10 @@ const SEVERITY_HEAD_LABELS: Record<string, string> = {
   campaign: 'Campaign Origin',
 }
 
-const RESERVED_KEYS = new Set(['model_name', 'model_version', 'latency_ms', 'demo_mode', 'preprocessing_version', 'created_at'])
+const RESERVED_KEYS = new Set([
+  'model_name', 'model_version', 'latency_ms', 'demo_mode',
+  'preprocessing_version', 'created_at', 'valve_position', 'input_strategy',
+])
 
 /**
  * Model 2 — Murmur Severity CNN: Functional Analysis

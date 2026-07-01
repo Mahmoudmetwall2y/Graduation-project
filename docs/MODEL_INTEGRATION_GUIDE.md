@@ -12,7 +12,7 @@ AscultiCor uses a **centralized model registry** (`inference/app/model_registry.
 |------|-----|------|--------|---------|
 | Model 1 | `pcg_xgboost` | XGBoost PCG Heart Sound Classifier | ✅ **Active** | `new-models/Xgboost/heart_sound_xgboost_model.pkl` |
 | Model 2 | `ecg_bilstm` | ECG AuscultICor v26 SL (Single-Lead) | ✅ **Active** | `new-models/ecg_mitbih_single_lead/AuscultICor_v26_SL.keras` |
-| Model 3 | `severity_cnn` | CNN Murmur Severity Classifier | 🔜 **Pending** | `/new-models/<pending-severity-model-file>` |
+| Model 3 | `severity_cnn` | PyTorch CNN Murmur Characterization | ✅ **Active** | `new-models/CNN/best_model.pkl` |
 
 ---
 
@@ -27,9 +27,12 @@ new-models/
 │   │   └── Final__XGBoost.py           ← Training script
 │   └── preprocessing/
 │       └── YAMNet_*.py                 ← Feature extraction pipeline
-└── ecg_mitbih_single_lead/
-    ├── AuscultICor_v26_SL.keras        ← Model 2 (active, single-lead)
-    └── label_encoder_SL.pkl            ← Metadata dict for Model 2
+├── ecg_mitbih_single_lead/
+│   ├── AuscultICor_v26_SL.keras        ← Model 2 (active, single-lead)
+│   └── label_encoder_SL.pkl            ← Metadata dict for Model 2
+└── CNN/
+    ├── best_model.pkl                  ← Model 3 PyTorch state_dict
+    └── confusion_matrix_*.png          ← Delivered per-head evaluation plots
 ```
 
 > **Do not commit large model files to Git.** `.gitignore` excludes `*.pkl`, `*.keras`, `*.h5`, `*.pt`, `*.pth` inside `new-models/`.
@@ -59,10 +62,10 @@ MODEL_2_META_PATH=/new-models/ecg_mitbih_single_lead/label_encoder_SL.pkl
 MODEL_2_ENABLED=true
 MODEL_2_VERSION=v26.0.0
 
-# Model 3 — CNN Severity (PENDING)
-MODEL_3_PATH=/new-models/<pending-severity-model-file>
-MODEL_3_ENABLED=false
-MODEL_3_VERSION=pending
+# Model 3 — PyTorch CNN Murmur Characterization
+MODEL_3_PATH=/new-models/CNN/best_model.pkl
+MODEL_3_ENABLED=true
+MODEL_3_VERSION=v1.0.0
 
 # ECG signal parameters — must match AuscultICor v26 SL training
 # The inference service resamples ESP32's 500 Hz stream to 125 Hz automatically.
@@ -133,40 +136,16 @@ If all enabled models fail and `ENABLE_DEMO_MODE=true`, it falls back to demo mo
 
 ---
 
-## How to Add Model 3 (When the Team Delivers It)
+## Model 3 Runtime Contract
 
-Follow these steps **in order**:
+`best_model.pkl` is a PyTorch `state_dict`, not a Python pickle or Keras model. The matching architecture is defined in `inference/app/severity_cnn.py`. It accepts four mel-spectrogram channels ordered as AV, MV, PV, and TV and returns six heads: timing, shape, grading, pitch, quality, and location.
 
-### Step 1 — Place the file
-```
-new-models/<severity-model-filename>.keras   ← model weights
-```
+The current device session supplies one PCG recording plus `valve_position`. Inference places the spectrogram in the matching channel and floors unavailable channels. If position metadata is absent, it replicates the recording across all four channels and records that fallback in `input_strategy`.
 
-### Step 2 — Set environment variables
-```env
-MODEL_3_PATH=/new-models/<severity-model-filename>.keras
-MODEL_3_ENABLED=true
-MODEL_3_VERSION=v2.0.0
-```
+Rebuild once to install the PyTorch runtime, then use ordinary restarts for later model-setting changes:
 
-### Step 3 — Update model_registry.py
-Open `inference/app/model_registry.py` and search for `TODO(model3)`.
-Fill in:
-- The `artifact_path` default value (already points to env var)
-- The `label_mapping` dict with the new model's output classes
-- Any `aux_paths` entries (config JSON, encoders, etc.)
-
-### Step 4 — Wire the inference code
-Open `inference/app/inference.py` and search for `TODO(model3)`:
-
-1. **`__init__`**: Uncomment `self.severity_preprocessor = PCGSeverityPreprocessor(...)`.
-2. **`_load_models()`**: Uncomment the `# self._load_severity_model()` call.
-3. **`_load_severity_model()`** (implement): Follow the same pattern as `_load_pcg_model()`.
-4. **`predict_murmur_severity()`**: Remove the pending-stub early return. The real inference path is preserved in the docstring.
-
-### Step 5 — Restart
 ```bash
-docker compose restart inference
+docker compose up -d --build inference
 ```
 
 Check logs to confirm Model 3 loads:
@@ -182,14 +161,14 @@ The `/health` endpoint (with internal token) shows per-model status:
 
 ```json
 {
-  "models_loaded": 2,
+  "models_loaded": 3,
   "models_total": 3,
   "demo_mode": false,
   "details": {
     "pcg_xgboost":  { "loaded": true,  "enabled": true,  "pending": false },
     "ecg_bilstm":   { "loaded": true,  "enabled": true,  "pending": false },
-    "severity_cnn": { "loaded": false, "enabled": false, "pending": true,
-                      "error": "PENDING — model not yet delivered" }
+    "severity_cnn": { "loaded": true, "enabled": true, "pending": false,
+                      "error": null }
   }
 }
 ```
@@ -201,13 +180,12 @@ The `/health` endpoint (with internal token) shows per-model status:
 Run the smoke test suite to verify the integration:
 
 ```bash
-cd inference
 pip install pytest
-pytest tests/test_model_registry.py -v
+python -m pytest inference/tests/test_model_registry.py -v
 ```
 
 Tests confirm:
-1. Registry loads with 2 active models + 1 pending
-2. Disabled Model 3 does not crash the system
+1. Registry exposes all 3 active models
+2. Model 3 checkpoint keys and tensor shapes match the runtime architecture
 3. Missing enabled model produces a clear error log
-4. Inference response handles 2-model output correctly
+4. Inference response decodes all 6 CNN output heads correctly
