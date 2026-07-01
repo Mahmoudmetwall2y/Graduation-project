@@ -239,7 +239,7 @@ After the VM is live, the first workflow to activate is the LLM queue replacemen
 ## 12. Controlled GitHub Deployment
 
 The production workflow runs only after the `CI` workflow succeeds on
-`feature/my-feature`. Configure a protected GitHub `production` environment
+`main`. Configure a protected GitHub `production` environment
 and add these secrets:
 
 - `PRODUCTION_SSH_HOST`

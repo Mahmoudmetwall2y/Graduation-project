@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 
 APP_DIR="${ASCULTICOR_APP_DIR:-/opt/asculticor}"
-BRANCH="${ASCULTICOR_DEPLOY_BRANCH:-feature/my-feature}"
+BRANCH="${ASCULTICOR_DEPLOY_BRANCH:-main}"
 COMPOSE=(docker compose -f docker-compose.yml -f docker-compose.cloud.yml)
 
 cd "$APP_DIR"
