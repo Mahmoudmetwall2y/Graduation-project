@@ -346,6 +346,9 @@ async function processPendingReports(request: Request) {
       emailSubject: string
       emailText: string
       emailHtml: string
+      reportId: string
+      sessionId: string
+      priority: 'routine' | 'review'
     }> = []
 
     for (const pending of readyReports) {
@@ -387,10 +390,18 @@ async function processPendingReports(request: Request) {
         const generatedReport = await generateLLMReport(session, activeReport.id, serviceClient)
         const recipient = session.patient?.email || process.env.ASCULTICOR_ALERT_EMAIL_TO
         if (recipient && generatedReport?.report_text) {
+          const pcg = (session.predictions || []).find((item: any) => item.modality === 'pcg')?.output_json
+          const ecg = (session.predictions || []).find((item: any) => item.modality === 'ecg')?.output_json
+          const needsReview =
+            (pcg?.label && String(pcg.label).toLowerCase() !== 'normal') ||
+            (ecg?.prediction && String(ecg.prediction).toLowerCase() !== 'normal')
+
           emails.push({
             emailFrom: process.env.ASCULTICOR_ALERT_EMAIL_FROM || 'AscultiCor <alerts@localhost>',
             emailTo: recipient,
-            emailSubject: '[AscultiCor] AI-assisted session report ready',
+            emailSubject: needsReview
+              ? '[AscultiCor] AI-assisted report ready — professional review recommended'
+              : '[AscultiCor] AI-assisted session report ready',
             emailText: [
               `Hello${session.patient?.full_name ? ` ${session.patient.full_name}` : ''},`,
               '',
@@ -403,6 +414,9 @@ async function processPendingReports(request: Request) {
               'Important: This report is for educational and research purposes only. It is not a medical diagnosis. Always consult a qualified healthcare professional for medical advice.',
             ].join('\n'),
             emailHtml: buildReportEmailHtml(session, generatedReport),
+            reportId: activeReport.id,
+            sessionId: session.id,
+            priority: needsReview ? 'review' : 'routine',
           })
         }
         processed += 1

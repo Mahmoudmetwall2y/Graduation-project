@@ -56,6 +56,52 @@ def code_node(name: str, code: str, x: int = 300, y: int = 80) -> dict:
     }
 
 
+def if_positive_node(name: str, value_expression: str, x: int, y: int) -> dict:
+    return {
+        "parameters": {
+            "conditions": {
+                "options": {
+                    "caseSensitive": True,
+                    "leftValue": "",
+                    "typeValidation": "strict",
+                    "version": 2,
+                },
+                "conditions": [{
+                    "id": stable_id(f"{name}:condition"),
+                    "leftValue": value_expression,
+                    "rightValue": 0,
+                    "operator": {"type": "number", "operation": "gt"},
+                }],
+                "combinator": "and",
+            },
+            "options": {},
+        },
+        "id": stable_id(name),
+        "name": name,
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [x, y],
+    }
+
+
+def no_op_node(name: str, x: int, y: int) -> dict:
+    return {
+        "parameters": {},
+        "id": stable_id(name),
+        "name": name,
+        "type": "n8n-nodes-base.noOp",
+        "typeVersion": 1,
+        "position": [x, y],
+    }
+
+
+def with_retry(node: dict, tries: int = 3, wait_ms: int = 5000) -> dict:
+    node["retryOnFail"] = True
+    node["maxTries"] = tries
+    node["waitBetweenTries"] = wait_ms
+    return node
+
+
 def gmail_node(name: str = "Send Gmail", x: int = 620, y: int = 80, html: bool = False) -> dict:
     return {
         "parameters": {
@@ -612,6 +658,71 @@ return emails
       emailHtml: item.emailHtml || `<pre style="white-space:pre-wrap;font-family:Arial,sans-serif">${String(item.emailText).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</pre>`,
     },
   }));
+"""
+
+
+VALIDATE_LLM_QUEUE_JS = r"""
+if (!$json || typeof $json !== 'object' || Array.isArray($json)) {
+  throw new Error('The AscultiCor report worker returned an invalid response payload');
+}
+
+for (const field of ['processed', 'failed', 'skipped']) {
+  if (!Number.isFinite(Number($json[field] ?? 0))) {
+    throw new Error(`The report worker returned an invalid ${field} count`);
+  }
+}
+
+const emails = Array.isArray($json.emails) ? $json.emails : [];
+return [{
+  json: {
+    emails,
+    emailCount: emails.length,
+    processed: Number($json.processed || 0),
+    failed: Number($json.failed || 0),
+    skipped: Number($json.skipped || 0),
+    automaticallyQueued: Number($json.automatically_queued || 0),
+    checkedAt: new Date().toISOString(),
+  },
+}];
+"""
+
+
+PREPARE_LLM_EMAILS_JS = r"""
+const emails = Array.isArray($json.emails) ? $json.emails : [];
+const seen = new Set();
+const prepared = [];
+
+for (const item of emails) {
+  if (!item || typeof item !== 'object') continue;
+  const recipient = String(item.emailTo || '').trim().toLowerCase();
+  const subject = String(item.emailSubject || '').trim();
+  const text = String(item.emailText || '').trim();
+  if (!recipient || !recipient.includes('@') || !subject || !text) continue;
+
+  const dedupeKey = `${item.reportId || item.sessionId || subject}:${recipient}`;
+  if (seen.has(dedupeKey)) continue;
+  seen.add(dedupeKey);
+
+  prepared.push({
+    json: {
+      emailFrom: item.emailFrom || '',
+      emailTo: recipient,
+      emailSubject: subject,
+      emailText: text,
+      emailHtml: item.emailHtml || `<pre style="white-space:pre-wrap;font-family:Arial,sans-serif">${text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</pre>`,
+      reportId: item.reportId || null,
+      sessionId: item.sessionId || null,
+      priority: item.priority === 'review' ? 'review' : 'routine',
+      preparedAt: new Date().toISOString(),
+    },
+  });
+}
+
+if (emails.length > 0 && prepared.length === 0) {
+  throw new Error('Report emails were returned, but none passed recipient and payload validation');
+}
+
+return prepared;
 """
 
 
@@ -1249,20 +1360,32 @@ def write_workflows() -> None:
             [
                 manual_node(),
                 schedule_node("Every Minute", minutes=1),
-                http_post_node(
-                    "Process Pending Reports",
-                    frontend_action_url("process-pending&include_email_payloads=1", "/api/llm"),
-                    headers=internal_api_headers(),
-                    x=300,
-                    y=80,
+                with_retry(
+                    http_post_node(
+                        "Process Pending Reports",
+                        frontend_action_url("process-pending&include_email_payloads=1", "/api/llm"),
+                        headers=internal_api_headers(),
+                        x=260,
+                        y=80,
+                    ),
+                    tries=3,
+                    wait_ms=5000,
                 ),
-                code_node("Prepare LLM Report Emails", EMAILS_FROM_RESULT_JS, x=600, y=80),
-                gmail_node(x=900, y=80, html=True),
+                code_node("Validate Queue Result", VALIDATE_LLM_QUEUE_JS, x=500, y=80),
+                if_positive_node("Emails Ready?", "={{$json.emailCount}}", x=740, y=80),
+                code_node("Prepare LLM Report Emails", PREPARE_LLM_EMAILS_JS, x=980, y=0),
+                with_retry(gmail_node(x=1230, y=0, html=True), tries=3, wait_ms=5000),
+                no_op_node("No Emails Needed", x=980, y=180),
             ],
             {
                 "Manual Trigger": {"main": [[{"node": "Process Pending Reports", "type": "main", "index": 0}]]},
                 "Every Minute": {"main": [[{"node": "Process Pending Reports", "type": "main", "index": 0}]]},
-                "Process Pending Reports": {"main": [[{"node": "Prepare LLM Report Emails", "type": "main", "index": 0}]]},
+                "Process Pending Reports": {"main": [[{"node": "Validate Queue Result", "type": "main", "index": 0}]]},
+                "Validate Queue Result": {"main": [[{"node": "Emails Ready?", "type": "main", "index": 0}]]},
+                "Emails Ready?": {"main": [
+                    [{"node": "Prepare LLM Report Emails", "type": "main", "index": 0}],
+                    [{"node": "No Emails Needed", "type": "main", "index": 0}],
+                ]},
                 "Prepare LLM Report Emails": {"main": [[{"node": "Send Gmail", "type": "main", "index": 0}]]},
             },
         ),
