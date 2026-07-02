@@ -145,7 +145,7 @@ Fill in at minimum:
 - `N8N_ENCRYPTION_KEY`
 - `N8N_EDITOR_BASE_URL=https://n8n.example.com`
 - `N8N_WEBHOOK_URL=https://n8n.example.com/`
-- `N8N_PUSH_BACKEND=sse`
+- `N8N_PUSH_BACKEND=websocket`
 - `N8N_BLOCK_ENV_ACCESS_IN_NODE=false`
 - `CLAUDE_API_KEY`
 - `ASCULTICOR_ALERT_EMAIL_TO`
@@ -182,7 +182,7 @@ N8N_DOMAIN=srv1621744.hstgr.cloud
 N8N_PROTOCOL=https
 N8N_EDITOR_BASE_URL=https://srv1621744.hstgr.cloud:8443
 N8N_WEBHOOK_URL=https://srv1621744.hstgr.cloud:8443/
-N8N_PUSH_BACKEND=sse
+N8N_PUSH_BACKEND=websocket
 NGINX_N8N_SERVER_NAME=n8n.localhost
 NGINX_N8N_ALT_SERVER_NAME=srv1621744.hstgr.cloud
 NGINX_N8N_ALT_HTTP_BIND_ADDRESS=127.0.0.1
