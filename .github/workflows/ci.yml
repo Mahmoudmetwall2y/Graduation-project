@@ -73,6 +73,26 @@ jobs:
       - name: Python compile smoke check
         run: python -m compileall inference/app
 
+  firmware:
+    name: ESP32 firmware build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build firmware toolchain image
+        run: docker build -t asculticor-firmware-builder -f firmware/Dockerfile.builder firmware
+
+      - name: Compile OTA firmware
+        run: |
+          mkdir -p "$PWD/.firmware-out"
+          docker run --rm \
+            -e VERSION=ci \
+            -v "$PWD/firmware/asculticor_esp32/AscultiCor_esp32:/AscultiCor_esp32:ro" \
+            -v "$PWD/.firmware-out:/out" \
+            asculticor-firmware-builder
+          test -s "$PWD/.firmware-out/asculticor_esp32_vci.bin"
+
   schema:
     name: Supabase migration sanity
     runs-on: ubuntu-latest

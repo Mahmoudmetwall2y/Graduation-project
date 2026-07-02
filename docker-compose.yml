@@ -7,6 +7,7 @@ services:
     container_name: asculticor-mosquitto
     ports:
       - "${MQTT_BIND_ADDRESS:-127.0.0.1}:${MQTT_TCP_PORT:-1883}:1883"
+      - "${MQTT_TLS_BIND_ADDRESS:-0.0.0.0}:${MQTT_TLS_PORT:-8883}:8883"
       - "${MQTT_WS_BIND_ADDRESS:-127.0.0.1}:${MQTT_WS_PORT:-9001}:9001"
     environment:
       - MQTT_USERNAME=${MQTT_USERNAME}
@@ -17,6 +18,7 @@ services:
     volumes:
       - mosquitto_data:/mosquitto/data
       - mosquitto_logs:/mosquitto/log
+      - ./nginx/certs:/mosquitto/certs:ro
     networks:
       - asculticor-network
     restart: unless-stopped
@@ -205,8 +207,8 @@ services:
       - MQTT_BIND_ADDRESS=${MQTT_BIND_ADDRESS:-127.0.0.1}
       - DEVICE_BOOTSTRAP_PUBLIC_BASE_URL=${DEVICE_BOOTSTRAP_PUBLIC_BASE_URL:-}
       - DEVICE_BOOTSTRAP_MQTT_HOST=${DEVICE_BOOTSTRAP_MQTT_HOST:-}
-      - DEVICE_BOOTSTRAP_MQTT_PORT=${DEVICE_BOOTSTRAP_MQTT_PORT:-1883}
-      - DEVICE_BOOTSTRAP_MQTT_TLS=${DEVICE_BOOTSTRAP_MQTT_TLS:-false}
+      - DEVICE_BOOTSTRAP_MQTT_PORT=${DEVICE_BOOTSTRAP_MQTT_PORT:-8883}
+      - DEVICE_BOOTSTRAP_MQTT_TLS=${DEVICE_BOOTSTRAP_MQTT_TLS:-true}
       - DEVICE_DEFAULT_SESSION_DURATION_SEC=${DEVICE_DEFAULT_SESSION_DURATION_SEC:-15}
       - NODE_ENV=production
     networks:

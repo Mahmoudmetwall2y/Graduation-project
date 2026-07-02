@@ -38,6 +38,7 @@
 #include <Preferences.h>   // NVS flash storage for credentials
 #include <mbedtls/sha256.h>
 #include <strings.h>
+#include <time.h>
 
 // ═══════════════════════════════════════════════════════════════
 //  CONFIGURATION — Edit these or provision via Serial/NVS
@@ -59,6 +60,42 @@
 #define DEFAULT_BOOTSTRAP_URL   ""
 #define FIRMWARE_VERSION        "3.1.0"
 #define PROVISIONING_AP_PREFIX  "AscultiCor-Setup-"
+
+// Public root CA used to validate the Let's Encrypt certificate presented by
+// the production MQTT endpoint. No private certificate material is stored here.
+static const char ISRG_ROOT_X1[] PROGMEM = R"EOF(
+-----BEGIN CERTIFICATE-----
+MIIFazCCA1OgAwIBAgIRAIIQz7DSQONZRGPgu2OCiwAwDQYJKoZIhvcNAQELBQAw
+TzELMAkGA1UEBhMCVVMxKTAnBgNVBAoTIEludGVybmV0IFNlY3VyaXR5IFJlc2Vh
+cmNoIEdyb3VwMRUwEwYDVQQDEwxJU1JHIFJvb3QgWDEwHhcNMTUwNjA0MTEwNDM4
+WhcNMzUwNjA0MTEwNDM4WjBPMQswCQYDVQQGEwJVUzEpMCcGA1UEChMgSW50ZXJu
+ZXQgU2VjdXJpdHkgUmVzZWFyY2ggR3JvdXAxFTATBgNVBAMTDElTUkcgUm9vdCBY
+MTCCAiIwDQYJKoZIhvcNAQEBBQADggIPADCCAgoCggIBAK3oJHP0FDfzm54rVygc
+h77ct984kIxuPOZXoHj3dcKi/vVqbvYATyjb3miGbESTtrFj/RQSa78f0uoxmyF+
+0TM8ukj13Xnfs7j/EvEhmkvBioZxaUpmZmyPfjxwv60pIgbz5MDmgK7iS4+3mX6U
+A5/TR5d8mUgjU+g4rk8Kb4Mu0UlXjIB0ttov0DiNewNwIRt18jA8+o+u3dpjq+sW
+T8KOEUt+zwvo/7V3LvSye0rgTBIlDHCNAymg4VMk7BPZ7hm/ELNKjD+Jo2FR3qyH
+B5T0Y3HsLuJvW5iB4YlcNHlsdu87kGJ55tukmi8mxdAQ4Q7e2RCOFvu396j3x+UC
+B5iPNgiV5+I3lg02dZ77DnKxHZu8A/lJBdiB3QW0KtZB6awBdpUKD9jf1b0SHzUv
+KBds0pjBqAlkd25HN7rOrFleaJ1/ctaJxQZBKT5ZPt0m9STJEadao0xAH0ahmbWn
+OlFuhjuefXKnEgV4We0+UXgVCwOPjdAvBbI+e0ocS3MFEvzG6uBQE3xDk3SzynTn
+jh8BCNAw1FtxNrQHusEwMFxIt4I7mKZ9YIqioymCzLq9gwQbooMDQaHWBfEbwrbw
+qHyGO0aoSCqI3Haadr8faqU9GY/rOPNk3sgrDQoo//fb4hVC1CLQJ13hef4Y53CI
+rU7m2Ys6xt0nUW7/vGT1M0NPAgMBAAGjQjBAMA4GA1UdDwEB/wQEAwIBBjAPBgNV
+HRMBAf8EBTADAQH/MB0GA1UdDgQWBBR5tFnme7bl5AFzgAiIyBpY9umbbjANBgkq
+hkiG9w0BAQsFAAOCAgEAVR9YqbyyqFDQDLHYGmkgJykIrGF1XIpu+ILlaS/V9lZL
+ubhzEFnTIZd+50xx+7LSYK05qAvqFyFWhfFQDlnrzuBZ6brJFe+GnY+EgPbk6ZGQ
+3BebYhtF8GaV0nxvwuo77x/Py9auJ/GpsMiu/X1+mvoiBOv/2X/qkSsisRcOj/KK
+NFtY2PwByVS5uCbMiogziUwthDyC3+6WVwW6LLv3xLfHTjuCvjHIInNzktHCgKQ5
+ORAzI4JMPJ+GslWYHb4phowim57iaztXOoJwTdwJx4nLCgdNbOhdjsnvzqvHu7Ur
+TkXWStAmzOVyyghqpZXjFaH3pO3JLF+l+/+sKAIuvtd7u+Nxe5AW0wdeRlN8NwdC
+jNPElpzVmbUq4JUagEiuTDkHzsxHpFKVK7q4+63SM1N95R1NbdWhscdCb+ZAJzVc
+oyi3B43njTOQ5yOf+1CceWxG1bQVs5ZufpsMljq4Ui0/1lvh+wjChP4kqKOJ2qxq
+4RgqsahDYVvTH9w7jXbyLeiNdd8XM2w9U/t7y0Ff/9yi0GE44Za4rF2LN9d11TPA
+mRGunUHBcnWEvgJBQl9nJEiU0Zsnvgc/ubhPgXRR4Xq37Z0j4r7g1SgEEzwxA57d
+emyPxgcYxn/eR44/KJ4EBs+lVDR3veyJm+kXQ99b21/+jh5Xos1AnX5iItreGCc=
+-----END CERTIFICATE-----
+)EOF";
 
 // Default device identity — MUST be overridden via serial provisioning before use.
 // Commands: SET device_id <uuid>  and  SET device_secret <secret>
@@ -127,6 +164,7 @@ void publishDeviceStatus();
 void publishFirmwareEvent(const char *state, const char *targetVersion, const char *detail);
 
 WiFiClient         espClient;
+WiFiClientSecure   mqttSecureClient;
 PubSubClient       mqtt(espClient);
 Preferences        nvs;
 WebServer          provisioningServer(80);
@@ -147,6 +185,7 @@ char device_id[40];
 char device_secret[80];  // Used by bootstrap provisioning and future per-device auth
 char session_id[37];
 bool bootstrap_insecure = false;
+bool mqtt_tls = false;
 bool provisioningPortalActive = false;
 bool otaInProgress = false;
 uint16_t defaultSessionDurationSec = DEFAULT_SESSION_DURATION_SEC;
@@ -375,6 +414,7 @@ void loadCredentials() {
   strlcpy(wifi_pass,     nvs.getString("wifi_pass",     DEFAULT_WIFI_PASS).c_str(),   sizeof(wifi_pass));
   strlcpy(mqtt_host,     nvs.getString("mqtt_host",     DEFAULT_MQTT_HOST).c_str(),   sizeof(mqtt_host));
   mqtt_port = nvs.getInt("mqtt_port", DEFAULT_MQTT_PORT);
+  mqtt_tls = nvs.getBool("mqtt_tls", false);
   strlcpy(mqtt_user,     nvs.getString("mqtt_user",     DEFAULT_MQTT_USER).c_str(),   sizeof(mqtt_user));
   strlcpy(mqtt_pass,     nvs.getString("mqtt_pass",     DEFAULT_MQTT_PASS).c_str(),   sizeof(mqtt_pass));
   strlcpy(bootstrap_url, nvs.getString("bootstrap_url", DEFAULT_BOOTSTRAP_URL).c_str(), sizeof(bootstrap_url));
@@ -394,6 +434,7 @@ void loadCredentials() {
   Serial.println("[NVS] Credentials loaded:");
   Serial.printf("  WiFi SSID     : %s\n", wifi_ssid);
   Serial.printf("  MQTT Host     : %s:%d\n", mqtt_host, mqtt_port);
+  Serial.printf("  MQTT TLS      : %s\n", mqtt_tls ? "enabled" : "disabled");
   Serial.printf("  Bootstrap URL : %s\n", strlen(bootstrap_url) > 0 ? bootstrap_url : "(not set)");
   Serial.printf("  Bootstrap TLS : %s\n",
     strlen(bootstrap_ca_pem) > 0 ? "ca_pem" :
@@ -423,6 +464,13 @@ void saveCredential(const char *key, const char *value) {
 
   if (strcmp(key, "mqtt_port") == 0) {
     nvs.putInt(key, atoi(value));
+  } else if (strcmp(key, "mqtt_tls") == 0) {
+    bool enabled = strcmp(value, "1") == 0 ||
+                   strcasecmp(value, "true") == 0 ||
+                   strcasecmp(value, "yes") == 0 ||
+                   strcasecmp(value, "on") == 0;
+    nvs.putBool(key, enabled);
+    mqtt_tls = enabled;
   } else if (strcmp(key, "session_duration_sec") == 0) {
     defaultSessionDurationSec = sanitizeSessionDurationSec(atoi(value));
     activeSessionDurationSec = defaultSessionDurationSec;
@@ -458,6 +506,42 @@ String normalizedBootstrapCaPem() {
   String pem = String(bootstrap_ca_pem);
   pem.replace("|", "\n");
   return pem;
+}
+
+bool syncTlsClock() {
+  const time_t minimumValidTime = 1704067200;  // 2024-01-01 UTC
+  if (time(nullptr) >= minimumValidTime) return true;
+
+  Serial.println("[TLS] Synchronizing clock with NTP...");
+  configTime(0, 0, "pool.ntp.org", "time.nist.gov");
+  unsigned long startedAt = millis();
+  while (time(nullptr) < minimumValidTime && millis() - startedAt < 15000) {
+    delay(250);
+  }
+
+  if (time(nullptr) < minimumValidTime) {
+    Serial.println("[TLS] Clock synchronization failed; certificate validation is unavailable");
+    return false;
+  }
+  Serial.println("[TLS] Clock synchronized");
+  return true;
+}
+
+bool configureMqttTransport() {
+  mqtt.disconnect();
+  if (!mqtt_tls) {
+    mqtt.setClient(espClient);
+    mqtt.setServer(mqtt_host, mqtt_port);
+    return true;
+  }
+
+  if (!syncTlsClock()) return false;
+  mqttSecureClient.stop();
+  mqttSecureClient.setCACert(ISRG_ROOT_X1);
+  mqtt.setClient(mqttSecureClient);
+  mqtt.setServer(mqtt_host, mqtt_port);
+  Serial.println("[MQTT] TLS certificate validation enabled");
+  return true;
 }
 
 bool fetchBootstrapConfig() {
@@ -551,6 +635,7 @@ bool fetchBootstrapConfig() {
   const char *newMqttPass = flatMqttPass ? flatMqttPass : nestedMqttPass;
   const char *newOrgId    = responseDoc["org_id"].as<const char *>();
   int newMqttPort         = responseDoc["mqtt_port"] | (mqttConfig["port"] | DEFAULT_MQTT_PORT);
+  bool newMqttTls         = responseDoc["mqtt_tls"] | (mqttConfig["tls"] | false);
 
   if (!newMqttHost || !newMqttUser || !newMqttPass || !newOrgId) {
     Serial.printf("[BOOTSTRAP] Field presence: host=%s user=%s pass=%s org=%s overflow=%s\n",
@@ -568,6 +653,7 @@ bool fetchBootstrapConfig() {
   strlcpy(mqtt_pass, newMqttPass, sizeof(mqtt_pass));
   strlcpy(org_id, newOrgId, sizeof(org_id));
   mqtt_port = newMqttPort;
+  mqtt_tls = newMqttTls;
 
   saveCredential("mqtt_host", mqtt_host);
   saveCredential("mqtt_user", mqtt_user);
@@ -576,11 +662,16 @@ bool fetchBootstrapConfig() {
   char portBuf[8];
   snprintf(portBuf, sizeof(portBuf), "%d", mqtt_port);
   saveCredential("mqtt_port", portBuf);
+  saveCredential("mqtt_tls", mqtt_tls ? "true" : "false");
 
   buildTopicBase();
-  mqtt.setServer(mqtt_host, mqtt_port);
+  if (!configureMqttTransport()) {
+    Serial.println("[BOOTSTRAP] MQTT TLS transport configuration failed");
+    return false;
+  }
 
-  Serial.printf("[BOOTSTRAP] Loaded broker config: %s:%d\n", mqtt_host, mqtt_port);
+  Serial.printf("[BOOTSTRAP] Loaded broker config: %s:%d tls=%s\n",
+                mqtt_host, mqtt_port, mqtt_tls ? "true" : "false");
   return true;
 }
 
@@ -1877,7 +1968,9 @@ void setup() {
   }
 
   // MQTT
-  mqtt.setServer(mqtt_host, mqtt_port);
+  if (!configureMqttTransport()) {
+    Serial.println("[MQTT] Transport setup deferred until the next reconnect attempt");
+  }
   mqtt.setCallback(mqttCallback);
   mqtt.setBufferSize(MQTT_BUFFER_BYTES);
   mqtt.setKeepAlive(MQTT_KEEPALIVE_SEC);

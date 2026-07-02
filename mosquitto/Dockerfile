@@ -14,6 +14,6 @@ RUN sed -i 's/\r$//' /usr/local/bin/entrypoint.sh \
     && test -x /usr/local/bin/entrypoint.sh
 
 # Expose ports
-EXPOSE 1883 9001
+EXPOSE 1883 8883 9001
 
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

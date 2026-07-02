@@ -57,6 +57,12 @@ variable "enable_web_ports" {
   default     = true
 }
 
+variable "enable_mqtt_tls_port" {
+  description = "Allow public MQTT over TLS ingress on TCP 8883."
+  type        = bool
+  default     = true
+}
+
 variable "enable_backups" {
   description = "Enable Hetzner backups for the server."
   type        = bool

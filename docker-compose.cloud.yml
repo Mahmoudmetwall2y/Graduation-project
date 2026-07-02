@@ -66,5 +66,12 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  frontend:
+    environment:
+      - DEVICE_BOOTSTRAP_MQTT_PORT=8883
+      - DEVICE_BOOTSTRAP_MQTT_TLS=true
+      - MQTT_PUBLIC_PORT=8883
+      - MQTT_PUBLIC_USE_TLS=true
+
 volumes:
   n8n_data:

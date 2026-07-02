@@ -45,6 +45,18 @@ resource "hcloud_firewall" "server" {
       description = "Public web traffic"
     }
   }
+
+  dynamic "rule" {
+    for_each = var.enable_mqtt_tls_port ? ["8883"] : []
+
+    content {
+      direction   = "in"
+      protocol    = "tcp"
+      port        = rule.value
+      source_ips  = ["0.0.0.0/0", "::/0"]
+      description = "Authenticated MQTT over TLS"
+    }
+  }
 }
 
 resource "hcloud_server" "ai_agent" {
