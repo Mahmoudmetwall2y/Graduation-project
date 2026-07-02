@@ -227,10 +227,14 @@ export default function DevicesPage() {
             </p>
           </div>
           {canCreateDevices && (
-            <Link href="/devices/add" className="btn-primary gap-2">
+            <button
+              type="button"
+              onClick={() => setShowAddModal(true)}
+              className="btn-primary gap-2"
+            >
               <Plus className="w-4 h-4" />
               Add Device
-            </Link>
+            </button>
           )}
         </div>
 
@@ -293,10 +297,14 @@ export default function DevicesPage() {
               Add your first AscultiCor device to capture live signals for clinical review.
             </p>
             {canCreateDevices ? (
-              <Link href="/devices/add" className="btn-primary gap-2">
+              <button
+                type="button"
+                onClick={() => setShowAddModal(true)}
+                className="btn-primary gap-2"
+              >
                 <Plus className="w-4 h-4" />
                 Add Your First Device
-              </Link>
+              </button>
             ) : (
               <p className="text-sm text-muted-foreground">Ask an admin in your organization to provision a device.</p>
             )}
