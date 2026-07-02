@@ -582,8 +582,12 @@ bool fetchBootstrapConfig() {
       secureClient.setInsecure();
       Serial.println("[BOOTSTRAP] WARNING: HTTPS bootstrap is using insecure TLS mode");
     } else {
-      Serial.println("[BOOTSTRAP] HTTPS bootstrap blocked: configure bootstrap_ca_pem or bootstrap_insecure true");
-      return false;
+      if (!syncTlsClock()) {
+        Serial.println("[BOOTSTRAP] HTTPS bootstrap blocked: device clock is not synchronized");
+        return false;
+      }
+      secureClient.setCACert(ISRG_ROOT_X1);
+      Serial.println("[BOOTSTRAP] HTTPS using built-in ISRG Root X1 certificate");
     }
     if (!http.begin(secureClient, bootstrap_url)) {
       Serial.println("[BOOTSTRAP] Failed to initialize HTTPS client");
