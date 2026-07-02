@@ -761,11 +761,16 @@ async function callOpenAIAPI(prompt: string): Promise<{
   if (!response.ok) {
     throw new Error(`OpenAI API returned ${response.status}: ${data?.error?.message || 'Unknown error'}`)
   }
-  if (!data.output_text) {
+  const outputText = data.output_text || data.output
+    ?.flatMap((item: any) => item?.type === 'message' ? (item.content || []) : [])
+    ?.find((item: any) => item?.type === 'output_text')
+    ?.text
+
+  if (!outputText) {
     throw new Error('OpenAI API returned no output text')
   }
 
-  const structuredData = JSON.parse(data.output_text) as StructuredOpenAIReport
+  const structuredData = JSON.parse(outputText) as StructuredOpenAIReport
   const reportText = [
     `## ${structuredData.headline}`,
     '',
