@@ -36,7 +36,7 @@ Keep the current Docker USB flasher only as a local/admin manufacturing tool, no
   - `POST /api/device/claim`: ESP32 exchanges claim token for `device_id`, `device_secret`, MQTT username/password, org id, and broker host.
   - Claim tokens should expire, for example after 10 minutes, and be single-use.
 - Keep existing paths:
-  - Docker `firmware-flasher` remains for local development/admin flashing.
+  - Server-side USB flashing is retired; factory/development bootstrap is followed by Wi-Fi onboarding and verified OTA.
   - Browser/Web Serial flashing can be added later as an advanced fallback, but should not be the main cloud path.
 
 ## Cloud Requirements

@@ -1,7 +1,7 @@
 param(
   [string]$Sketch = "firmware/asculticor_esp32/AscultiCor_esp32.ino",
-  [string]$Fqbn = "esp32:esp32:esp32",
-  [string]$Version = "3.0.0"
+  [string]$Fqbn = "esp32:esp32:esp32:PartitionScheme=custom",
+  [string]$Version = "3.1.0"
 )
 
 $ErrorActionPreference = "Stop"
@@ -30,7 +30,7 @@ try {
   arduino-cli compile --fqbn $Fqbn --export-binaries --output-dir $buildDir $Sketch
 
   $appBin = Get-ChildItem -Path $buildDir -Filter "*.bin" -Recurse |
-    Where-Object { $_.Name -notmatch "bootloader|partitions" } |
+    Where-Object { $_.Name -notmatch "bootloader|partitions|merged" } |
     Select-Object -First 1
   $bootloader = Get-ChildItem -Path $buildDir -Filter "*bootloader*.bin" -Recurse | Select-Object -First 1
   $partitions = Get-ChildItem -Path $buildDir -Filter "*partitions*.bin" -Recurse | Select-Object -First 1

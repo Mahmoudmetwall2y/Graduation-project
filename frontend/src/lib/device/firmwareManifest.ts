@@ -8,9 +8,14 @@ export interface FirmwareManifest {
   version: string
   chipFamily: 'ESP32'
   parts: FirmwareManifestPart[]
+  ota?: {
+    path: string
+    sha256: string
+    size: number
+  }
 }
 
-export const ASCULTICOR_FIRMWARE_VERSION = '3.0.0'
+export const ASCULTICOR_FIRMWARE_VERSION = '3.1.0'
 export const ASCULTICOR_FIRMWARE_MANIFEST_PATH = '/firmware/manifest.json'
 
 function resolveFirmwarePartPath(path: string) {

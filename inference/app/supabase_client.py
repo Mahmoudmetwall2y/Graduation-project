@@ -299,6 +299,100 @@ class SupabaseClient:
             logger.error(f"Error creating device telemetry: {e}")
             return False
 
+    def update_firmware_deployment_from_event(
+        self,
+        device_id: str,
+        state: str,
+        target_version: Optional[str] = None,
+        detail: Optional[str] = None,
+    ) -> bool:
+        """Advance the newest active OTA deployment for a device."""
+        state_map = {
+            "downloading": "downloading",
+            "installing": "installing",
+            "rebooting": "rebooting",
+            "failed": "failed",
+            "rejected": "failed",
+        }
+        status = state_map.get(state)
+        if not status:
+            return True
+
+        try:
+            query = (
+                self.client.table("firmware_deployments")
+                .select("id, metadata")
+                .eq("device_id", device_id)
+                .in_("status", ["dispatched", "downloading", "installing", "rebooting"])
+                .order("requested_at", desc=True)
+                .limit(1)
+                .execute()
+            )
+            if not query.data:
+                return True
+
+            deployment = query.data[0]
+            metadata = deployment.get("metadata") or {}
+            metadata.update({
+                "device_state": state,
+                "target_version": target_version,
+                "device_detail": detail,
+                "last_device_event_at": datetime.now(timezone.utc).isoformat(),
+            })
+            updates: Dict[str, Any] = {"status": status, "metadata": metadata}
+            if status == "failed":
+                updates["last_error"] = detail or state
+                updates["completed_at"] = datetime.now(timezone.utc).isoformat()
+
+            self.client.table("firmware_deployments").update(updates).eq(
+                "id", deployment["id"]
+            ).execute()
+            return True
+        except Exception as e:
+            logger.error(f"Error updating firmware deployment: {e}")
+            return False
+
+    def reconcile_firmware_deployment(
+        self,
+        device_id: str,
+        firmware_version: Optional[str],
+    ) -> bool:
+        """Mark a rebooting deployment successful once the new version checks in."""
+        if not firmware_version:
+            return True
+        try:
+            query = (
+                self.client.table("firmware_deployments")
+                .select("id, release_id, metadata, firmware_releases(version)")
+                .eq("device_id", device_id)
+                .in_("status", ["dispatched", "downloading", "installing", "rebooting"])
+                .order("requested_at", desc=True)
+                .limit(1)
+                .execute()
+            )
+            if not query.data:
+                return True
+            deployment = query.data[0]
+            release = deployment.get("firmware_releases") or {}
+            if release.get("version") != firmware_version:
+                return True
+
+            metadata = deployment.get("metadata") or {}
+            metadata.update({
+                "confirmed_version": firmware_version,
+                "confirmed_at": datetime.now(timezone.utc).isoformat(),
+            })
+            self.client.table("firmware_deployments").update({
+                "status": "succeeded",
+                "completed_at": datetime.now(timezone.utc).isoformat(),
+                "last_error": None,
+                "metadata": metadata,
+            }).eq("id", deployment["id"]).execute()
+            return True
+        except Exception as e:
+            logger.error(f"Error reconciling firmware deployment: {e}")
+            return False
+
     # ========== RECORDING OPERATIONS ==========
 
     def create_recording(

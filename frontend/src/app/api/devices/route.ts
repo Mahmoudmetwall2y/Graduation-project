@@ -323,7 +323,7 @@ export async function POST(request: Request) {
         mqtt_port: mqttPort,
         mqtt_tls: mqttTls,
         mqtt_lan_exposure_enabled: mqttLanExposureEnabled,
-        firmware_version: process.env.NEXT_PUBLIC_ASCULTICOR_FIRMWARE_VERSION || '3.0.0',
+        firmware_version: process.env.NEXT_PUBLIC_ASCULTICOR_FIRMWARE_VERSION || '3.1.0',
         environment: process.env.NEXT_PUBLIC_DEPLOYMENT_MODE === 'vps' ? 'vps' : 'local',
         mqtt: {
           host: mqttHost,

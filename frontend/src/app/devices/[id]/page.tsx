@@ -71,6 +71,7 @@ export default function DeviceDetailPage() {
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState('overview')
   const [generatingReport, setGeneratingReport] = useState<string | null>(null)
+  const [firmwareUpdateStatus, setFirmwareUpdateStatus] = useState<string>('')
   const supabase = createClientComponentClient()
 
   useEffect(() => {
@@ -132,6 +133,24 @@ export default function DeviceDetailPage() {
     if (diff < 3600) return `${Math.floor(diff / 60)} minutes ago`
     if (diff < 86400) return `${Math.floor(diff / 3600)} hours ago`
     return `${Math.floor(diff / 86400)} days ago`
+  }
+
+  const queueFirmwareUpdate = async () => {
+    setFirmwareUpdateStatus('Queuing verified firmware update...')
+    try {
+      const response = await fetch('/api/device/firmware/deployments?action=queue-latest', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ device_id: deviceId }),
+      })
+      const body = await response.json()
+      if (!response.ok) throw new Error(body.error || 'Could not queue firmware update')
+      setFirmwareUpdateStatus(
+        `Firmware ${body.release.version} queued. n8n will dispatch it when the device is online and idle.`
+      )
+    } catch (error) {
+      setFirmwareUpdateStatus(error instanceof Error ? error.message : 'Firmware update failed')
+    }
   }
 
   const formatUptime = (seconds?: number | null) => {
@@ -537,6 +556,27 @@ export default function DeviceDetailPage() {
                     <p className="text-sm text-muted-foreground bg-muted p-4 rounded-lg">{device.notes}</p>
                   </div>
                 )}
+
+                <div className="pt-6 border-t border-border">
+                  <h3 className="font-semibold text-foreground mb-2">Firmware Update</h3>
+                  <p className="mb-4 text-sm text-muted-foreground">
+                    Queue the latest verified release. The ESP32 downloads it over Wi-Fi, verifies its SHA-256 digest,
+                    installs it into the inactive OTA slot, and reports its version after reboot.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={queueFirmwareUpdate}
+                    className="btn-primary gap-2"
+                  >
+                    <RefreshCw className="w-4 h-4" />
+                    Queue Latest Firmware
+                  </button>
+                  {firmwareUpdateStatus && (
+                    <p className="mt-3 rounded-lg border border-border bg-muted/40 p-3 text-xs text-muted-foreground">
+                      {firmwareUpdateStatus}
+                    </p>
+                  )}
+                </div>
 
                 <div className="pt-6 border-t border-border">
                   <h3 className="font-semibold text-red-600 dark:text-red-400 mb-4">Danger Zone</h3>

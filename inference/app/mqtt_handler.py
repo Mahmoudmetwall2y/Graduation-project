@@ -363,6 +363,7 @@ class MQTTHandler:
             # Subscribe to all org topics
             # Pattern: org/+/device/+/session/+/meta
             client.subscribe("org/+/device/+/status", qos=1)
+            client.subscribe("org/+/device/+/firmware", qos=1)
             client.subscribe("org/+/device/+/session/+/meta", qos=1)
             client.subscribe("org/+/device/+/session/+/pcg", qos=0)
             client.subscribe("org/+/device/+/session/+/ecg", qos=0)
@@ -390,6 +391,20 @@ class MQTTHandler:
         for attempt in range(1, max_retries + 1):
             if not self.running:
                 logger.info("MQTT handler stopped, aborting reconnect")
+                return
+
+            # Firmware rollout events: org/{orgId}/device/{deviceId}/firmware
+            if (
+                len(topic_parts) == 5 and
+                topic_parts[0] == 'org' and
+                topic_parts[2] == 'device' and
+                topic_parts[4] == 'firmware'
+            ):
+                self._handle_firmware_message(
+                    topic_parts[1],
+                    topic_parts[3],
+                    msg.payload
+                )
                 return
 
             delay = min(base_delay * (2 ** (attempt - 1)), max_delay)
@@ -455,6 +470,22 @@ class MQTTHandler:
 
         except Exception as e:
             logger.error(f"Error handling message: {e}")
+
+    def _handle_firmware_message(self, org_id: str, device_id: str, payload: bytes):
+        """Persist progress reported by the ESP32 OTA updater."""
+        try:
+            if not self.supabase.device_exists(device_id, org_id):
+                logger.warning(f"Ignoring firmware event for unknown device {device_id}")
+                return
+            event = json.loads(payload.decode('utf-8'))
+            self.supabase.update_firmware_deployment_from_event(
+                device_id,
+                str(event.get("state") or ""),
+                event.get("target_version"),
+                event.get("detail"),
+            )
+        except Exception as e:
+            logger.error(f"Error handling firmware event: {e}")
 
     def _handle_meta_message(
         self,
@@ -522,6 +553,10 @@ class MQTTHandler:
 
             status_payload = json.loads(payload.decode('utf-8'))
             now_iso = datetime.now(timezone.utc).isoformat()
+            self.supabase.reconcile_firmware_deployment(
+                device_id,
+                status_payload.get("firmware_version"),
+            )
 
             telemetry = {
                 "free_heap_bytes": self._coerce_int(status_payload.get("free_heap")),

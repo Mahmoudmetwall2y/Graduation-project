@@ -45,7 +45,11 @@ arduino-cli compile \
 
 echo "${BANNER} Compilation successful. Locating output binaries..."
 
-APP_BIN=$(find /build -name "*.bin" ! -iname "*bootloader*" ! -iname "*partitions*" | head -n 1)
+APP_BIN=$(find /build -name "*.bin" \
+  ! -iname "*bootloader*" \
+  ! -iname "*partitions*" \
+  ! -iname "*merged*" \
+  | head -n 1)
 BOOT_BIN=$(find /build -iname "*bootloader*.bin" | head -n 1)
 PART_BIN=$(find /build -iname "*partitions*.bin" | head -n 1)
 
@@ -65,6 +69,9 @@ cp "${APP_BIN}"  "${OUTPUT_DIR}/asculticor_esp32_v${VERSION}.bin"
 cp "${BOOT_BIN}" "${OUTPUT_DIR}/bootloader.bin"
 cp "${PART_BIN}" "${OUTPUT_DIR}/partitions.bin"
 
+APP_SHA256=$(sha256sum "${OUTPUT_DIR}/asculticor_esp32_v${VERSION}.bin" | awk '{print $1}')
+APP_SIZE=$(stat -c%s "${OUTPUT_DIR}/asculticor_esp32_v${VERSION}.bin")
+
 # ── Generate manifest.json ───────────────────────────────────
 # This overrides the stub manifest.json baked into the frontend image.
 # ESP Web Tools reads this file to know which binary to flash and at
@@ -75,6 +82,11 @@ cat > "${OUTPUT_DIR}/manifest.json" << MANIFEST
   "version": "${VERSION}",
   "chipFamily": "ESP32",
   "description": "AscultiCor firmware for ESP32-WROOM-32 with AD8232 ECG, MAX9814 PCG, JSON serial provisioning, NVS storage, bootstrap, MQTT streaming, heartbeat, and preflight support.",
+  "ota": {
+    "path": "/firmware/asculticor_esp32_v${VERSION}.bin",
+    "sha256": "${APP_SHA256}",
+    "size": ${APP_SIZE}
+  },
   "parts": [
     { "path": "/firmware/bootloader.bin", "offset": 4096 },
     { "path": "/firmware/partitions.bin", "offset": 32768 },

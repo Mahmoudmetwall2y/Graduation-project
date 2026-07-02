@@ -1,8 +1,10 @@
-# Firmware Flashing
+# Firmware Bootstrap and OTA
+
+The server-side Docker USB flasher has been retired. AscultiCor now uses Wi-Fi onboarding and verified OTA updates.
 
 Firmware binaries not found. Created manifest/build structure only.
 
-Browser flashing target:
+The following factory artifacts are still generated for manufacturer/development bootstrap:
 
 - Manifest: `/firmware/manifest.json`
 - Release source: `firmware/releases/manifest.json`
@@ -33,7 +35,7 @@ Requirements:
 - PubSubClient
 - ArduinoJson
 
-Manual fallback: open `firmware/asculticor_esp32/AscultiCor_esp32.ino`, compile for ESP32-WROOM-32, upload, then use JSON serial provisioning.
+After bootstrap firmware is installed, onboarding uses the temporary `AscultiCor-Setup-XXXX` Wi-Fi network and all later application updates use OTA.
 
-Recommendation: add CI that runs Arduino CLI compile and publishes release binaries as artifacts.
+See `docs/DEVICE_OTA_LIFECYCLE.md`.
 

@@ -660,6 +660,22 @@ return emails
   }));
 """
 
+FIRMWARE_ROLLOUT_VALIDATE_JS = r"""
+if (!$json || $json.ok !== true || $json.action !== 'firmware-rollout') {
+  throw new Error('Firmware rollout dispatcher returned an invalid response');
+}
+const results = Array.isArray($json.results) ? $json.results : [];
+return [{
+  json: {
+    queued: Number($json.queued || 0),
+    dispatched: results.filter((item) => item.status === 'dispatched').length,
+    retryPending: results.filter((item) => item.status === 'retry_pending').length,
+    results,
+    checkedAt: new Date().toISOString(),
+  },
+}];
+"""
+
 
 VALIDATE_LLM_QUEUE_JS = r"""
 if (!$json || typeof $json !== 'object' || Array.isArray($json)) {
@@ -1484,18 +1500,28 @@ def write_workflows() -> None:
             },
         ),
         (
-            "03 - Device Health Monitoring",
+            "03 - Device Lifecycle Management",
             "03-device-health-monitoring.json",
             [
                 manual_node(),
                 schedule_node("Every Two Minutes", minutes=2),
-                http_post_node("Run Device Health", frontend_action_url("device-health"), headers=internal_api_headers(), x=300, y=80),
-                code_node("Prepare Device Health Emails", EMAILS_FROM_RESULT_JS, x=600, y=80),
-                gmail_node(x=900, y=80),
+                http_post_node(
+                    "Dispatch Firmware Rollouts",
+                    frontend_action_url("dispatch", route="/api/device/firmware/deployments"),
+                    headers=internal_api_headers(),
+                    x=280,
+                    y=20,
+                ),
+                code_node("Validate Firmware Dispatch", FIRMWARE_ROLLOUT_VALIDATE_JS, x=540, y=20),
+                http_post_node("Run Device Health", frontend_action_url("device-health"), headers=internal_api_headers(), x=800, y=20),
+                code_node("Prepare Device Health Emails", EMAILS_FROM_RESULT_JS, x=1060, y=20),
+                gmail_node(x=1320, y=-40),
             ],
             {
-                "Manual Trigger": {"main": [[{"node": "Run Device Health", "type": "main", "index": 0}]]},
-                "Every Two Minutes": {"main": [[{"node": "Run Device Health", "type": "main", "index": 0}]]},
+                "Manual Trigger": {"main": [[{"node": "Dispatch Firmware Rollouts", "type": "main", "index": 0}]]},
+                "Every Two Minutes": {"main": [[{"node": "Dispatch Firmware Rollouts", "type": "main", "index": 0}]]},
+                "Dispatch Firmware Rollouts": {"main": [[{"node": "Validate Firmware Dispatch", "type": "main", "index": 0}]]},
+                "Validate Firmware Dispatch": {"main": [[{"node": "Run Device Health", "type": "main", "index": 0}]]},
                 "Run Device Health": {"main": [[{"node": "Prepare Device Health Emails", "type": "main", "index": 0}]]},
                 "Prepare Device Health Emails": {"main": [[{"node": "Send Gmail", "type": "main", "index": 0}]]},
             },

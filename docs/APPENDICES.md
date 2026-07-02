@@ -107,7 +107,7 @@ Organization ownership is the principal tenant boundary. Browser clients use aut
 | `/api/devices` | GET, POST | List organization devices or perform controlled creation |
 | `/api/devices/{id}` | GET, PATCH, DELETE | Inspect or manage one authorized device |
 | `/api/device/bootstrap` | POST | Validate bootstrap secret and return scoped broker configuration |
-| `/api/device/provision` | POST | Coordinate device provisioning |
+| `/api/device/bootstrap` | POST | Authenticate a provisioned ESP32 and return scoped broker configuration |
 | `/api/sessions/{id}/start` | POST | Authorize a session and publish its MQTT command |
 | `/api/sessions/{id}/live` | GET | Return authorized live metrics and waveform frames |
 | `/api/sessions/{id}/stream` | GET | Return server-sent session updates |

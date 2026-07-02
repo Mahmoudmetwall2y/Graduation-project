@@ -30,9 +30,13 @@
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
 #include <HTTPClient.h>
+#include <Update.h>
+#include <WebServer.h>
+#include <DNSServer.h>
 #include <PubSubClient.h>
 #include <ArduinoJson.h>
 #include <Preferences.h>   // NVS flash storage for credentials
+#include <mbedtls/sha256.h>
 #include <strings.h>
 
 // ═══════════════════════════════════════════════════════════════
@@ -53,7 +57,8 @@
 #define DEFAULT_MQTT_USER       "asculticor"
 #define DEFAULT_MQTT_PASS       "CHANGE_ME_IN_PRODUCTION"
 #define DEFAULT_BOOTSTRAP_URL   ""
-#define FIRMWARE_VERSION        "3.0.0"
+#define FIRMWARE_VERSION        "3.1.0"
+#define PROVISIONING_AP_PREFIX  "AscultiCor-Setup-"
 
 // Default device identity — MUST be overridden via serial provisioning before use.
 // Commands: SET device_id <uuid>  and  SET device_secret <secret>
@@ -119,10 +124,13 @@ enum LedPattern {
 void startSession(const char* new_session_id = nullptr, uint16_t requestedDurationSec = 0);
 void processPcgBuffer();
 void publishDeviceStatus();
+void publishFirmwareEvent(const char *state, const char *targetVersion, const char *detail);
 
 WiFiClient         espClient;
 PubSubClient       mqtt(espClient);
 Preferences        nvs;
+WebServer          provisioningServer(80);
+DNSServer          provisioningDns;
 
 // Credentials (loaded from NVS or defaults)
 char wifi_ssid[64];
@@ -139,6 +147,8 @@ char device_id[40];
 char device_secret[80];  // Used by bootstrap provisioning and future per-device auth
 char session_id[37];
 bool bootstrap_insecure = false;
+bool provisioningPortalActive = false;
+bool otaInProgress = false;
 uint16_t defaultSessionDurationSec = DEFAULT_SESSION_DURATION_SEC;
 uint16_t activeSessionDurationSec  = DEFAULT_SESSION_DURATION_SEC;
 
@@ -934,6 +944,171 @@ void updateLed() {
 // ═══════════════════════════════════════════════════════════════
 //  WiFi
 // ═══════════════════════════════════════════════════════════════
+bool deviceIdentityProvisioned() {
+  return strlen(device_secret) > 0 &&
+         strlen(bootstrap_url) > 0 &&
+         strncmp(device_id, "00000000-0000-0000-0000-000000000000", 36) != 0;
+}
+
+String htmlEscape(const String &value) {
+  String escaped = value;
+  escaped.replace("&", "&amp;");
+  escaped.replace("<", "&lt;");
+  escaped.replace(">", "&gt;");
+  escaped.replace("\"", "&quot;");
+  escaped.replace("'", "&#039;");
+  return escaped;
+}
+
+String provisioningPage(const String &message = "") {
+  String page = F(
+    "<!doctype html><html><head><meta name='viewport' content='width=device-width,initial-scale=1'>"
+    "<title>AscultiCor Setup</title><style>"
+    "body{font-family:Arial,sans-serif;background:#f2f6f8;color:#0b1f3a;margin:0;padding:24px}"
+    ".card{max-width:520px;margin:auto;background:#fff;padding:24px;border-radius:16px;box-shadow:0 8px 28px #0b1f3a18}"
+    "h1{margin-top:0}label{display:block;font-weight:700;margin:14px 0 5px}"
+    "input{box-sizing:border-box;width:100%;padding:11px;border:1px solid #cad5df;border-radius:8px}"
+    "button{width:100%;margin-top:20px;padding:12px;border:0;border-radius:8px;background:#0f766e;color:white;font-weight:700}"
+    ".note{font-size:13px;color:#526579;line-height:1.5}.msg{padding:10px;background:#e7f7f4;border-radius:8px}"
+    "</style></head><body><div class='card'><h1>AscultiCor Device Setup</h1>"
+    "<p class='note'>Connect this device to Wi-Fi and register it with your AscultiCor account. "
+    "The device secret and bootstrap URL are generated in the AscultiCor Devices page.</p>");
+  if (message.length()) page += "<p class='msg'>" + htmlEscape(message) + "</p>";
+  page += F(
+    "<form method='post' action='/save'>"
+    "<label>Wi-Fi name</label><input name='ssid' required maxlength='63'>"
+    "<label>Wi-Fi password</label><input name='pass' type='password' maxlength='63'>"
+    "<label>Device ID</label><input name='device_id' required maxlength='36'>"
+    "<label>Device secret</label><input name='device_secret' type='password' required maxlength='79'>"
+    "<label>Bootstrap URL</label><input name='bootstrap_url' required maxlength='191' placeholder='https://example.com/api/device/bootstrap'>"
+    "<label><input style='width:auto' name='insecure' type='checkbox' value='1'> Development only: allow insecure HTTPS</label>"
+    "<button type='submit'>Save and connect</button></form></div></body></html>");
+  return page;
+}
+
+bool saveProvisioningValues(
+  const String &ssid,
+  const String &pass,
+  const String &newDeviceId,
+  const String &newSecret,
+  const String &newBootstrap,
+  bool insecure,
+  String &error
+) {
+  if (!ssid.length() || newDeviceId.length() != 36 || !newSecret.length() || !newBootstrap.length()) {
+    error = "Please complete Wi-Fi name, device ID, device secret, and bootstrap URL.";
+    return false;
+  }
+
+  saveCredential("wifi_ssid", ssid.c_str());
+  saveCredential("wifi_pass", pass.c_str());
+  saveCredential("device_id", newDeviceId.c_str());
+  saveCredential("device_secret", newSecret.c_str());
+  saveCredential("bootstrap_url", newBootstrap.c_str());
+  saveCredential("bootstrap_insecure", insecure ? "true" : "false");
+  return true;
+}
+
+bool saveProvisioningPayload(const String &payload, String &error) {
+  StaticJsonDocument<1536> doc;
+  DeserializationError jsonError = deserializeJson(doc, payload);
+  if (jsonError) {
+    error = String("QR payload was not valid JSON: ") + jsonError.c_str();
+    return false;
+  }
+
+  const char *type = doc["type"] | "";
+  if (strcmp(type, "asculticor-provision-v2") != 0 && strcmp(type, "asculticor-wifi-setup-v2") != 0) {
+    error = "Unsupported QR payload type.";
+    return false;
+  }
+
+  String ssid = doc["wifi_ssid"] | "";
+  String pass = doc["wifi_pass"] | "";
+  String newDeviceId = doc["device_id"] | "";
+  String newSecret = doc["device_secret"] | "";
+  String newBootstrap = doc["bootstrap_url"] | "";
+  bool insecure = doc["bootstrap_insecure"] | false;
+
+  return saveProvisioningValues(ssid, pass, newDeviceId, newSecret, newBootstrap, insecure, error);
+}
+
+void stopProvisioningPortal() {
+  if (!provisioningPortalActive) return;
+  provisioningDns.stop();
+  provisioningServer.stop();
+  WiFi.softAPdisconnect(true);
+  provisioningPortalActive = false;
+}
+
+void startProvisioningPortal() {
+  if (provisioningPortalActive) return;
+
+  uint64_t chip = ESP.getEfuseMac();
+  char apName[32];
+  snprintf(apName, sizeof(apName), "%s%04X", PROVISIONING_AP_PREFIX, (uint16_t)(chip & 0xFFFF));
+
+  WiFi.mode(WIFI_AP_STA);
+  WiFi.softAP(apName);
+  provisioningDns.start(53, "*", WiFi.softAPIP());
+
+  provisioningServer.on("/", HTTP_GET, []() {
+    provisioningServer.send(200, "text/html", provisioningPage());
+  });
+  provisioningServer.on("/provision", HTTP_GET, []() {
+    if (!provisioningServer.hasArg("payload")) {
+      provisioningServer.send(400, "text/html", provisioningPage("QR payload is missing."));
+      return;
+    }
+
+    String error;
+    if (!saveProvisioningPayload(provisioningServer.arg("payload"), error)) {
+      provisioningServer.send(400, "text/html", provisioningPage(error));
+      return;
+    }
+
+    provisioningServer.send(200, "text/html",
+      provisioningPage("QR setup saved. The ESP32 will restart and connect to AscultiCor."));
+    delay(1200);
+    ESP.restart();
+  });
+  provisioningServer.on("/save", HTTP_POST, []() {
+    String ssid = provisioningServer.arg("ssid");
+    String pass = provisioningServer.arg("pass");
+    String newDeviceId = provisioningServer.arg("device_id");
+    String newSecret = provisioningServer.arg("device_secret");
+    String newBootstrap = provisioningServer.arg("bootstrap_url");
+
+    String error;
+    if (!saveProvisioningValues(
+      ssid,
+      pass,
+      newDeviceId,
+      newSecret,
+      newBootstrap,
+      provisioningServer.hasArg("insecure"),
+      error
+    )) {
+      provisioningServer.send(400, "text/html", provisioningPage(error));
+      return;
+    }
+
+    provisioningServer.send(200, "text/html",
+      provisioningPage("Configuration saved. The ESP32 will restart and connect to your Wi-Fi."));
+    delay(1200);
+    ESP.restart();
+  });
+  provisioningServer.onNotFound([]() {
+    provisioningServer.sendHeader("Location", "/", true);
+    provisioningServer.send(302, "text/plain", "");
+  });
+  provisioningServer.begin();
+  provisioningPortalActive = true;
+
+  Serial.printf("[PROVISION] Wi-Fi setup portal started: %s\n", apName);
+  Serial.printf("[PROVISION] Connect to it and open http://%s/\n", WiFi.softAPIP().toString().c_str());
+}
+
 void setupWiFi() {
   Serial.printf("[WiFi] Connecting to %s", wifi_ssid);
   setLedPattern(LED_CONNECTING);
@@ -955,6 +1130,7 @@ void setupWiFi() {
   } else {
     Serial.println("\n[WiFi] FAILED — will retry in loop()");
     setLedPattern(LED_ERROR);
+    startProvisioningPortal();
   }
 }
 
@@ -1089,9 +1265,156 @@ void setupPcgTimer() {
 // ═══════════════════════════════════════════════════════════════
 //  MQTT
 // ═══════════════════════════════════════════════════════════════
+void publishFirmwareEvent(const char *state, const char *targetVersion, const char *detail) {
+  if (!mqtt.connected()) return;
+  char topic[160];
+  buildTopic(topic, sizeof(topic), "firmware");
+
+  StaticJsonDocument<512> doc;
+  doc["state"] = state;
+  doc["device_id"] = device_id;
+  doc["current_version"] = FIRMWARE_VERSION;
+  doc["target_version"] = targetVersion ? targetVersion : "";
+  doc["detail"] = detail ? detail : "";
+  doc["free_heap"] = ESP.getFreeHeap();
+
+  char payload[640];
+  size_t length = serializeJson(doc, payload, sizeof(payload));
+  mqtt.publish(topic, reinterpret_cast<const uint8_t *>(payload), length, false);
+}
+
+String sha256Hex(const unsigned char digest[32]) {
+  static const char hex[] = "0123456789abcdef";
+  char output[65];
+  for (int i = 0; i < 32; i++) {
+    output[i * 2] = hex[(digest[i] >> 4) & 0x0F];
+    output[i * 2 + 1] = hex[digest[i] & 0x0F];
+  }
+  output[64] = '\0';
+  return String(output);
+}
+
+bool installFirmwareUpdate(const char *url, const char *expectedSha256, const char *targetVersion) {
+  if (otaInProgress || isStreaming || !url || !expectedSha256 || strlen(expectedSha256) != 64) {
+    publishFirmwareEvent("rejected", targetVersion, isStreaming ? "recording_in_progress" : "invalid_update_request");
+    return false;
+  }
+
+  otaInProgress = true;
+  publishFirmwareEvent("downloading", targetVersion, "starting_https_download");
+
+  HTTPClient http;
+  WiFiClient plainClient;
+  WiFiClientSecure secureClient;
+  bool isHttps = strncmp(url, "https://", 8) == 0;
+
+  if (isHttps) {
+    if (strlen(bootstrap_ca_pem) > 0) {
+      String caPem = normalizedBootstrapCaPem();
+      secureClient.setCACert(caPem.c_str());
+    } else if (bootstrap_insecure) {
+      secureClient.setInsecure();
+    } else {
+      publishFirmwareEvent("failed", targetVersion, "https_ca_not_configured");
+      otaInProgress = false;
+      return false;
+    }
+    if (!http.begin(secureClient, url)) {
+      publishFirmwareEvent("failed", targetVersion, "https_initialization_failed");
+      otaInProgress = false;
+      return false;
+    }
+  } else if (!http.begin(plainClient, url)) {
+    publishFirmwareEvent("failed", targetVersion, "http_initialization_failed");
+    otaInProgress = false;
+    return false;
+  }
+
+  http.setTimeout(15000);
+  int status = http.GET();
+  int contentLength = http.getSize();
+  if (status != HTTP_CODE_OK || contentLength <= 0) {
+    char detail[96];
+    snprintf(detail, sizeof(detail), "download_failed_http_%d_length_%d", status, contentLength);
+    publishFirmwareEvent("failed", targetVersion, detail);
+    http.end();
+    otaInProgress = false;
+    return false;
+  }
+
+  if (!Update.begin((size_t)contentLength, U_FLASH)) {
+    publishFirmwareEvent("failed", targetVersion, "ota_partition_unavailable_or_image_too_large");
+    http.end();
+    otaInProgress = false;
+    return false;
+  }
+
+  mbedtls_sha256_context sha;
+  mbedtls_sha256_init(&sha);
+  mbedtls_sha256_starts(&sha, 0);
+
+  WiFiClient *stream = http.getStreamPtr();
+  uint8_t buffer[1024];
+  size_t written = 0;
+  unsigned long lastProgress = 0;
+
+  while (http.connected() && written < (size_t)contentLength) {
+    size_t available = stream->available();
+    if (!available) {
+      delay(2);
+      continue;
+    }
+    size_t readLength = stream->readBytes(buffer, min(available, sizeof(buffer)));
+    if (!readLength) continue;
+
+    mbedtls_sha256_update(&sha, buffer, readLength);
+    if (Update.write(buffer, readLength) != readLength) {
+      Update.abort();
+      mbedtls_sha256_free(&sha);
+      http.end();
+      publishFirmwareEvent("failed", targetVersion, "flash_write_failed");
+      otaInProgress = false;
+      return false;
+    }
+    written += readLength;
+
+    if (millis() - lastProgress > 2000) {
+      lastProgress = millis();
+      char detail[64];
+      snprintf(detail, sizeof(detail), "downloaded_%u_of_%u_bytes", (unsigned)written, (unsigned)contentLength);
+      publishFirmwareEvent("installing", targetVersion, detail);
+      mqtt.loop();
+    }
+  }
+
+  unsigned char digest[32];
+  mbedtls_sha256_finish(&sha, digest);
+  mbedtls_sha256_free(&sha);
+  http.end();
+
+  String actualSha256 = sha256Hex(digest);
+  if (written != (size_t)contentLength || !actualSha256.equalsIgnoreCase(expectedSha256)) {
+    Update.abort();
+    publishFirmwareEvent("failed", targetVersion, "sha256_verification_failed");
+    otaInProgress = false;
+    return false;
+  }
+
+  if (!Update.end(true) || !Update.isFinished()) {
+    publishFirmwareEvent("failed", targetVersion, "ota_finalize_failed");
+    otaInProgress = false;
+    return false;
+  }
+
+  publishFirmwareEvent("rebooting", targetVersion, "verified_update_installed");
+  delay(750);
+  ESP.restart();
+  return true;
+}
+
 void mqttCallback(char *topic, byte *payload, unsigned int length) {
   // Parse incoming control messages
-  StaticJsonDocument<384> doc;
+  StaticJsonDocument<1024> doc;
   DeserializationError err = deserializeJson(doc, payload, length);
   if (err) return;
 
@@ -1122,6 +1445,11 @@ void mqttCallback(char *topic, byte *payload, unsigned int length) {
     } else {
       Serial.println("[MQTT] Start requested but no session_id provided.");
     }
+  } else if (strcmp(command, "firmware_update") == 0) {
+    const char *url = doc["url"];
+    const char *sha256 = doc["sha256"];
+    const char *version = doc["version"];
+    installFirmwareUpdate(url, sha256, version);
   }
 }
 
@@ -1177,6 +1505,8 @@ void publishDeviceStatus() {
   doc["default_session_duration_sec"] = defaultSessionDurationSec;
   doc["quality_gate_enabled"] = true;
   doc["streaming"] = isStreaming;
+  doc["ota_capable"] = true;
+  doc["ota_in_progress"] = otaInProgress;
 
   char buf[384];
   size_t payloadLen = serializeJson(doc, buf, sizeof(buf));
@@ -1521,6 +1851,10 @@ void setup() {
   // WiFi
   setupWiFi();
 
+  if (!deviceIdentityProvisioned()) {
+    startProvisioningPortal();
+  }
+
   if (shouldUseBootstrap() && WiFi.status() == WL_CONNECTED) {
     if (!fetchBootstrapConfig()) {
       Serial.println("[BOOTSTRAP] Falling back to locally stored MQTT credentials");
@@ -1551,6 +1885,11 @@ void setup() {
 void loop() {
   unsigned long now = millis();
 
+  if (provisioningPortalActive) {
+    provisioningDns.processNextRequest();
+    provisioningServer.handleClient();
+  }
+
   // ── Serial provisioning ──
   handleSerialProvisioning();
 
@@ -1561,6 +1900,10 @@ void loop() {
   if (!ensureWiFi()) {
     delay(100);
     return;  // Skip everything until WiFi is back
+  }
+
+  if (provisioningPortalActive && deviceIdentityProvisioned()) {
+    stopProvisioningPortal();
   }
 
   // ── MQTT connection ──

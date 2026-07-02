@@ -83,7 +83,7 @@ export default function DevicesPage() {
         hour: '2-digit',
         minute: '2-digit',
       })
-      setNewDeviceName(`ESP32 USB ${timeLabel}`)
+      setNewDeviceName(`AscultiCor ESP32 ${timeLabel}`)
     }
     const handleKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
@@ -510,7 +510,7 @@ export default function DevicesPage() {
                         className="input-field"
                         ref={addFirstFieldRef}
                       />
-                      <p className="form-hint">A default USB label is ready; rename it only if you want a room or kit label.</p>
+                      <p className="form-hint">A default device label is ready; rename it for a room, kit, or asset identifier.</p>
                     </div>
 
                     <div className="form-group">
@@ -564,7 +564,7 @@ export default function DevicesPage() {
                       <button type="button" onClick={() => setShowAddModal(false)} className="btn-ghost">Cancel</button>
                       <button type="submit" disabled={creating} className="btn-primary gap-2">
                         {creating && <Activity className="w-4 h-4 animate-spin" />}
-                        {creating ? 'Creating...' : 'Create Device & Open USB Setup'}
+                        {creating ? 'Creating...' : 'Create Device & Open Wi-Fi Setup'}
                       </button>
                     </div>
                   </form>

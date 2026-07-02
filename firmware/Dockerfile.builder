@@ -60,17 +60,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # /out     → named volume read-write (firmware_public)
 #            This volume is also mounted by the frontend at
 #            /app/public/firmware so Next.js serves the binaries.
-ENV FQBN=esp32:esp32:esp32 \
-    VERSION=3.0.0 \
+ENV FQBN=esp32:esp32:esp32:PartitionScheme=custom \
+    VERSION=3.1.0 \
     SKETCH_DIR=/AscultiCor_esp32 \
     OUTPUT_DIR=/out
-    # ESPTOOL is not needed in this image: the firmware-flasher service
-    # uses Dockerfile.flasher with pip-installed esptool instead.
+    # ESPTOOL is not needed in this image; AscultiCor uses OTA-first
+    # lifecycle management after factory/development bootstrap.
 
 WORKDIR /workspace
 
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
-COPY flasher_server.py /usr/local/bin/flasher_server.py
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
 ENTRYPOINT ["docker-entrypoint.sh"]

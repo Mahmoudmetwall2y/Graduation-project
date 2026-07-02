@@ -495,8 +495,8 @@ export default function Dashboard() {
                 <div className="p-2.5 rounded-xl bg-blue-50 dark:bg-blue-950/30 w-fit mb-3">
                   <Wifi className="w-5 h-5 text-blue-600 dark:text-blue-400" />
                 </div>
-                <h3 className="font-semibold text-foreground mb-1">Flash & Provision</h3>
-                <p className="text-sm text-muted-foreground mb-4">Flash firmware and send credentials via Serial Monitor</p>
+                <h3 className="font-semibold text-foreground mb-1">Wi-Fi Onboarding</h3>
+                <p className="text-sm text-muted-foreground mb-4">Connect a preloaded device through its secure setup network</p>
                 <span className="inline-flex items-center text-sm text-muted-foreground">
                   <Clock className="w-3.5 h-3.5 mr-1" /> After step 1
                 </span>

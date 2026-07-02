@@ -1,5 +1,5 @@
 {
-  "name": "03 - Device Health Monitoring",
+  "name": "03 - Device Lifecycle Management",
   "nodes": [
     {
       "parameters": {},
@@ -34,6 +34,56 @@
     },
     {
       "parameters": {
+        "url": "={{(($env.ASCULTICOR_APP_URL || 'http://frontend:3000').replace(/\\/+$/, '')) + '/api/device/firmware/deployments?action=dispatch'}}",
+        "options": {},
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Host",
+              "value": "={{$env.ASCULTICOR_INTERNAL_HOST_HEADER || ($env.ASCULTICOR_PUBLIC_APP_URL || 'http://frontend:3000').replace(/^https?:\\/\\//, '').replace(/\\/.*$/, '')}}"
+            },
+            {
+              "name": "X-Forwarded-Host",
+              "value": "={{$env.ASCULTICOR_INTERNAL_HOST_HEADER || ($env.ASCULTICOR_PUBLIC_APP_URL || 'http://frontend:3000').replace(/^https?:\\/\\//, '').replace(/\\/.*$/, '')}}"
+            },
+            {
+              "name": "X-Forwarded-Proto",
+              "value": "https"
+            },
+            {
+              "name": "x-internal-token",
+              "value": "={{$env.ASCULTICOR_INTERNAL_API_TOKEN}}"
+            }
+          ]
+        },
+        "method": "POST"
+      },
+      "id": "5969a37a-6cd7-5eca-96a7-2e89ce2b2b7c",
+      "name": "Dispatch Firmware Rollouts",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        280,
+        20
+      ],
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "if (!$json || $json.ok !== true || $json.action !== 'firmware-rollout') {\n  throw new Error('Firmware rollout dispatcher returned an invalid response');\n}\nconst results = Array.isArray($json.results) ? $json.results : [];\nreturn [{\n  json: {\n    queued: Number($json.queued || 0),\n    dispatched: results.filter((item) => item.status === 'dispatched').length,\n    retryPending: results.filter((item) => item.status === 'retry_pending').length,\n    results,\n    checkedAt: new Date().toISOString(),\n  },\n}];\n"
+      },
+      "id": "56d21191-f7d6-5a89-acf8-adb6e0654942",
+      "name": "Validate Firmware Dispatch",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        540,
+        20
+      ]
+    },
+    {
+      "parameters": {
         "url": "={{(($env.ASCULTICOR_APP_URL || 'http://frontend:3000').replace(/\\/+$/, '')) + '/api/n8n/workflows?action=device-health'}}",
         "options": {},
         "sendHeaders": true,
@@ -64,8 +114,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        300,
-        80
+        800,
+        20
       ],
       "alwaysOutputData": true
     },
@@ -78,8 +128,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        600,
-        80
+        1060,
+        20
       ]
     },
     {
@@ -97,8 +147,8 @@
       "type": "n8n-nodes-base.gmail",
       "typeVersion": 2.1,
       "position": [
-        900,
-        80
+        1320,
+        -40
       ]
     }
   ],
@@ -107,7 +157,7 @@
       "main": [
         [
           {
-            "node": "Run Device Health",
+            "node": "Dispatch Firmware Rollouts",
             "type": "main",
             "index": 0
           }
@@ -115,6 +165,28 @@
       ]
     },
     "Every Two Minutes": {
+      "main": [
+        [
+          {
+            "node": "Dispatch Firmware Rollouts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Dispatch Firmware Rollouts": {
+      "main": [
+        [
+          {
+            "node": "Validate Firmware Dispatch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Firmware Dispatch": {
       "main": [
         [
           {
@@ -155,6 +227,6 @@
   },
   "staticData": null,
   "active": false,
-  "versionId": "7509fbb3-3296-5a4d-b0d1-769c2ba7550a",
+  "versionId": "abc80f11-84c3-5883-8b7b-4178c40217f9",
   "id": ""
 }
