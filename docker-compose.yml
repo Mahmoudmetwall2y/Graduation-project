@@ -153,7 +153,7 @@ services:
     volumes:
       # Source sketch — read-only; never baked into the image.
       # Arduino sketches require the folder name to match the main .ino file.
-      - ./firmware/asculticor_esp32:/AscultiCor_esp32:ro
+      - ./firmware/asculticor_esp32/AscultiCor_esp32:/AscultiCor_esp32:ro
       # Output volume shared with the frontend (read-write here)
       - firmware_public:/out
     environment:

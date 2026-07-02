@@ -77,6 +77,17 @@ export default function DevicesPage() {
   }, [fetchDevices])
 
   useEffect(() => {
+    if (loading || !canCreateDevices) return
+
+    const url = new URL(window.location.href)
+    if (url.searchParams.get('add') !== '1') return
+
+    setShowAddModal(true)
+    url.searchParams.delete('add')
+    window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`)
+  }, [canCreateDevices, loading])
+
+  useEffect(() => {
     if (!showAddModal) return
     if (!credentials && !newDeviceName.trim()) {
       const timeLabel = new Date().toLocaleTimeString([], {

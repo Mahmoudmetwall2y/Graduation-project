@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SKETCH="${SKETCH:-firmware/asculticor_esp32/AscultiCor_esp32.ino}"
+SKETCH="${SKETCH:-firmware/asculticor_esp32/AscultiCor_esp32/AscultiCor_esp32.ino}"
 FQBN="${FQBN:-esp32:esp32:esp32}"
 VERSION="${VERSION:-3.0.0}"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
