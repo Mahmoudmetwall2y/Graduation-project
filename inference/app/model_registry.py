@@ -16,7 +16,7 @@ From inference.py (or any other module):
     if cfg.enabled:
         model_path = cfg.artifact_path  # resolved from env var
 
-Model 3 is the delivered PyTorch state_dict at
+The Tier 2 functional model is the delivered PyTorch state_dict at
 new-models/CNN/best_model.pkl; its architecture lives in severity_cnn.py.
 """
 
@@ -149,7 +149,7 @@ def _build_registry() -> Dict[str, ModelConfig]:
         ),
     )
 
-    # ── Model 2: ECG AuscultICor v26 SL (Single-Lead, Multi-Head) ───────────
+    # ── Tier 3: ECG Prognosis (legacy MODEL_2_* configuration) ─────────────
     # Artifact:  new-models/ecg_mitbih_single_lead/AuscultICor_v26_SL.keras
     # Meta:      new-models/ecg_mitbih_single_lead/label_encoder_SL.pkl
     #
@@ -171,7 +171,7 @@ def _build_registry() -> Dict[str, ModelConfig]:
     #    AD8232 3-electrode setup on the printed PCB. No hardware changes needed.
     #    RR features are estimated server-side from the ECG signal.
     # ─────────────────────────────────────────────────────────────────────────
-    model2 = ModelConfig(
+    prognosis_model = ModelConfig(
         key="ecg_bilstm",
         name="ECG AuscultICor v26 SL (Single-Lead, Multi-Head)",
         task="ecg_arrhythmia_classification",
@@ -219,10 +219,10 @@ def _build_registry() -> Dict[str, ModelConfig]:
         ),
     )
 
-    # ── Model 3: PyTorch CNN Murmur Characterization ─────────────────────────
+    # ── Tier 2: Functional Murmur Characterization (legacy MODEL_3_*) ────────
     # Artifact: new-models/CNN/best_model.pkl (state_dict, four input channels).
     # Class order is taken from the delivered per-head confusion matrices.
-    model3 = ModelConfig(
+    functional_model = ModelConfig(
         key="severity_cnn",
         name="CNN Murmur Characterization Classifier",
         task="murmur_severity_classification",
@@ -262,8 +262,8 @@ def _build_registry() -> Dict[str, ModelConfig]:
 
     registry = {
         model1.key: model1,
-        model2.key: model2,
-        model3.key: model3,
+        prognosis_model.key: prognosis_model,
+        functional_model.key: functional_model,
     }
 
     # Emit a startup summary so the log clearly shows registry state

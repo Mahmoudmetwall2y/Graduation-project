@@ -1408,7 +1408,13 @@ export default function SessionDetailPage() {
                 return <Model1StateCard data={hierarchicalReport.model1} />
               }
               if (activeReportTab === 'model2') {
-                return <Model2DiagnosticCard data={hierarchicalReport.model2} murmurDetected={murmurDetected} />
+                return (
+                  <Model2DiagnosticCard
+                    data={hierarchicalReport.model2}
+                    murmurDetected={murmurDetected}
+                    sessionStatus={session.status}
+                  />
+                )
               }
               if (activeReportTab === 'model3') {
                 return <Model3PrognosisCard data={hierarchicalReport.model3} />

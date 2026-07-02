@@ -8,8 +8,8 @@ prevents the remaining models from working.
 Model slots
 -----------
   Model 1 – pcg_xgboost   : XGBoost PCG heart-sound classifier (ACTIVE)
-  Model 2 – ecg_bilstm    : ECG AuscultICor v26 SL — single-lead, multi-head (ACTIVE)
-  Model 3 – severity_cnn  : PyTorch multi-head murmur characterization (ACTIVE)
+  Tier 2 – severity_cnn   : Functional murmur characterization (ACTIVE)
+  Tier 3 – ecg_bilstm     : ECG prognosis — single-lead, multi-head (ACTIVE)
 
 Falls back to deterministic demo mode if all enabled models fail to load
 and ENABLE_DEMO_MODE=true.
@@ -41,7 +41,7 @@ from .model_registry import (
 logger = logging.getLogger(__name__)
 
 # ─── AAMI beat-type mapping (kept for backwards-compat demo mode) ─────────────
-# Model 2 uses its own embedded beat_map; this is only used for the legacy demo.
+# The Tier 3 ECG model uses its own embedded beat_map; this is only for legacy demo mode.
 _LEGACY_BEAT_TO_AAMI = {
     "N": "Normal", "L": "Normal", "R": "Normal",
     "A": "SVEB", "V": "VEB", "F": "Fusion", "/": "Unknown",
@@ -62,7 +62,7 @@ class InferenceEngine:
       system falls back to demo mode if all enabled models fail.
     * Demo mode remains fully functional for offline development.
 
-    Model 3 is loaded from its PyTorch state_dict independently of Models 1/2.
+    Tier 2 functional analysis is loaded from its PyTorch state_dict independently.
     """
 
     def __init__(self, enable_demo_mode: bool = True):
@@ -81,12 +81,12 @@ class InferenceEngine:
         self.pcg_label_encoder = None   # sklearn LabelEncoder (optional)
         self.pcg_classes: list = []     # resolved class list
 
-        # ── Model 2: ECG AuscultICor_Final ───────────────────────────────────
+        # ── Tier 3: ECG Prognosis ────────────────────────────────────────────
         self.ecg_model = None
         self.ecg_meta: Dict[str, Any] = {}   # metadata dict from label_encoder.pkl
         self.ecg_classes: list = []          # resolved class list
 
-        # ── Model 3: CNN Murmur Characterization ────────────────────────────
+        # ── Tier 2: Functional Murmur Characterization ──────────────────────
         self.severity_model = None
         self.severity_device = None
 
@@ -220,7 +220,7 @@ class InferenceEngine:
 
     def _load_ecg_model(self):
         """
-        Load Model 2: ECG AuscultICor v26 SL (single-lead, multi-head).
+        Load Tier 3: ECG prognosis (AuscultICor v26 SL, single-lead, multi-head).
 
         Input signature (v26):
             ecg_input : (batch, 500, 1)  — single-lead ECG @ 125 Hz
@@ -238,13 +238,13 @@ class InferenceEngine:
         """
         cfg = get_model_config("ecg_bilstm")
         if not cfg.enabled:
-            logger.info("[Model 2] ecg_bilstm is disabled — skipping.")
+            logger.info("[Tier 3 · ECG Prognosis] ecg_bilstm is disabled — skipping.")
             return
 
         try:
             if cfg.artifact_path is None or not cfg.artifact_path.exists():
                 raise FileNotFoundError(
-                    f"Model 2 (ECG) artifact not found at: {cfg.artifact_path}. "
+                    f"Tier 3 ECG prognosis artifact not found at: {cfg.artifact_path}. "
                     "Set MODEL_2_PATH in your .env file."
                 )
 
@@ -258,17 +258,17 @@ class InferenceEngine:
             self.ecg_model = keras.models.load_model(
                 str(cfg.artifact_path), compile=False
             )
-            logger.info(f"[Model 2] Loaded ECG model from {cfg.artifact_path}")
+            logger.info(f"[Tier 3 · ECG Prognosis] Loaded model from {cfg.artifact_path}")
 
             # Load metadata dict (label_encoder_SL.pkl)
             meta_path = cfg.aux_paths.get("meta")
             if meta_path and meta_path.exists():
                 with open(meta_path, "rb") as f:
                     self.ecg_meta = pickle.load(f)
-                logger.info(f"[Model 2] Loaded ECG metadata: {list(self.ecg_meta.keys())}")
+                logger.info(f"[Tier 3 · ECG Prognosis] Loaded metadata: {list(self.ecg_meta.keys())}")
             else:
                 logger.warning(
-                    f"[Model 2] No metadata file at {meta_path}. "
+                    f"[Tier 3 · ECG Prognosis] No metadata file at {meta_path}. "
                     "Using registry label mapping as fallback."
                 )
 
@@ -283,21 +283,21 @@ class InferenceEngine:
                 self.ecg_classes = cfg.label_mapping.get(
                     "classes", ["Normal", "SVEB", "VEB", "Fusion", "Unknown"]
                 )
-            logger.info(f"[Model 2] ECG classes: {self.ecg_classes}")
+            logger.info(f"[Tier 3 · ECG Prognosis] Classes: {self.ecg_classes}")
 
             self.model_status["ecg_bilstm"] = {
                 "loaded": True, "error": None,
                 "enabled": True, "pending": False,
             }
             logger.info(
-                f"[Model 2] AuscultICor v26 SL loaded successfully (version={cfg.version}). "
+                f"[Tier 3 · ECG Prognosis] AuscultICor v26 SL loaded successfully (version={cfg.version}). "
                 "Single-lead mode — compatible with AD8232 3-electrode PCB. "
                 "RR features computed server-side."
             )
 
         except Exception as exc:
             err = str(exc)
-            logger.error(f"[Model 2] ecg_bilstm FAILED to load: {err}")
+            logger.error(f"[Tier 3 · ECG Prognosis] ecg_bilstm FAILED to load: {err}")
             self.model_status["ecg_bilstm"] = {
                 "loaded": False, "error": err,
                 "enabled": True, "pending": False,
@@ -305,16 +305,16 @@ class InferenceEngine:
 
 
     def _load_severity_model(self):
-        """Load Model 3 from its delivered PyTorch state_dict checkpoint."""
+        """Load Tier 2 functional analysis from its delivered PyTorch checkpoint."""
         cfg = get_model_config("severity_cnn")
         if not cfg.enabled:
-            logger.info("[Model 3] severity_cnn is disabled — skipping.")
+            logger.info("[Tier 2 · Functional] severity_cnn is disabled — skipping.")
             return
 
         try:
             if cfg.artifact_path is None or not cfg.artifact_path.exists():
                 raise FileNotFoundError(
-                    f"Model 3 (CNN) artifact not found at: {cfg.artifact_path}. "
+                    f"Tier 2 functional CNN artifact not found at: {cfg.artifact_path}. "
                     "Set MODEL_3_PATH in your .env file."
                 )
 
@@ -343,11 +343,11 @@ class InferenceEngine:
                 "enabled": True, "pending": False,
             }
             logger.info(
-                f"[Model 3] severity_cnn loaded successfully (version={cfg.version})"
+                f"[Tier 2 · Functional] severity_cnn loaded successfully (version={cfg.version})"
             )
         except Exception as exc:
             err = str(exc)
-            logger.error(f"[Model 3] severity_cnn FAILED to load: {err}")
+            logger.error(f"[Tier 2 · Functional] severity_cnn FAILED to load: {err}")
             self.model_status["severity_cnn"] = {
                 "loaded": False, "error": err,
                 "enabled": True, "pending": False,
@@ -479,7 +479,7 @@ class InferenceEngine:
 
     def predict_ecg(self, ecg: np.ndarray, sample_rate: int) -> Dict[str, Any]:
         """
-        Run ECG prediction (Model 2 — AuscultICor v26 SL, single-lead, multi-head).
+        Run Tier 3 ECG prognosis (AuscultICor v26 SL, single-lead, multi-head).
 
         The model has 3 input tensors:
           - ecg_input : (batch, 500, 1)  — single-lead ECG @ 125 Hz
@@ -582,7 +582,7 @@ class InferenceEngine:
             raise
 
 
-    # ─── Murmur Characterization (Model 3) ───────────────────────────────────
+    # ─── Tier 2 Functional Murmur Characterization ───────────────────────────
 
     def predict_murmur_severity(
         self,
@@ -594,7 +594,7 @@ class InferenceEngine:
         cfg = get_model_config("severity_cnn")
 
         if not cfg.enabled:
-            logger.info("[Model 3] predict_murmur_severity called while disabled.")
+            logger.info("[Tier 2 · Functional] predict_murmur_severity called while disabled.")
             return {
                 "status": "disabled",
                 "model_name": "murmur_severity_cnn",
@@ -855,7 +855,7 @@ class InferenceEngine:
         }
 
     def _demo_severity_prediction(self) -> Dict[str, Any]:
-        """Deterministic demo severity prediction (used when Model 3 is active in demo mode)."""
+        """Deterministic functional prediction used when demo mode is active."""
         return {
             "murmur_locations": {
                 "predicted": "MV",
