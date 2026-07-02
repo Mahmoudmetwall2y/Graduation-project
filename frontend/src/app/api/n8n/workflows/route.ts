@@ -8,6 +8,10 @@ type EmailPayload = {
   emailTo: string
   emailSubject: string
   emailText: string
+  emailHtml?: string
+  alertId?: string
+  sessionId?: string
+  severity?: 'warning' | 'critical'
 }
 
 type WorkflowResult = {
@@ -72,14 +76,60 @@ function emailFrom() {
   return env('ASCULTICOR_ALERT_EMAIL_FROM', 'AscultiCor <alerts@localhost>')
 }
 
-function email(subject: string, text: string, to = fallbackEmail()): EmailPayload | null {
+function email(
+  subject: string,
+  text: string,
+  to = fallbackEmail(),
+  details: Partial<EmailPayload> = {},
+): EmailPayload | null {
   if (!to) return null
   return {
     emailFrom: emailFrom(),
     emailTo: to,
     emailSubject: subject,
     emailText: text,
+    ...details,
   }
+}
+
+function escapeHtml(value: unknown) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
+function clinicalAlertHtml(input: {
+  title: string
+  severity: 'warning' | 'critical'
+  patientName?: string | null
+  deviceName: string
+  sessionId: string
+  finding: string
+  confidence: number | null
+}) {
+  const critical = input.severity === 'critical'
+  const accent = critical ? '#a53f4b' : '#b7791f'
+  const pale = critical ? '#fff0f1' : '#fff8e7'
+  const confidence = input.confidence === null || input.confidence === undefined
+    ? 'Not available'
+    : `${Math.round(input.confidence * 100)}%`
+  const sessionUrl = `${publicAppUrl()}/session/${input.sessionId}`
+
+  return `<!doctype html><html><body style="margin:0;background:#f2f6f8;font-family:Arial,Helvetica,sans-serif;color:#172b40;">
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr><td align="center" style="padding:28px 12px;">
+  <table role="presentation" width="660" cellspacing="0" cellpadding="0" style="max-width:100%;background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 6px 22px rgba(11,31,58,.08);">
+    <tr><td style="padding:26px 30px;background:#0b1f3a;border-bottom:5px solid ${accent};"><div style="color:#7bd3c7;font-size:12px;font-weight:800;letter-spacing:1.4px;text-transform:uppercase;">AscultiCor Clinical Review Alert</div><div style="margin-top:8px;color:#fff;font-size:24px;font-weight:800;">${escapeHtml(input.title)}</div></td></tr>
+    <tr><td style="padding:24px 30px;"><div style="display:inline-block;padding:6px 11px;border-radius:999px;background:${pale};color:${accent};font-size:12px;font-weight:800;text-transform:uppercase;">${escapeHtml(input.severity)}</div>
+      <p style="margin:18px 0 4px;color:#607286;font-size:12px;text-transform:uppercase;">Automated model output</p><p style="margin:0;color:#0b1f3a;font-size:21px;font-weight:800;">${escapeHtml(input.finding)}</p>
+      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin-top:20px;background:#f7fafb;border:1px solid #dce4eb;border-radius:10px;"><tr><td style="padding:13px;color:#607286;font-size:12px;">Patient<strong style="display:block;color:#172b40;font-size:14px;">${escapeHtml(input.patientName || 'Not linked')}</strong></td><td style="padding:13px;color:#607286;font-size:12px;">Device<strong style="display:block;color:#172b40;font-size:14px;">${escapeHtml(input.deviceName)}</strong></td><td style="padding:13px;color:#607286;font-size:12px;">Confidence<strong style="display:block;color:#172b40;font-size:14px;">${escapeHtml(confidence)}</strong></td></tr></table>
+      <p style="margin:20px 0;color:#314459;font-size:14px;line-height:1.6;">This automated result requires qualified professional review and correlation with the original recording and available context.</p>
+      <div style="text-align:center;"><a href="${escapeHtml(sessionUrl)}" style="display:inline-block;padding:12px 20px;border-radius:9px;background:#0f766e;color:#fff;text-decoration:none;font-size:14px;font-weight:800;">Review session</a></div>
+    </td></tr>
+    <tr><td style="padding:16px 22px;background:${pale};border-top:1px solid ${accent};color:${accent};font-size:12px;line-height:1.55;"><strong>Educational use only:</strong> This alert is not a diagnosis or treatment recommendation. Review by a qualified healthcare professional is required.</td></tr>
+  </table></td></tr></table></body></html>`
 }
 
 function result(action: string, summary: Record<string, unknown>, emails: Array<EmailPayload | null> = []): WorkflowResult {
@@ -166,6 +216,7 @@ async function runClinicalAlerts(supabase: any) {
     title: string
     message: string
     confidence: number | null
+    finding: string
   }) {
     const existing = await findOpenAlert(supabase, input.session.device_id, input.subtype, input.session.id)
     if (existing) {
@@ -173,11 +224,12 @@ async function runClinicalAlerts(supabase: any) {
       return
     }
 
-    await insertAlert(supabase, {
+    const severity: 'warning' | 'critical' = input.subtype === 'session_error' ? 'critical' : 'warning'
+    const alert = await insertAlert(supabase, {
       device_id: input.session.device_id,
       org_id: input.session.org_id,
       alert_type: input.subtype === 'session_error' ? 'error' : 'anomaly_detected',
-      severity: input.subtype === 'session_error' ? 'critical' : 'warning',
+      severity,
       message: input.message,
       metadata: {
         session_id: input.session.id,
@@ -185,13 +237,14 @@ async function runClinicalAlerts(supabase: any) {
         subtype: input.subtype,
         modality: input.prediction?.modality || null,
         confidence: input.confidence,
+        finding: input.finding,
         source: 'n8n-clinical-alerts',
       },
     })
 
     created += 1
     const patient = input.session.patient
-    const recipient = patient?.email || fallbackEmail()
+    const recipient = fallbackEmail() || patient?.email
     const deviceName = input.session.device?.device_name || input.session.device_id
     emails.push(email(
       `[AscultiCor] ${input.title}`,
@@ -208,6 +261,20 @@ async function runClinicalAlerts(supabase: any) {
         'This notification is for workflow review and is not a medical diagnosis.',
       ].join('\n'),
       recipient,
+      {
+        emailHtml: clinicalAlertHtml({
+          title: input.title,
+          severity,
+          patientName: patient?.full_name,
+          deviceName,
+          sessionId: input.session.id,
+          finding: input.finding,
+          confidence: input.confidence,
+        }),
+        alertId: alert.id,
+        sessionId: input.session.id,
+        severity,
+      },
     ))
   }
 
@@ -237,17 +304,33 @@ async function runClinicalAlerts(supabase: any) {
         title: 'Warning: Murmur detected',
         message: `Murmur detected for session ${session.id}`,
         confidence: output.probabilities?.Murmur ?? output.probabilities?.[output.label] ?? null,
+        finding: 'PCG classified as Murmur',
       })
     }
 
-    if (prediction.modality === 'ecg' && output.prediction === 'Abnormal') {
+    const ecgClass = String(output.prediction || output.label || '').trim()
+    const normalizedEcgClass = ecgClass.toLowerCase()
+    if (prediction.modality === 'ecg' && ['abnormal', 'sveb', 'veb', 'fusion'].includes(normalizedEcgClass)) {
       await createClinicalAlert({
         session,
         prediction,
-        subtype: 'ecg_abnormal',
-        title: 'Warning: Abnormal ECG',
-        message: `Abnormal ECG detected for session ${session.id}`,
+        subtype: `ecg_${normalizedEcgClass}`,
+        title: `Warning: ECG ${ecgClass} requires review`,
+        message: `ECG ${ecgClass} output detected for session ${session.id}`,
         confidence: output.confidence ?? null,
+        finding: `ECG classified as ${ecgClass}`,
+      })
+    }
+
+    if (prediction.modality === 'ecg' && normalizedEcgClass === 'unknown') {
+      await createClinicalAlert({
+        session,
+        prediction,
+        subtype: 'ecg_uninterpretable',
+        title: 'Warning: ECG result requires repeat or review',
+        message: `ECG output was Unknown for session ${session.id}`,
+        confidence: output.confidence ?? null,
+        finding: 'ECG result was Unknown / uninterpretable',
       })
     }
   }
@@ -269,6 +352,7 @@ async function runClinicalAlerts(supabase: any) {
       title: 'Critical: Session error',
       message: `Session ${session.id} entered error state`,
       confidence: null,
+      finding: 'Session processing entered an error state',
     })
   }
 

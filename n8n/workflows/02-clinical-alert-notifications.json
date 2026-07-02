@@ -64,30 +64,79 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        300,
+        260,
         80
       ],
-      "alwaysOutputData": true
+      "alwaysOutputData": true,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
     },
     {
       "parameters": {
-        "jsCode": "const emails = Array.isArray($json.emails) ? $json.emails : [];\n\nreturn emails\n  .filter((item) => item && item.emailTo && item.emailSubject && item.emailText)\n  .map((item) => ({\n    json: {\n      emailFrom: item.emailFrom || '',\n      emailTo: item.emailTo,\n      emailSubject: item.emailSubject,\n      emailText: item.emailText,\n      emailHtml: item.emailHtml || `<pre style=\"white-space:pre-wrap;font-family:Arial,sans-serif\">${String(item.emailText).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</pre>`,\n    },\n  }));\n"
+        "jsCode": "if (!$json || typeof $json !== 'object' || $json.ok !== true || $json.action !== 'clinical-alerts') {\n  throw new Error('The clinical-alert worker returned an invalid response payload');\n}\n\nconst summary = $json.summary && typeof $json.summary === 'object' ? $json.summary : {};\nconst emails = Array.isArray($json.emails) ? $json.emails : [];\nfor (const field of ['created', 'skipped', 'emails']) {\n  if (!Number.isFinite(Number(summary[field] ?? 0))) {\n    throw new Error(`The clinical-alert worker returned an invalid ${field} count`);\n  }\n}\n\nreturn [{\n  json: {\n    emails,\n    emailCount: emails.length,\n    created: Number(summary.created || 0),\n    skipped: Number(summary.skipped || 0),\n    checkedAt: new Date().toISOString(),\n  },\n}];\n"
+      },
+      "id": "a5d44fa5-59ff-5439-a744-78f837d65525",
+      "name": "Validate Clinical Alerts",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        500,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "84bbc746-4aab-569d-b012-7cfebe6dfaef",
+              "leftValue": "={{$json.emailCount}}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "8bc2f6cb-5159-5f56-9cc3-26672e8e4b24",
+      "name": "Alerts Ready?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        740,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const emails = Array.isArray($json.emails) ? $json.emails : [];\nconst seen = new Set();\nconst prepared = [];\n\nfor (const item of emails) {\n  if (!item || typeof item !== 'object') continue;\n  const recipient = String(item.emailTo || '').trim().toLowerCase();\n  const subject = String(item.emailSubject || '').trim();\n  const text = String(item.emailText || '').trim();\n  if (!recipient || !recipient.includes('@') || !subject || !text) continue;\n\n  const dedupeKey = `${item.alertId || item.sessionId || subject}:${recipient}`;\n  if (seen.has(dedupeKey)) continue;\n  seen.add(dedupeKey);\n  prepared.push({\n    json: {\n      emailFrom: item.emailFrom || '',\n      emailTo: recipient,\n      emailSubject: subject,\n      emailText: text,\n      emailHtml: item.emailHtml || `<pre style=\"white-space:pre-wrap;font-family:Arial,sans-serif\">${text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</pre>`,\n      alertId: item.alertId || null,\n      sessionId: item.sessionId || null,\n      severity: item.severity === 'critical' ? 'critical' : 'warning',\n      preparedAt: new Date().toISOString(),\n    },\n  });\n}\n\nif (emails.length > 0 && prepared.length === 0) {\n  throw new Error('Clinical-alert emails were returned, but none passed validation');\n}\n\nreturn prepared;\n"
       },
       "id": "aa435333-b60c-56e0-a10b-7a66c865c8b5",
       "name": "Prepare Clinical Alert Emails",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        600,
-        80
+        980,
+        0
       ]
     },
     {
       "parameters": {
         "sendTo": "={{$json.emailTo}}",
         "subject": "={{$json.emailSubject}}",
-        "message": "={{$json.emailText}}",
-        "emailType": "text",
+        "message": "={{$json.emailHtml}}",
+        "emailType": "html",
         "options": {
           "appendAttribution": false
         }
@@ -97,8 +146,22 @@
       "type": "n8n-nodes-base.gmail",
       "typeVersion": 2.1,
       "position": [
-        900,
-        80
+        1230,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {},
+      "id": "42da2365-3183-5f2c-aed9-f87262f9060b",
+      "name": "No Alerts Needed",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        980,
+        180
       ]
     }
   ],
@@ -129,7 +192,36 @@
       "main": [
         [
           {
+            "node": "Validate Clinical Alerts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Clinical Alerts": {
+      "main": [
+        [
+          {
+            "node": "Alerts Ready?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Alerts Ready?": {
+      "main": [
+        [
+          {
             "node": "Prepare Clinical Alert Emails",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "No Alerts Needed",
             "type": "main",
             "index": 0
           }

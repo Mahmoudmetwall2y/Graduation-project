@@ -726,6 +726,69 @@ return prepared;
 """
 
 
+VALIDATE_CLINICAL_ALERTS_JS = r"""
+if (!$json || typeof $json !== 'object' || $json.ok !== true || $json.action !== 'clinical-alerts') {
+  throw new Error('The clinical-alert worker returned an invalid response payload');
+}
+
+const summary = $json.summary && typeof $json.summary === 'object' ? $json.summary : {};
+const emails = Array.isArray($json.emails) ? $json.emails : [];
+for (const field of ['created', 'skipped', 'emails']) {
+  if (!Number.isFinite(Number(summary[field] ?? 0))) {
+    throw new Error(`The clinical-alert worker returned an invalid ${field} count`);
+  }
+}
+
+return [{
+  json: {
+    emails,
+    emailCount: emails.length,
+    created: Number(summary.created || 0),
+    skipped: Number(summary.skipped || 0),
+    checkedAt: new Date().toISOString(),
+  },
+}];
+"""
+
+
+PREPARE_CLINICAL_ALERT_EMAILS_JS = r"""
+const emails = Array.isArray($json.emails) ? $json.emails : [];
+const seen = new Set();
+const prepared = [];
+
+for (const item of emails) {
+  if (!item || typeof item !== 'object') continue;
+  const recipient = String(item.emailTo || '').trim().toLowerCase();
+  const subject = String(item.emailSubject || '').trim();
+  const text = String(item.emailText || '').trim();
+  if (!recipient || !recipient.includes('@') || !subject || !text) continue;
+
+  const dedupeKey = `${item.alertId || item.sessionId || subject}:${recipient}`;
+  if (seen.has(dedupeKey)) continue;
+  seen.add(dedupeKey);
+  prepared.push({
+    json: {
+      emailFrom: item.emailFrom || '',
+      emailTo: recipient,
+      emailSubject: subject,
+      emailText: text,
+      emailHtml: item.emailHtml || `<pre style="white-space:pre-wrap;font-family:Arial,sans-serif">${text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</pre>`,
+      alertId: item.alertId || null,
+      sessionId: item.sessionId || null,
+      severity: item.severity === 'critical' ? 'critical' : 'warning',
+      preparedAt: new Date().toISOString(),
+    },
+  });
+}
+
+if (emails.length > 0 && prepared.length === 0) {
+  throw new Error('Clinical-alert emails were returned, but none passed validation');
+}
+
+return prepared;
+"""
+
+
 LLM_JS = COMMON_JS + r"""
 const CLAUDE_API_KEY = requiredEnv('CLAUDE_API_KEY');
 const CLAUDE_BASE_URL = env('CLAUDE_BASE_URL', 'https://api.anthropic.com').replace(/\/+$/, '');
@@ -995,13 +1058,15 @@ for (const prediction of predictions || []) {
       confidence: output.probabilities?.Murmur ?? output.probabilities?.[output.label] ?? null,
     });
   }
-  if (prediction.modality === 'ecg' && output.prediction === 'Abnormal') {
+  const ecgClass = String(output.prediction || output.label || '').trim();
+  const normalizedEcgClass = ecgClass.toLowerCase();
+  if (prediction.modality === 'ecg' && ['abnormal', 'sveb', 'veb', 'fusion'].includes(normalizedEcgClass)) {
     await createClinicalAlert({
       session,
       prediction,
-      subtype: 'ecg_abnormal',
-      title: 'Warning: Abnormal ECG',
-      message: `Abnormal ECG detected for session ${session.id}`,
+      subtype: `ecg_${normalizedEcgClass}`,
+      title: `Warning: ECG ${ecgClass} requires review`,
+      message: `ECG ${ecgClass} output detected for session ${session.id}`,
       confidence: output.confidence ?? null,
     });
   }
@@ -1395,14 +1460,26 @@ def write_workflows() -> None:
             [
                 manual_node(),
                 schedule_node("Every Minute", minutes=1),
-                http_post_node("Run Clinical Alerts", frontend_action_url("clinical-alerts"), headers=internal_api_headers(), x=300, y=80),
-                code_node("Prepare Clinical Alert Emails", EMAILS_FROM_RESULT_JS, x=600, y=80),
-                gmail_node(x=900, y=80),
+                with_retry(
+                    http_post_node("Run Clinical Alerts", frontend_action_url("clinical-alerts"), headers=internal_api_headers(), x=260, y=80),
+                    tries=3,
+                    wait_ms=5000,
+                ),
+                code_node("Validate Clinical Alerts", VALIDATE_CLINICAL_ALERTS_JS, x=500, y=80),
+                if_positive_node("Alerts Ready?", "={{$json.emailCount}}", x=740, y=80),
+                code_node("Prepare Clinical Alert Emails", PREPARE_CLINICAL_ALERT_EMAILS_JS, x=980, y=0),
+                with_retry(gmail_node(x=1230, y=0, html=True), tries=3, wait_ms=5000),
+                no_op_node("No Alerts Needed", x=980, y=180),
             ],
             {
                 "Manual Trigger": {"main": [[{"node": "Run Clinical Alerts", "type": "main", "index": 0}]]},
                 "Every Minute": {"main": [[{"node": "Run Clinical Alerts", "type": "main", "index": 0}]]},
-                "Run Clinical Alerts": {"main": [[{"node": "Prepare Clinical Alert Emails", "type": "main", "index": 0}]]},
+                "Run Clinical Alerts": {"main": [[{"node": "Validate Clinical Alerts", "type": "main", "index": 0}]]},
+                "Validate Clinical Alerts": {"main": [[{"node": "Alerts Ready?", "type": "main", "index": 0}]]},
+                "Alerts Ready?": {"main": [
+                    [{"node": "Prepare Clinical Alert Emails", "type": "main", "index": 0}],
+                    [{"node": "No Alerts Needed", "type": "main", "index": 0}],
+                ]},
                 "Prepare Clinical Alert Emails": {"main": [[{"node": "Send Gmail", "type": "main", "index": 0}]]},
             },
         ),
