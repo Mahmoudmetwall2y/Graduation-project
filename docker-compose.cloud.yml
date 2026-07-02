@@ -68,6 +68,7 @@ services:
 
   frontend:
     environment:
+      - MQTT_COMMAND_BROKER_URL=mqtt://mosquitto:1883
       - MQTT_PUBLIC_HOST=${MQTT_TLS_PUBLIC_HOST:-asculticor.mahmoudmetwall2y.online}
       - DEVICE_BOOTSTRAP_MQTT_HOST=${MQTT_TLS_PUBLIC_HOST:-asculticor.mahmoudmetwall2y.online}
       - DEVICE_BOOTSTRAP_MQTT_PORT=8883

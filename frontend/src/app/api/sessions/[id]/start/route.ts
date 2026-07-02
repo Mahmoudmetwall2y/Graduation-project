@@ -54,6 +54,14 @@ function getStartCommandBrokerUrl() {
     return commandBrokerUrl
   }
 
+  // Server-side commands should stay on the private Docker network. The
+  // public TLS endpoint is for remote devices, not container-to-container
+  // traffic or public-IP hairpin routing.
+  const internalBrokerUrl = process.env.MQTT_BROKER_URL?.trim()
+  if (internalBrokerUrl) {
+    return internalBrokerUrl
+  }
+
   const deviceBrokerHost = process.env.DEVICE_BOOTSTRAP_MQTT_HOST?.trim()
   if (deviceBrokerHost) {
     return buildMqttUrl(
@@ -63,7 +71,7 @@ function getStartCommandBrokerUrl() {
     )
   }
 
-  return process.env.MQTT_BROKER_URL || 'mqtt://127.0.0.1:1883'
+  return 'mqtt://127.0.0.1:1883'
 }
 
 function describeBrokerTarget(brokerUrl: string) {
