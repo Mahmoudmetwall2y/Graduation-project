@@ -609,6 +609,7 @@ return emails
       emailTo: item.emailTo,
       emailSubject: item.emailSubject,
       emailText: item.emailText,
+      emailHtml: item.emailHtml || `<pre style="white-space:pre-wrap;font-family:Arial,sans-serif">${String(item.emailText).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</pre>`,
     },
   }));
 """
@@ -1247,7 +1248,7 @@ def write_workflows() -> None:
             "01-process-pending-llm-reports.json",
             [
                 manual_node(),
-                schedule_node("Every Five Minutes", minutes=5),
+                schedule_node("Every Minute", minutes=1),
                 http_post_node(
                     "Process Pending Reports",
                     frontend_action_url("process-pending&include_email_payloads=1", "/api/llm"),
@@ -1255,6 +1256,18 @@ def write_workflows() -> None:
                     x=300,
                     y=80,
                 ),
+                code_node("Prepare LLM Report Emails", EMAILS_FROM_RESULT_JS, x=600, y=80),
+                gmail_node(x=900, y=80, html=True),
+            ],
+            {
+                "Manual Trigger": {"main": [[{"node": "Process Pending Reports", "type": "main", "index": 0}]]},
+                "Every Minute": {"main": [[{"node": "Process Pending Reports", "type": "main", "index": 0}]]},
+                "Process Pending Reports": {"main": [[{"node": "Prepare LLM Report Emails", "type": "main", "index": 0}]]},
+                "Prepare LLM Report Emails": {"main": [[{"node": "Send Gmail", "type": "main", "index": 0}]]},
+            },
+        ),
+        (
+            "02 - Clinical Alert Notifications",
             "02-clinical-alert-notifications.json",
             [
                 manual_node(),

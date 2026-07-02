@@ -345,6 +345,7 @@ async function processPendingReports(request: Request) {
       emailTo: string
       emailSubject: string
       emailText: string
+      emailHtml: string
     }> = []
 
     for (const pending of readyReports) {
@@ -389,7 +390,7 @@ async function processPendingReports(request: Request) {
           emails.push({
             emailFrom: process.env.ASCULTICOR_ALERT_EMAIL_FROM || 'AscultiCor <alerts@localhost>',
             emailTo: recipient,
-            emailSubject: '[AscultiCor] Cardiac analysis report ready',
+            emailSubject: '[AscultiCor] AI-assisted session report ready',
             emailText: [
               `Hello${session.patient?.full_name ? ` ${session.patient.full_name}` : ''},`,
               '',
@@ -401,6 +402,7 @@ async function processPendingReports(request: Request) {
               '',
               'Important: This report is for educational and research purposes only. It is not a medical diagnosis. Always consult a qualified healthcare professional for medical advice.',
             ].join('\n'),
+            emailHtml: buildReportEmailHtml(session, generatedReport),
           })
         }
         processed += 1
@@ -578,8 +580,65 @@ Remember to include the medical disclaimer and emphasize this is not a diagnosis
   return prompt
 }
 
+function escapeEmailHtml(value: unknown): string {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;')
+}
+
+function reportList(items: unknown, fallback: string): string {
+  const values = Array.isArray(items) && items.length ? items : [fallback]
+  return values.map((item) =>
+    `<li style="margin:0 0 8px;padding-left:4px;">${escapeEmailHtml(item)}</li>`
+  ).join('')
+}
+
+function formatReportConfidence(value: unknown): string {
+  return typeof value === 'number' ? `${Math.round(value * 100)}%` : 'Not available'
+}
+
+function buildReportEmailHtml(session: any, report: any): string {
+  const structured = report.report_json || {}
+  const pcg = (session.predictions || []).find((item: any) => item.modality === 'pcg')?.output_json || {}
+  const ecg = (session.predictions || []).find((item: any) => item.modality === 'ecg')?.output_json || {}
+  const observations = structured.key_observations || structured.findings
+  const followUp = structured.suggested_follow_up || structured.recommendations
+  const summary = structured.summary || 'The AI-assisted report is ready for professional review.'
+  const headline = structured.headline || 'AI-assisted session summary'
+  const disclaimer = structured.disclaimer || 'This educational report is not a medical diagnosis and must be reviewed by a qualified healthcare professional.'
+  const publicBaseUrl = (process.env.DEVICE_BOOTSTRAP_PUBLIC_BASE_URL || 'https://mahmoudmetwall2y.online').replace(/\/+$/, '')
+  const sessionUrl = `${publicBaseUrl}/session/${session.id}`
+  const completedAt = new Intl.DateTimeFormat('en-GB', {
+    dateStyle: 'medium', timeStyle: 'short', timeZone: 'Africa/Cairo',
+  }).format(new Date(report.completed_at || Date.now()))
+
+  return `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><style>@media only screen and (max-width:620px){.shell{width:100%!important}.signal-card{display:block!important;width:100%!important}}</style></head>
+<body style="margin:0;padding:0;background:#f2f6f8;font-family:Arial,Helvetica,sans-serif;color:#172b40;">
+<div style="display:none;max-height:0;overflow:hidden;opacity:0;">Your AscultiCor AI-assisted report is ready for professional review.</div>
+<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f2f6f8;"><tr><td align="center" style="padding:28px 12px;">
+<table role="presentation" class="shell" width="680" cellspacing="0" cellpadding="0" style="width:680px;max-width:100%;background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 6px 22px rgba(11,31,58,.08);">
+<tr><td style="padding:28px 30px;background:#0b1f3a;border-bottom:5px solid #0f766e;"><div style="color:#7bd3c7;font-size:12px;font-weight:800;letter-spacing:1.4px;text-transform:uppercase;">AscultiCor · AI-Assisted Report</div><div style="margin-top:8px;color:#fff;font-size:25px;font-weight:800;line-height:1.25;">${escapeEmailHtml(headline)}</div><div style="margin-top:12px;display:inline-block;padding:6px 11px;border-radius:999px;background:#e7f7f4;color:#0f766e;font-size:12px;font-weight:800;">Ready for professional review</div></td></tr>
+<tr><td style="padding:22px 30px 8px;"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f7fafb;border:1px solid #dce4eb;border-radius:10px;"><tr><td style="padding:14px 16px;color:#607286;font-size:12px;">Patient<br><strong style="color:#172b40;font-size:14px;">${escapeEmailHtml(session.patient?.full_name || 'Not linked')}</strong></td><td style="padding:14px 16px;color:#607286;font-size:12px;">Session<br><strong style="color:#172b40;font-size:14px;">${escapeEmailHtml(String(session.id).slice(0, 8))}</strong></td><td style="padding:14px 16px;color:#607286;font-size:12px;">Generated<br><strong style="color:#172b40;font-size:14px;">${escapeEmailHtml(completedAt)}</strong></td></tr></table></td></tr>
+<tr><td style="padding:16px 30px 6px;color:#0b1f3a;font-size:18px;font-weight:800;">Signal overview</td></tr>
+<tr><td style="padding:0 24px 18px;"><table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr>
+<td class="signal-card" width="50%" valign="top" style="padding:6px;"><table role="presentation" width="100%" style="border:1px solid #dce4eb;border-top:4px solid #0f766e;border-radius:10px;"><tr><td style="padding:16px;"><div style="color:#607286;font-size:12px;text-transform:uppercase;">PCG classification</div><div style="margin-top:7px;color:#0b1f3a;font-size:20px;font-weight:800;">${escapeEmailHtml(pcg.label || 'Not available')}</div><div style="margin-top:5px;color:#526579;font-size:13px;">Confidence: ${escapeEmailHtml(formatReportConfidence(pcg.confidence ?? pcg.probabilities?.[pcg.label]))}</div></td></tr></table></td>
+<td class="signal-card" width="50%" valign="top" style="padding:6px;"><table role="presentation" width="100%" style="border:1px solid #dce4eb;border-top:4px solid #365f91;border-radius:10px;"><tr><td style="padding:16px;"><div style="color:#607286;font-size:12px;text-transform:uppercase;">ECG classification</div><div style="margin-top:7px;color:#0b1f3a;font-size:20px;font-weight:800;">${escapeEmailHtml(ecg.prediction || 'Not available')}</div><div style="margin-top:5px;color:#526579;font-size:13px;">${escapeEmailHtml(formatReportConfidence(ecg.confidence))} confidence${ecg.heart_rate_bpm ? ` · ${escapeEmailHtml(ecg.heart_rate_bpm)} bpm` : ''}</div></td></tr></table></td>
+</tr></table></td></tr>
+<tr><td style="padding:8px 30px 4px;color:#0b1f3a;font-size:18px;font-weight:800;">Educational summary</td></tr><tr><td style="padding:0 30px 18px;color:#314459;font-size:14px;line-height:1.65;">${escapeEmailHtml(summary)}</td></tr>
+<tr><td style="padding:8px 30px 4px;color:#0b1f3a;font-size:16px;font-weight:800;">Key observations</td></tr><tr><td style="padding:0 30px 14px;color:#314459;font-size:14px;line-height:1.55;"><ul style="margin:8px 0 0;padding-left:20px;">${reportList(observations, 'Review the signal classifications and confidence values in the session dashboard.')}</ul></td></tr>
+<tr><td style="padding:8px 30px 4px;color:#0b1f3a;font-size:16px;font-weight:800;">Suggested professional follow-up</td></tr><tr><td style="padding:0 30px 14px;color:#314459;font-size:14px;line-height:1.55;"><ul style="margin:8px 0 0;padding-left:20px;">${reportList(followUp, 'Correlate these model outputs with clinical context and qualified professional review.')}</ul></td></tr>
+<tr><td style="padding:8px 30px 4px;color:#0b1f3a;font-size:16px;font-weight:800;">Limitations</td></tr><tr><td style="padding:0 30px 18px;color:#526579;font-size:13px;line-height:1.55;"><ul style="margin:8px 0 0;padding-left:20px;">${reportList(structured.limitations, 'Results depend on recording quality, model scope, and available session data.')}</ul></td></tr>
+<tr><td align="center" style="padding:4px 30px 24px;"><a href="${escapeEmailHtml(sessionUrl)}" style="display:inline-block;padding:12px 20px;border-radius:9px;background:#0f766e;color:#fff;text-decoration:none;font-size:14px;font-weight:800;">Open session report</a></td></tr>
+<tr><td style="padding:17px 22px;background:#fff0f1;border-top:1px solid #e7a8af;color:#8b3440;font-size:12px;line-height:1.55;"><strong>Educational use only:</strong> ${escapeEmailHtml(disclaimer)}</td></tr>
+<tr><td style="padding:15px 22px;background:#f5f8fa;color:#607286;font-size:11px;">Generated by ${escapeEmailHtml(report.model_name || 'AscultiCor AI')} · No autonomous diagnosis or treatment decision is made.</td></tr>
+</table></td></tr></table></body></html>`
+}
+
 // ── LLM Report Generation ──────────────────────────────────────────
-// Supports: 'claude' (via AgentRouter proxy) and 'demo' (template).
+// Supports: 'openai' (Responses API), 'claude' (AgentRouter), and 'demo' (template).
 async function generateLLMReport(session: any, reportId: string, supabase: any) {
   const startMs = Date.now()
   const llmProvider = process.env.LLM_PROVIDER || 'demo'
@@ -589,7 +648,19 @@ async function generateLLMReport(session: any, reportId: string, supabase: any) 
   const ecgPrediction = predictions.find((p: any) => p.modality === 'ecg')
 
   // ── Try Claude via AgentRouter ──────────────────────────────────
-  if (llmProvider === 'claude') {
+  if (llmProvider === 'openai') {
+    try {
+      const generated = await callOpenAIAPI(generatePrompt(session))
+      return await saveReport(
+        supabase, reportId, generated.reportText,
+        'openai', process.env.OPENAI_MODEL || 'gpt-5.4-mini',
+        startMs, pcgPrediction, ecgPrediction,
+        generated.structuredData, generated.tokensUsed
+      )
+    } catch (err: any) {
+      console.error('OpenAI API error, falling back to demo template:', err.message)
+    }
+  } else if (llmProvider === 'claude') {
     try {
       const reportText = await callClaudeAPI(generatePrompt(session))
       return await saveReport(
@@ -615,6 +686,110 @@ async function generateLLMReport(session: any, reportId: string, supabase: any) 
 }
 
 // ── Claude API call via AgentRouter (Anthropic Messages API) ──────
+interface StructuredOpenAIReport {
+  headline: string
+  summary: string
+  key_observations: string[]
+  suggested_follow_up: string[]
+  limitations: string[]
+  disclaimer: string
+}
+
+async function callOpenAIAPI(prompt: string): Promise<{
+  reportText: string
+  structuredData: StructuredOpenAIReport
+  tokensUsed?: number
+}> {
+  const apiKey = process.env.OPENAI_API_KEY
+  const baseUrl = (process.env.OPENAI_BASE_URL || 'https://api.openai.com').replace(/\/+$/, '')
+  const model = process.env.OPENAI_MODEL || 'gpt-5.4-mini'
+
+  if (!apiKey) {
+    throw new Error('OPENAI_API_KEY is not configured')
+  }
+
+  const response = await fetch(`${baseUrl}/v1/responses`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model,
+      store: false,
+      instructions: [
+        'Draft concise educational cardiac-monitoring summaries for qualified professional review.',
+        'Use only the supplied session data. Never invent symptoms, history, diagnoses, treatments, or certainty.',
+        'Clearly distinguish model outputs from clinical findings and preserve uncertainty.',
+        'Do not call AscultiCor a medical device and do not provide a medical diagnosis.',
+      ].join(' '),
+      input: prompt,
+      reasoning: { effort: 'low' },
+      max_output_tokens: 1800,
+      text: {
+        verbosity: 'medium',
+        format: {
+          type: 'json_schema',
+          name: 'asculticor_educational_report',
+          strict: true,
+          schema: {
+            type: 'object',
+            additionalProperties: false,
+            properties: {
+              headline: { type: 'string' },
+              summary: { type: 'string' },
+              key_observations: { type: 'array', items: { type: 'string' } },
+              suggested_follow_up: { type: 'array', items: { type: 'string' } },
+              limitations: { type: 'array', items: { type: 'string' } },
+              disclaimer: { type: 'string' },
+            },
+            required: [
+              'headline',
+              'summary',
+              'key_observations',
+              'suggested_follow_up',
+              'limitations',
+              'disclaimer',
+            ],
+          },
+        },
+      },
+    }),
+  })
+
+  const data = await response.json()
+  if (!response.ok) {
+    throw new Error(`OpenAI API returned ${response.status}: ${data?.error?.message || 'Unknown error'}`)
+  }
+  if (!data.output_text) {
+    throw new Error('OpenAI API returned no output text')
+  }
+
+  const structuredData = JSON.parse(data.output_text) as StructuredOpenAIReport
+  const reportText = [
+    `## ${structuredData.headline}`,
+    '',
+    structuredData.summary,
+    '',
+    '### Key observations',
+    ...structuredData.key_observations.map((item) => `- ${item}`),
+    '',
+    '### Suggested professional follow-up',
+    ...structuredData.suggested_follow_up.map((item) => `- ${item}`),
+    '',
+    '### Limitations',
+    ...structuredData.limitations.map((item) => `- ${item}`),
+    '',
+    `**Educational disclaimer:** ${structuredData.disclaimer}`,
+  ].join('\n')
+
+  return {
+    reportText,
+    structuredData,
+    tokensUsed: data.usage?.total_tokens,
+  }
+}
+
 async function callClaudeAPI(prompt: string): Promise<string> {
   const apiKey = process.env.CLAUDE_API_KEY
   const baseUrl = (process.env.CLAUDE_BASE_URL || 'https://api.anthropic.com').replace(/\/+$/, '')
@@ -750,8 +925,10 @@ async function saveReport(
   startMs: number,
   pcgPrediction: any,
   ecgPrediction: any,
+  structuredOverride?: StructuredOpenAIReport,
+  actualTokensUsed?: number,
 ) {
-  const structuredData = {
+  const structuredData = structuredOverride || {
     summary: reportText.split('##')[1]?.split('###')[0]?.trim() || 'Analysis completed',
     findings: [
       pcgPrediction?.output_json?.label && `PCG: ${pcgPrediction.output_json.label}`,
@@ -769,7 +946,7 @@ async function saveReport(
   }
 
   const latencyMs = Date.now() - startMs
-  const estimatedTokens = Math.ceil(reportText.length / 4)
+  const estimatedTokens = actualTokensUsed || Math.ceil(reportText.length / 4)
   const avgConfidence = [
     pcgPrediction?.output_json?.probabilities?.[pcgPrediction?.output_json?.label],
     ecgPrediction?.output_json?.confidence

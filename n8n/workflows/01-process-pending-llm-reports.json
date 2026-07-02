@@ -71,7 +71,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const emails = Array.isArray($json.emails) ? $json.emails : [];\n\nreturn emails\n  .filter((item) => item && item.emailTo && item.emailSubject && item.emailText)\n  .map((item) => ({\n    json: {\n      emailFrom: item.emailFrom || '',\n      emailTo: item.emailTo,\n      emailSubject: item.emailSubject,\n      emailText: item.emailText,\n    },\n  }));\n"
+        "jsCode": "const emails = Array.isArray($json.emails) ? $json.emails : [];\n\nreturn emails\n  .filter((item) => item && item.emailTo && item.emailSubject && item.emailText)\n  .map((item) => ({\n    json: {\n      emailFrom: item.emailFrom || '',\n      emailTo: item.emailTo,\n      emailSubject: item.emailSubject,\n      emailText: item.emailText,\n      emailHtml: item.emailHtml || `<pre style=\"white-space:pre-wrap;font-family:Arial,sans-serif\">${String(item.emailText).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</pre>`,\n    },\n  }));\n"
       },
       "id": "6889d1d8-4f24-5535-b871-6d112b5f91dd",
       "name": "Prepare LLM Report Emails",
@@ -86,8 +86,8 @@
       "parameters": {
         "sendTo": "={{$json.emailTo}}",
         "subject": "={{$json.emailSubject}}",
-        "message": "={{$json.emailText}}",
-        "emailType": "text",
+        "message": "={{$json.emailHtml}}",
+        "emailType": "html",
         "options": {
           "appendAttribution": false
         }
