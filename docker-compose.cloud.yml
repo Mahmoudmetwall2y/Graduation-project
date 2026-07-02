@@ -68,6 +68,8 @@ services:
 
   frontend:
     environment:
+      - MQTT_PUBLIC_HOST=${MQTT_TLS_PUBLIC_HOST:-asculticor.mahmoudmetwall2y.online}
+      - DEVICE_BOOTSTRAP_MQTT_HOST=${MQTT_TLS_PUBLIC_HOST:-asculticor.mahmoudmetwall2y.online}
       - DEVICE_BOOTSTRAP_MQTT_PORT=8883
       - DEVICE_BOOTSTRAP_MQTT_TLS=true
       - MQTT_PUBLIC_PORT=8883
