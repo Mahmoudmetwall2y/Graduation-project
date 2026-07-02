@@ -22,7 +22,7 @@ ASCULTICOR_ALERT_EMAIL_TO=<team inbox>
 ASCULTICOR_ALERT_EMAIL_FROM=AscultiCor <alerts@localhost>
 ASCULTICOR_INTERNAL_HOST_HEADER=srv1621744.hstgr.cloud
 N8N_BLOCK_ENV_ACCESS_IN_NODE=false
-N8N_PUSH_BACKEND=sse
+N8N_PUSH_BACKEND=websocket
 ```
 
 Patient-facing report and clinical alert emails use the linked patient's `patients.email` value when present. `ASCULTICOR_ALERT_EMAIL_TO` remains the fallback and the destination for operational workflows such as device health, daily digest, ops monitoring, and escalation. Emails are sent through the n8n Gmail node, so the sender is the Gmail account connected in n8n.
