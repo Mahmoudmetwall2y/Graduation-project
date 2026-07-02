@@ -56,13 +56,13 @@ def code_node(name: str, code: str, x: int = 300, y: int = 80) -> dict:
     }
 
 
-def gmail_node(name: str = "Send Gmail", x: int = 620, y: int = 80) -> dict:
+def gmail_node(name: str = "Send Gmail", x: int = 620, y: int = 80, html: bool = False) -> dict:
     return {
         "parameters": {
             "sendTo": "={{$json.emailTo}}",
             "subject": "={{$json.emailSubject}}",
-            "message": "={{$json.emailText}}",
-            "emailType": "text",
+            "message": "={{$json.emailHtml}}" if html else "={{$json.emailText}}",
+            "emailType": "html" if html else "text",
             "options": {
                 "appendAttribution": False,
             },
@@ -428,9 +428,9 @@ function env(name, fallback = '') {
 const EMAIL_TO = env('ASCULTICOR_ALERT_EMAIL_TO');
 const EMAIL_FROM = env('ASCULTICOR_ALERT_EMAIL_FROM', 'AscultiCor <alerts@localhost>');
 
-function emailItem(subject, text, to = EMAIL_TO) {
+function emailItem(subject, text, html, to = EMAIL_TO) {
   if (!to) throw new Error('A recipient email is required before sending email');
-  return { json: { emailFrom: EMAIL_FROM, emailTo: to, emailSubject: subject, emailText: text } };
+  return { json: { emailFrom: EMAIL_FROM, emailTo: to, emailSubject: subject, emailText: text, emailHtml: html } };
 }
 
 function firstJson(nodeName) {
@@ -449,25 +449,150 @@ function allJson(nodeName) {
   }
 }
 
-function preview(value) {
-  return JSON.stringify(value).slice(0, 300);
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+function label(value) {
+  return String(value || 'unknown')
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, (character) => character.toUpperCase());
+}
+
+function statusTheme(state) {
+  if (['healthy', 'connected', 'loaded', 'operational', 'ok'].includes(state)) {
+    return { color: '#0f766e', background: '#e7f7f4', border: '#99d9cf' };
+  }
+  if (['degraded', 'warning', 'partial'].includes(state)) {
+    return { color: '#9a6700', background: '#fff7df', border: '#efd58a' };
+  }
+  return { color: '#a53f4b', background: '#fff0f1', border: '#e7a8af' };
+}
+
+function badge(state) {
+  const normalized = String(state || 'unknown').toLowerCase();
+  const theme = statusTheme(normalized);
+  return `<span style="display:inline-block;padding:5px 10px;border-radius:999px;border:1px solid ${theme.border};background:${theme.background};color:${theme.color};font-size:12px;font-weight:700;line-height:1;">${escapeHtml(label(normalized))}</span>`;
+}
+
+function serviceCard(title, state, detail, metric) {
+  const theme = statusTheme(String(state || '').toLowerCase());
+  return `<td class="status-column" width="33.33%" valign="top" style="padding:6px;">
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border:1px solid #dce4eb;border-top:4px solid ${theme.color};border-radius:10px;background:#ffffff;">
+      <tr><td style="padding:16px 16px 8px;color:#0b1f3a;font-size:15px;font-weight:700;">${escapeHtml(title)}</td></tr>
+      <tr><td style="padding:0 16px 12px;">${badge(state)}</td></tr>
+      <tr><td style="padding:0 16px 4px;color:#314459;font-size:13px;line-height:1.5;">${escapeHtml(detail)}</td></tr>
+      <tr><td style="padding:0 16px 16px;color:#0b1f3a;font-size:20px;font-weight:800;">${escapeHtml(metric)}</td></tr>
+    </table>
+  </td>`;
 }
 
 const inference = firstJson('Inference Health');
 const frontend = firstJson('Frontend Health');
 const reports = allJson('Supabase LLM Report Sample');
+const checkedAt = new Date();
+const checkedAtCairo = new Intl.DateTimeFormat('en-GB', {
+  dateStyle: 'medium',
+  timeStyle: 'short',
+  timeZone: 'Africa/Cairo',
+}).format(checkedAt);
+
+const frontendState = frontend.unavailable ? 'unavailable' : String(frontend.status || 'unknown').toLowerCase();
+const inferenceState = inference.unavailable ? 'unavailable' : String(inference.status || 'unknown').toLowerCase();
+const supabaseAvailable = !reports.some((report) => report?.unavailable);
+const supabaseState = supabaseAvailable ? 'connected' : 'unavailable';
+const modelEntries = Object.entries(inference.models || {});
+const modelsLoaded = Number(inference.models_loaded ?? modelEntries.filter(([, model]) => model?.loaded).length);
+const modelsTotal = Number(inference.models_total ?? modelEntries.length);
+const hasWarnings = inferenceState !== 'healthy' || frontendState !== 'healthy' || !supabaseAvailable || modelsLoaded < modelsTotal;
+const overallState = hasWarnings ? 'warning' : 'operational';
+const overallLabel = hasWarnings ? 'Operational with warnings' : 'All systems operational';
+
+const modelRows = modelEntries.length
+  ? modelEntries.map(([name, model]) => {
+      const state = model?.loaded ? 'loaded' : 'unavailable';
+      const detail = model?.loaded ? 'Ready for inference' : (model?.error ? String(model.error).slice(0, 120) : 'Model did not load');
+      return `<tr>
+        <td style="padding:11px 12px;border-top:1px solid #e7edf2;color:#172b40;font-size:13px;font-weight:700;">${escapeHtml(label(name))}</td>
+        <td style="padding:11px 12px;border-top:1px solid #e7edf2;">${badge(state)}</td>
+        <td style="padding:11px 12px;border-top:1px solid #e7edf2;color:#526579;font-size:12px;line-height:1.4;">${escapeHtml(detail)}</td>
+      </tr>`;
+    }).join('')
+  : `<tr><td colspan="3" style="padding:14px;color:#526579;font-size:13px;">No model details were returned.</td></tr>`;
+
+const text = [
+  `AscultiCor system check: ${overallLabel}`,
+  '',
+  `Frontend: ${label(frontendState)}`,
+  `Inference: ${label(inferenceState)}`,
+  `Supabase: ${label(supabaseState)}`,
+  `Models ready: ${modelsLoaded}/${modelsTotal}`,
+  `MQTT connected: ${inference.mqtt_connected ? 'Yes' : 'No'}`,
+  `Storage connected: ${inference.storage_connected ? 'Yes' : 'No'}`,
+  `Supabase sample rows: ${supabaseAvailable ? reports.length : 'Unavailable'}`,
+  `Checked at: ${checkedAtCairo} Africa/Cairo`,
+].join('\n');
+
+const html = `<!doctype html>
+<html>
+<head>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <style>@media only screen and (max-width:620px){.shell{width:100%!important}.status-column{display:block!important;width:100%!important}}</style>
+</head>
+<body style="margin:0;padding:0;background:#f2f6f8;font-family:Arial,Helvetica,sans-serif;color:#172b40;">
+  <div style="display:none;max-height:0;overflow:hidden;opacity:0;">Frontend, inference, Supabase, MQTT, storage, and model readiness summary.</div>
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f2f6f8;">
+    <tr><td align="center" style="padding:28px 12px;">
+      <table role="presentation" class="shell" width="680" cellspacing="0" cellpadding="0" style="width:680px;max-width:100%;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 6px 22px rgba(11,31,58,.08);">
+        <tr><td style="padding:26px 30px;background:#0b1f3a;border-bottom:5px solid #0f766e;">
+          <div style="color:#7bd3c7;font-size:12px;font-weight:800;letter-spacing:1.4px;text-transform:uppercase;">AscultiCor Operations</div>
+          <div style="margin-top:7px;color:#ffffff;font-size:25px;font-weight:800;line-height:1.25;">Connectivity &amp; Readiness Check</div>
+          <div style="margin-top:12px;">${badge(overallState)}</div>
+        </td></tr>
+        <tr><td style="padding:22px 24px 8px;">
+          <table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr>
+            ${serviceCard('Frontend', frontendState, 'Web application and API', frontendState === 'healthy' ? 'Online' : label(frontendState))}
+            ${serviceCard('Inference', inferenceState, 'AI inference service', `${modelsLoaded}/${modelsTotal} models`)}
+            ${serviceCard('Supabase', supabaseState, 'Database connectivity', supabaseAvailable ? `${reports.length} sample row${reports.length === 1 ? '' : 's'}` : 'Unavailable')}
+          </tr></table>
+        </td></tr>
+        <tr><td style="padding:14px 30px 8px;color:#0b1f3a;font-size:17px;font-weight:800;">Infrastructure signals</td></tr>
+        <tr><td style="padding:0 30px 18px;">
+          <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border:1px solid #dce4eb;border-radius:10px;background:#f9fbfc;">
+            <tr>
+              <td width="33.33%" align="center" style="padding:15px 8px;border-right:1px solid #e1e8ee;"><div style="font-size:12px;color:#607286;">MQTT</div><div style="margin-top:6px;">${badge(inference.mqtt_connected ? 'connected' : 'unavailable')}</div></td>
+              <td width="33.33%" align="center" style="padding:15px 8px;border-right:1px solid #e1e8ee;"><div style="font-size:12px;color:#607286;">Storage</div><div style="margin-top:6px;">${badge(inference.storage_connected ? 'connected' : 'unavailable')}</div></td>
+              <td width="33.33%" align="center" style="padding:15px 8px;"><div style="font-size:12px;color:#607286;">Active sessions</div><div style="margin-top:8px;color:#0b1f3a;font-size:18px;font-weight:800;">${escapeHtml(inference.active_sessions ?? 0)}</div></td>
+            </tr>
+          </table>
+        </td></tr>
+        <tr><td style="padding:8px 30px;color:#0b1f3a;font-size:17px;font-weight:800;">Model readiness</td></tr>
+        <tr><td style="padding:0 30px 24px;">
+          <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border:1px solid #dce4eb;border-radius:10px;overflow:hidden;">
+            <tr style="background:#eef3f6;"><th align="left" style="padding:10px 12px;color:#526579;font-size:11px;text-transform:uppercase;letter-spacing:.5px;">Model</th><th align="left" style="padding:10px 12px;color:#526579;font-size:11px;text-transform:uppercase;letter-spacing:.5px;">Status</th><th align="left" style="padding:10px 12px;color:#526579;font-size:11px;text-transform:uppercase;letter-spacing:.5px;">Details</th></tr>
+            ${modelRows}
+          </table>
+        </td></tr>
+        <tr><td style="padding:18px 30px;background:#f5f8fa;border-top:1px solid #e2e8ee;color:#607286;font-size:12px;line-height:1.6;">
+          Checked ${escapeHtml(checkedAtCairo)} (Africa/Cairo)<br>
+          Automated by n8n · This operational message contains no patient data.
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
 
 return [
   emailItem(
-    'AscultiCor n8n connectivity OK',
-    [
-      'AscultiCor n8n connectivity check passed.',
-      '',
-      `Inference: ${preview(inference)}`,
-      `Frontend: ${preview(frontend)}`,
-      `Supabase llm_reports sample rows: ${reports.length}`,
-      `Checked at: ${new Date().toISOString()}`,
-    ].join('\n')
+    `AscultiCor system check — ${overallLabel}`,
+    text,
+    html
   )
 ];
 """
@@ -1107,7 +1232,7 @@ def write_workflows() -> None:
                     always_output=True,
                 ),
                 code_node("Build Connectivity Email", CONNECTIVITY_JS, x=1040, y=0),
-                gmail_node(x=1300, y=0),
+                gmail_node(x=1300, y=0, html=True),
             ],
             {
                 "Manual Trigger": {"main": [[{"node": "Inference Health", "type": "main", "index": 0}]]},
