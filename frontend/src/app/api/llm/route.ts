@@ -227,6 +227,7 @@ async function processPendingReports(request: Request) {
     const includeEmailPayloads =
       process.env.N8N_EMAIL_PAYLOAD_EXPORT_ENABLED === 'true' &&
       url.searchParams.get('include_email_payloads') === '1'
+    const llmProvider = process.env.LLM_PROVIDER || 'demo'
     const internalToken = process.env.INTERNAL_API_TOKEN
     if (!internalToken) {
       return NextResponse.json({ error: 'INTERNAL_API_TOKEN is not configured' }, { status: 500 })
@@ -245,6 +246,70 @@ async function processPendingReports(request: Request) {
 
     const serviceClient = createClient(supabaseUrl, serviceRoleKey)
 
+    let automaticallyQueued = 0
+    if (process.env.LLM_AUTO_QUEUE_ENABLED === 'true') {
+      const configuredSince = process.env.LLM_AUTO_QUEUE_SINCE
+      const autoQueueSince = configuredSince && !Number.isNaN(Date.parse(configuredSince))
+        ? new Date(configuredSince).toISOString()
+        : new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
+
+      const { data: completedSessions, error: completedSessionsError } = await serviceClient
+        .from('sessions')
+        .select('id, org_id, device_id, created_by, ended_at, predictions(id)')
+        .eq('status', 'done')
+        .gte('ended_at', autoQueueSince)
+        .order('ended_at', { ascending: false })
+        .limit(100)
+
+      if (completedSessionsError) throw completedSessionsError
+
+      const eligibleSessions = (completedSessions || []).filter(
+        (session: any) => session.created_by && session.predictions?.length > 0
+      )
+      const eligibleSessionIds = eligibleSessions.map((session: any) => session.id)
+
+      if (eligibleSessionIds.length > 0) {
+        const { data: existingReports, error: existingReportsError } = await serviceClient
+          .from('llm_reports')
+          .select('session_id')
+          .in('session_id', eligibleSessionIds)
+
+        if (existingReportsError) throw existingReportsError
+
+        const coveredSessionIds = new Set(
+          (existingReports || []).map((report: any) => report.session_id)
+        )
+        const missingReports = eligibleSessions
+          .filter((session: any) => !coveredSessionIds.has(session.id))
+          .map((session: any) => ({
+            id: randomUUID(),
+            org_id: session.org_id,
+            session_id: session.id,
+            device_id: session.device_id,
+            requested_by: session.created_by,
+            status: 'pending',
+            prompt_text: 'Automatically queued after session completion; prompt assembled by the report worker.',
+            report_text: '',
+            model_name: llmProvider === 'demo' ? 'demo-template' : llmProvider,
+            model_version: llmProvider === 'demo' ? 'v1' : 'unconfigured',
+            retry_count: 0,
+            max_retries: 3,
+            next_retry_at: null,
+            last_error_at: null,
+          }))
+
+        if (missingReports.length > 0) {
+          const { data: insertedReports, error: autoQueueError } = await serviceClient
+            .from('llm_reports')
+            .insert(missingReports)
+            .select('id')
+
+          if (autoQueueError) throw autoQueueError
+          automaticallyQueued = insertedReports?.length || 0
+        }
+      }
+    }
+
     const { data: pendingReports, error: pendingError } = await serviceClient
       .from('llm_reports')
       .select('id, session_id, device_id, retry_count, max_retries, next_retry_at')
@@ -255,7 +320,11 @@ async function processPendingReports(request: Request) {
     if (pendingError) throw pendingError
 
     if (!pendingReports || pendingReports.length === 0) {
-      return NextResponse.json({ processed: 0, message: 'No pending reports found' })
+      return NextResponse.json({
+        automatically_queued: automaticallyQueued,
+        processed: 0,
+        message: 'No pending reports found'
+      })
     }
 
     const now = Date.now()
@@ -357,6 +426,7 @@ async function processPendingReports(request: Request) {
     }
 
     return NextResponse.json({
+      automatically_queued: automaticallyQueued,
       processed,
       failed,
       skipped,

@@ -86,6 +86,14 @@ interface SessionSummaryResponse {
   deidentifyExports: boolean
 }
 
+interface LLMReportSummary {
+  id: string
+  status: 'pending' | 'generating' | 'completed' | 'error'
+  error_message?: string | null
+  created_at: string
+  completed_at?: string | null
+}
+
 interface LiveWaveformResponse {
   frames: Array<{
     created_at: string
@@ -131,6 +139,8 @@ export default function SessionDetailPage() {
   const [lastLiveAt, setLastLiveAt] = useState<string | null>(null)
   const [deidentifyExports, setDeidentifyExports] = useState(false)
   const [activeReportTab, setActiveReportTab] = useState<ActiveReportTab>('model1')
+  const [llmReport, setLlmReport] = useState<LLMReportSummary | null>(null)
+  const [queueingLlmReport, setQueueingLlmReport] = useState(false)
   const [uiNow, setUiNow] = useState(() => Date.now())
   const deleteModalRef = useRef<HTMLDivElement | null>(null)
   const deletePrimaryRef = useRef<HTMLButtonElement | null>(null)
@@ -174,6 +184,50 @@ export default function SessionDetailPage() {
       setLoading(false)
     }
   }, [fetchAppJson, sessionId])
+
+  const fetchLlmReport = useCallback(async () => {
+    if (!sessionId) return
+
+    try {
+      const payload = await fetchAppJson<{ reports: LLMReportSummary[] }>(
+        `/api/llm?session_id=${encodeURIComponent(sessionId)}`
+      )
+      setLlmReport(payload.reports?.[0] || null)
+    } catch (fetchError) {
+      console.error('Error fetching LLM report status:', fetchError)
+    }
+  }, [fetchAppJson, sessionId])
+
+  const handleQueueLlmReport = useCallback(async () => {
+    if (!session || session.status !== 'done') return
+
+    setQueueingLlmReport(true)
+    try {
+      const response = await fetch('/api/llm', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          session_id: session.id,
+          device_id: session.device_id,
+        }),
+      })
+      const payload = await response.json().catch(() => ({}))
+      if (!response.ok) {
+        throw new Error(payload?.error || `Request failed with status ${response.status}`)
+      }
+
+      if (payload.report) {
+        setLlmReport(payload.report)
+      }
+      showToast(payload.message || 'AI-assisted report queued', 'success')
+    } catch (queueError: any) {
+      console.error('Error queueing LLM report:', queueError)
+      showToast(queueError?.message || 'Failed to queue AI-assisted report', 'error')
+    } finally {
+      setQueueingLlmReport(false)
+    }
+  }, [session, showToast])
 
   const applyLiveWaveformPayload = useCallback((payload: LiveWaveformResponse) => {
     liveMetricsCursorRef.current = payload.cursor || liveMetricsCursorRef.current
@@ -289,7 +343,8 @@ export default function SessionDetailPage() {
 
     fetchSessionSummary()
     fetchLiveWaveforms(true)
-  }, [fetchLiveWaveforms, fetchSessionSummary, sessionId])
+    fetchLlmReport()
+  }, [fetchLiveWaveforms, fetchLlmReport, fetchSessionSummary, sessionId])
 
   const isSessionActive = Boolean(
     session && (session.status === 'streaming' || session.status === 'processing')
@@ -307,6 +362,12 @@ export default function SessionDetailPage() {
     )
     return () => window.clearInterval(summaryInterval)
   }, [fetchSessionSummary, isSessionActive, sessionId])
+
+  useEffect(() => {
+    if (!sessionId || session?.status !== 'done') return
+    const reportInterval = window.setInterval(fetchLlmReport, 5000)
+    return () => window.clearInterval(reportInterval)
+  }, [fetchLlmReport, session?.status, sessionId])
 
   useEffect(() => {
     if (!sessionId || !isSessionActive) return
@@ -1070,6 +1131,37 @@ export default function SessionDetailPage() {
               </span>
 
               {/* Action buttons */}
+              <button
+                onClick={handleQueueLlmReport}
+                disabled={
+                  session.status !== 'done' ||
+                  queueingLlmReport ||
+                  llmReport?.status === 'pending' ||
+                  llmReport?.status === 'generating' ||
+                  llmReport?.status === 'completed'
+                }
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium bg-violet-50 dark:bg-violet-950/30 text-violet-700 dark:text-violet-300 hover:bg-violet-100 dark:hover:bg-violet-950/50 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                title={session.status === 'done' ? 'Queue an AI-assisted report' : 'Available after the session completes'}
+              >
+                {queueingLlmReport || llmReport?.status === 'generating' ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <FileText className="w-4 h-4" />
+                )}
+                <span className="hidden sm:inline">
+                  {queueingLlmReport
+                    ? 'Queueing...'
+                    : llmReport?.status === 'completed'
+                      ? 'Report Ready'
+                      : llmReport?.status === 'generating'
+                        ? 'Generating...'
+                        : llmReport?.status === 'pending'
+                          ? 'Report Queued'
+                          : llmReport?.status === 'error'
+                            ? 'Retry Report'
+                            : 'AI Report'}
+                </span>
+              </button>
               <button
                 onClick={handleExportPDF}
                 className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium bg-accent hover:bg-accent/80 text-foreground transition-colors"
