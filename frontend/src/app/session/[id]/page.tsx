@@ -20,6 +20,7 @@ import {
   LiveWaveformFrame,
 } from '../../../components/session/LiveWaveformMonitor'
 import { extractHierarchicalReport } from './types'
+import { buildSessionReportDocument } from '../../../lib/reportExport'
 
 interface Session {
   id: string
@@ -92,6 +93,10 @@ interface LLMReportSummary {
   error_message?: string | null
   created_at: string
   completed_at?: string | null
+  model_name?: string | null
+  model_version?: string | null
+  report_text?: string | null
+  report_json?: Record<string, any> | null
 }
 
 interface LiveWaveformResponse {
@@ -747,6 +752,16 @@ export default function SessionDetailPage() {
   }
 
   const buildPrintReport = () => {
+    return buildSessionReportDocument({
+      session: session!,
+      predictions,
+      report: llmReport,
+      deidentify: deidentifyExports,
+      notes: notes.map((item) => item.note),
+    })
+
+    /* Legacy session export retained temporarily for reference; the shared
+       professional report renderer above is now the single export path.
     const preds = predictions.map(p => {
       const label = p.output_json?.label || p.output_json?.prediction || 'N/A'
       const confidence = p.output_json?.confidence
@@ -900,6 +915,9 @@ export default function SessionDetailPage() {
       </body>
       </html>
     `
+  }
+
+    */
   }
 
   const handleExportCSV = () => {
