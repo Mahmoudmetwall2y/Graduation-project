@@ -1,0 +1,299 @@
+{
+  "name": "06 - Operations Intelligence",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "9e2e1210-5211-569b-b85c-cc3aca5617fe",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 5
+            }
+          ]
+        }
+      },
+      "id": "81ad7de4-4fc0-515d-989a-2952fe20ded4",
+      "name": "Security Correlation Every Five Minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        140
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{(($env.ASCULTICOR_APP_URL || 'http://frontend:3000').replace(/\\/+$/, '')) + '/api/n8n/workflows?action=ops-security'}}",
+        "options": {},
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Host",
+              "value": "={{$env.ASCULTICOR_INTERNAL_HOST_HEADER || ($env.ASCULTICOR_PUBLIC_APP_URL || 'http://frontend:3000').replace(/^https?:\\/\\//, '').replace(/\\/.*$/, '')}}"
+            },
+            {
+              "name": "X-Forwarded-Host",
+              "value": "={{$env.ASCULTICOR_INTERNAL_HOST_HEADER || ($env.ASCULTICOR_PUBLIC_APP_URL || 'http://frontend:3000').replace(/^https?:\\/\\//, '').replace(/\\/.*$/, '')}}"
+            },
+            {
+              "name": "X-Forwarded-Proto",
+              "value": "https"
+            },
+            {
+              "name": "x-internal-token",
+              "value": "={{$env.ASCULTICOR_INTERNAL_API_TOKEN}}"
+            }
+          ]
+        },
+        "method": "POST"
+      },
+      "id": "bd08eed1-7fda-5d88-9714-19efd4babb2e",
+      "name": "Run Security Correlation",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        300,
+        0
+      ],
+      "alwaysOutputData": true,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "jsCode": "const emails = Array.isArray($json.emails) ? $json.emails : [];\n\nreturn emails\n  .filter((item) => item && item.emailTo && item.emailSubject && item.emailText)\n  .map((item) => ({\n    json: {\n      emailFrom: item.emailFrom || '',\n      emailTo: item.emailTo,\n      emailSubject: item.emailSubject,\n      emailText: item.emailText,\n      emailHtml: item.emailHtml || `<pre style=\"white-space:pre-wrap;font-family:Arial,sans-serif\">${String(item.emailText).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</pre>`,\n    },\n  }));\n"
+      },
+      "id": "1ab55d98-6b95-5045-b82f-b86ba344cd1b",
+      "name": "Prepare Security Correlation Emails",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        620,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{$json.emailTo}}",
+        "subject": "={{$json.emailSubject}}",
+        "message": "={{$json.emailHtml}}",
+        "emailType": "html",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "afb38c58-ed6d-586b-a706-7cc9e687c602",
+      "name": "Send Security Correlation Gmail",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        940,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "days",
+              "triggerAtHour": 9
+            }
+          ]
+        }
+      },
+      "id": "19d6be38-d96c-502a-99bc-4072795790b2",
+      "name": "Daily Operations 09 Cairo",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{(($env.ASCULTICOR_APP_URL || 'http://frontend:3000').replace(/\\/+$/, '')) + '/api/n8n/workflows?action=daily-operations'}}",
+        "options": {},
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Host",
+              "value": "={{$env.ASCULTICOR_INTERNAL_HOST_HEADER || ($env.ASCULTICOR_PUBLIC_APP_URL || 'http://frontend:3000').replace(/^https?:\\/\\//, '').replace(/\\/.*$/, '')}}"
+            },
+            {
+              "name": "X-Forwarded-Host",
+              "value": "={{$env.ASCULTICOR_INTERNAL_HOST_HEADER || ($env.ASCULTICOR_PUBLIC_APP_URL || 'http://frontend:3000').replace(/^https?:\\/\\//, '').replace(/\\/.*$/, '')}}"
+            },
+            {
+              "name": "X-Forwarded-Proto",
+              "value": "https"
+            },
+            {
+              "name": "x-internal-token",
+              "value": "={{$env.ASCULTICOR_INTERNAL_API_TOKEN}}"
+            }
+          ]
+        },
+        "method": "POST"
+      },
+      "id": "f48b7198-fcc7-5625-9b8b-799f323c21d1",
+      "name": "Run Daily Operations",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        300,
+        260
+      ],
+      "alwaysOutputData": true,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "jsCode": "const emails = Array.isArray($json.emails) ? $json.emails : [];\n\nreturn emails\n  .filter((item) => item && item.emailTo && item.emailSubject && item.emailText)\n  .map((item) => ({\n    json: {\n      emailFrom: item.emailFrom || '',\n      emailTo: item.emailTo,\n      emailSubject: item.emailSubject,\n      emailText: item.emailText,\n      emailHtml: item.emailHtml || `<pre style=\"white-space:pre-wrap;font-family:Arial,sans-serif\">${String(item.emailText).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</pre>`,\n    },\n  }));\n"
+      },
+      "id": "e31f27c1-5849-5427-ac3f-82aa71e9838b",
+      "name": "Prepare Daily Operations Emails",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        620,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{$json.emailTo}}",
+        "subject": "={{$json.emailSubject}}",
+        "message": "={{$json.emailHtml}}",
+        "emailType": "html",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "19b0a0a1-a30e-5e0b-8fa9-136096a46e41",
+      "name": "Send Daily Operations Gmail",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        940,
+        260
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    }
+  ],
+  "connections": {
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Run Security Correlation",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Run Daily Operations",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Security Correlation Every Five Minutes": {
+      "main": [
+        [
+          {
+            "node": "Run Security Correlation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run Security Correlation": {
+      "main": [
+        [
+          {
+            "node": "Prepare Security Correlation Emails",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Security Correlation Emails": {
+      "main": [
+        [
+          {
+            "node": "Send Security Correlation Gmail",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Daily Operations 09 Cairo": {
+      "main": [
+        [
+          {
+            "node": "Run Daily Operations",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run Daily Operations": {
+      "main": [
+        [
+          {
+            "node": "Prepare Daily Operations Emails",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Daily Operations Emails": {
+      "main": [
+        [
+          {
+            "node": "Send Daily Operations Gmail",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Africa/Cairo"
+  },
+  "staticData": null,
+  "active": false,
+  "versionId": "98c3c543-e814-543c-9b17-5915128d2291",
+  "id": ""
+}

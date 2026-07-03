@@ -847,6 +847,42 @@ def action_workflow(number: str, title: str, filename: str, action: str, trigger
     return (f"{number} - {title}", filename, nodes, connections)
 
 
+def multi_action_workflow(
+    number: str,
+    title: str,
+    filename: str,
+    branches: list[tuple[str, str, dict]],
+) -> tuple:
+    """Build one operational workflow with independently scheduled action branches."""
+    manual = manual_node()
+    nodes = [manual]
+    connections = {"Manual Trigger": {"main": [[]]}}
+
+    for index, (branch_title, action, trigger) in enumerate(branches):
+        y = index * 260
+        trigger["position"] = [0, y + 140]
+        run_name = f"Run {branch_title}"
+        prepare_name = f"Prepare {branch_title} Emails"
+        send_name = f"Send {branch_title} Gmail"
+        nodes.extend([
+            trigger,
+            with_retry(
+                http_post_node(run_name, frontend_action_url(action), headers=internal_api_headers(), x=300, y=y),
+                tries=3,
+                wait_ms=5000,
+            ),
+            code_node(prepare_name, EMAILS_FROM_RESULT_JS, x=620, y=y),
+            with_retry(gmail_node(name=send_name, x=940, y=y, html=True), tries=3, wait_ms=5000),
+        ])
+        target = {"node": run_name, "type": "main", "index": 0}
+        connections["Manual Trigger"]["main"][0].append(target)
+        connections[trigger["name"]] = {"main": [[target]]}
+        connections[run_name] = {"main": [[{"node": prepare_name, "type": "main", "index": 0}]]}
+        connections[prepare_name] = {"main": [[{"node": send_name, "type": "main", "index": 0}]]}
+
+    return (f"{number} - {title}", filename, nodes, connections)
+
+
 def replacement_workflows() -> list[tuple]:
     device_nodes = [
         manual_node(),
@@ -899,15 +935,42 @@ def replacement_workflows() -> list[tuple]:
     }
 
     return [
-        action_workflow("02", "Session Processing Failure Recovery", "02-session-failure-recovery.json", "session-recovery", schedule_node("Every Two Minutes", minutes=2)),
-        action_workflow("03", "Report Dead-Letter Queue", "03-report-dead-letter-queue.json", "report-dead-letter", schedule_node("Every Five Minutes", minutes=5)),
-        action_workflow("04", "Clinician Acknowledgement and Escalation", "04-clinician-acknowledgement-escalation.json", "clinical-acknowledgement", schedule_node("Every Two Minutes", minutes=2)),
-        ("05 - Device Onboarding and OTA Lifecycle", "05-device-onboarding-ota-lifecycle.json", device_nodes, device_connections),
-        action_workflow("06", "Backup and Storage Integrity", "06-backup-storage-integrity.json", "storage-integrity", schedule_node("Every Six Hours", hours=6)),
-        action_workflow("07", "Weekly Research and Data Quality", "07-weekly-research-data-quality.json", "research-quality", weekly_node("Monday 09 Cairo", weekday=1, hour=9)),
-        ("08 - Shared Workflow Failure Handler", "08-shared-workflow-failure-handler.json", error_nodes, error_connections),
-        action_workflow("09", "Security and Operations Correlation", "09-security-operations-correlation.json", "ops-security", schedule_node("Every Five Minutes", minutes=5)),
-        action_workflow("10", "Daily Operations Digest and Enrichment", "10-daily-operations-digest.json", "daily-operations", schedule_node("Daily 09 Cairo", daily_hour=9)),
+        multi_action_workflow(
+            "02",
+            "Processing Reliability",
+            "02-processing-reliability.json",
+            [
+                ("Session Recovery", "session-recovery", schedule_node("Session Recovery Every Two Minutes", minutes=2)),
+                ("Report Dead Letter", "report-dead-letter", schedule_node("Report DLQ Every Five Minutes", minutes=5)),
+            ],
+        ),
+        action_workflow(
+            "03",
+            "Clinical Alert Management",
+            "03-clinical-alert-management.json",
+            "clinical-acknowledgement",
+            schedule_node("Clinical Review Every Two Minutes", minutes=2),
+        ),
+        ("04 - Device and OTA Management", "04-device-ota-management.json", device_nodes, device_connections),
+        multi_action_workflow(
+            "05",
+            "Data Integrity and Research Quality",
+            "05-data-integrity-research-quality.json",
+            [
+                ("Storage Integrity", "storage-integrity", schedule_node("Storage Check Every Six Hours", hours=6)),
+                ("Research Quality", "research-quality", weekly_node("Research Quality Monday 09 Cairo", weekday=1, hour=9)),
+            ],
+        ),
+        multi_action_workflow(
+            "06",
+            "Operations Intelligence",
+            "06-operations-intelligence.json",
+            [
+                ("Security Correlation", "ops-security", schedule_node("Security Correlation Every Five Minutes", minutes=5)),
+                ("Daily Operations", "daily-operations", schedule_node("Daily Operations 09 Cairo", daily_hour=9)),
+            ],
+        ),
+        ("07 - Shared Workflow Failure Handler", "07-shared-workflow-failure-handler.json", error_nodes, error_connections),
     ]
 
 

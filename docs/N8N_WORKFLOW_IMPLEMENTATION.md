@@ -1,6 +1,6 @@
 # AscultiCor n8n Workflow Implementation
 
-> Workflows `02–07` in the older guide below have been replaced by the production automation suite `02–10`. Follow `N8N_PRODUCTION_AUTOMATION_SUITE.md` for the current import, test, error-handler, and activation procedure. Workflows `00` and `01` remain current.
+> Workflows `02–07` in the older guide below have been replaced by the consolidated production automation suite `02–07`. Follow `N8N_PRODUCTION_AUTOMATION_SUITE.md` for the current import, branch testing, error-handler, and activation procedure. Workflows `00` and `01` remain current.
 
 This guide is for the teammate responsible for n8n automation. It assumes the Hostinger/Docker deployment is already running and n8n is reachable.
 

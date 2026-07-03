@@ -1,22 +1,21 @@
 # AscultiCor n8n Automation Suite
 
-The importable JSON workflows in `workflows/` form AscultiCor's durable automation and human-operations layer. Raw ECG/PCG streaming, inference, authentication, and device safety remain in MQTT, FastAPI, Next.js, firmware, and Supabase.
+The importable workflows in `workflows/` form AscultiCor's durable automation and human-operations layer. Raw ECG/PCG streaming, inference, authentication, and device safety remain in MQTT, FastAPI, Next.js, firmware, and Supabase.
 
 ## Workflow inventory
 
-- `00-connectivity-check.json` — infrastructure and model readiness
-- `01-process-pending-llm-reports.json` — report queue worker
-- `02-session-failure-recovery.json` — closes stalled session states with audit evidence
-- `03-report-dead-letter-queue.json` — detects exhausted report retries once
-- `04-clinician-acknowledgement-escalation.json` — creates review alerts and escalates unresolved critical alerts
-- `05-device-onboarding-ota-lifecycle.json` — OTA dispatch plus device-health reconciliation
-- `06-backup-storage-integrity.json` — verifies recent recording rows have readable objects
-- `07-weekly-research-data-quality.json` — missing-output and model-version quality report
-- `08-shared-workflow-failure-handler.json` — n8n Error Trigger, audit record, and notification
-- `09-security-operations-correlation.json` — service/queue monitoring correlated with audit anomalies
-- `10-daily-operations-digest.json` — summary enrichment and daily operational digest
+- `00-connectivity-check.json` — infrastructure and model readiness diagnostics
+- `01-process-pending-llm-reports.json` — auditable AI report queue worker
+- `02-processing-reliability.json` — stalled-session recovery and report dead-letter handling on independent schedules
+- `03-clinical-alert-management.json` — clinical review alerts, acknowledgement tracking, and critical escalation
+- `04-device-ota-management.json` — device-health reconciliation and controlled OTA dispatch
+- `05-data-integrity-research-quality.json` — six-hour storage verification and weekly research-quality reporting
+- `06-operations-intelligence.json` — five-minute security/operations correlation and daily operations digest
+- `07-shared-workflow-failure-handler.json` — central n8n Error Trigger, audit record, and notification
 
-See `docs/N8N_PRODUCTION_AUTOMATION_SUITE.md` for import order, testing, activation, and the shared error-workflow configuration.
+The merged workflows retain separate triggers and deterministic application actions. The consolidation reduces editor clutter without coupling clinical, firmware, or AI-report responsibilities.
+
+See `docs/N8N_PRODUCTION_AUTOMATION_SUITE.md` for migration, testing, activation, and shared error-workflow configuration.
 
 ## Regenerate and validate
 
@@ -27,4 +26,6 @@ python n8n/generate_workflows.py
 python n8n/validate_workflows.py
 ```
 
-Generated exports are inactive by default. Assign the Gmail OAuth credential, test each workflow manually, and activate schedules only after the expected database and email outcomes are confirmed.
+On Windows, use `py -3` if `python` is not on `PATH`.
+
+Generated exports are inactive by default. Assign the Gmail OAuth credential, test each branch manually, and activate schedules only after confirming the expected database and email outcomes.

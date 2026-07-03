@@ -58,7 +58,7 @@ Firmware is not installed during an active recording.
 - Rebuild `firmware-builder`, `frontend`, and `inference`.
 - Ensure `DEVICE_BOOTSTRAP_PUBLIC_BASE_URL` is HTTPS and reachable by the ESP32.
 - Configure a trusted CA certificate in device provisioning for production HTTPS. Insecure TLS is development-only.
-- Import and validate `05-device-onboarding-ota-lifecycle.json` in n8n after deployment.
+- Import and validate `04-device-ota-management.json` in n8n after deployment.
 
 ## Current safety boundary
 

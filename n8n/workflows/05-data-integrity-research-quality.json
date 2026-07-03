@@ -1,0 +1,302 @@
+{
+  "name": "05 - Data Integrity and Research Quality",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "9e2e1210-5211-569b-b85c-cc3aca5617fe",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 6
+            }
+          ]
+        }
+      },
+      "id": "16e51260-5cde-51a0-998d-56f44ad6c1c3",
+      "name": "Storage Check Every Six Hours",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        140
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{(($env.ASCULTICOR_APP_URL || 'http://frontend:3000').replace(/\\/+$/, '')) + '/api/n8n/workflows?action=storage-integrity'}}",
+        "options": {},
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Host",
+              "value": "={{$env.ASCULTICOR_INTERNAL_HOST_HEADER || ($env.ASCULTICOR_PUBLIC_APP_URL || 'http://frontend:3000').replace(/^https?:\\/\\//, '').replace(/\\/.*$/, '')}}"
+            },
+            {
+              "name": "X-Forwarded-Host",
+              "value": "={{$env.ASCULTICOR_INTERNAL_HOST_HEADER || ($env.ASCULTICOR_PUBLIC_APP_URL || 'http://frontend:3000').replace(/^https?:\\/\\//, '').replace(/\\/.*$/, '')}}"
+            },
+            {
+              "name": "X-Forwarded-Proto",
+              "value": "https"
+            },
+            {
+              "name": "x-internal-token",
+              "value": "={{$env.ASCULTICOR_INTERNAL_API_TOKEN}}"
+            }
+          ]
+        },
+        "method": "POST"
+      },
+      "id": "f48c6ff5-5d60-5b14-9593-5cb1b5c316b6",
+      "name": "Run Storage Integrity",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        300,
+        0
+      ],
+      "alwaysOutputData": true,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "jsCode": "const emails = Array.isArray($json.emails) ? $json.emails : [];\n\nreturn emails\n  .filter((item) => item && item.emailTo && item.emailSubject && item.emailText)\n  .map((item) => ({\n    json: {\n      emailFrom: item.emailFrom || '',\n      emailTo: item.emailTo,\n      emailSubject: item.emailSubject,\n      emailText: item.emailText,\n      emailHtml: item.emailHtml || `<pre style=\"white-space:pre-wrap;font-family:Arial,sans-serif\">${String(item.emailText).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</pre>`,\n    },\n  }));\n"
+      },
+      "id": "af7a7e72-0a54-529e-a874-83bba646b7c6",
+      "name": "Prepare Storage Integrity Emails",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        620,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{$json.emailTo}}",
+        "subject": "={{$json.emailSubject}}",
+        "message": "={{$json.emailHtml}}",
+        "emailType": "html",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "ee49abe8-4cde-584f-bbcf-b616270c74f9",
+      "name": "Send Storage Integrity Gmail",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        940,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "weeks",
+              "triggerAtDay": [
+                1
+              ],
+              "triggerAtHour": 9
+            }
+          ]
+        }
+      },
+      "id": "7029ccb5-24fc-5b55-8241-93e931492ea9",
+      "name": "Research Quality Monday 09 Cairo",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{(($env.ASCULTICOR_APP_URL || 'http://frontend:3000').replace(/\\/+$/, '')) + '/api/n8n/workflows?action=research-quality'}}",
+        "options": {},
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Host",
+              "value": "={{$env.ASCULTICOR_INTERNAL_HOST_HEADER || ($env.ASCULTICOR_PUBLIC_APP_URL || 'http://frontend:3000').replace(/^https?:\\/\\//, '').replace(/\\/.*$/, '')}}"
+            },
+            {
+              "name": "X-Forwarded-Host",
+              "value": "={{$env.ASCULTICOR_INTERNAL_HOST_HEADER || ($env.ASCULTICOR_PUBLIC_APP_URL || 'http://frontend:3000').replace(/^https?:\\/\\//, '').replace(/\\/.*$/, '')}}"
+            },
+            {
+              "name": "X-Forwarded-Proto",
+              "value": "https"
+            },
+            {
+              "name": "x-internal-token",
+              "value": "={{$env.ASCULTICOR_INTERNAL_API_TOKEN}}"
+            }
+          ]
+        },
+        "method": "POST"
+      },
+      "id": "78f523d2-899e-522c-a23c-63a5cc67ad06",
+      "name": "Run Research Quality",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        300,
+        260
+      ],
+      "alwaysOutputData": true,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "jsCode": "const emails = Array.isArray($json.emails) ? $json.emails : [];\n\nreturn emails\n  .filter((item) => item && item.emailTo && item.emailSubject && item.emailText)\n  .map((item) => ({\n    json: {\n      emailFrom: item.emailFrom || '',\n      emailTo: item.emailTo,\n      emailSubject: item.emailSubject,\n      emailText: item.emailText,\n      emailHtml: item.emailHtml || `<pre style=\"white-space:pre-wrap;font-family:Arial,sans-serif\">${String(item.emailText).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</pre>`,\n    },\n  }));\n"
+      },
+      "id": "8fc3f3fc-4582-5f89-9cc3-49da08dd6cda",
+      "name": "Prepare Research Quality Emails",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        620,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{$json.emailTo}}",
+        "subject": "={{$json.emailSubject}}",
+        "message": "={{$json.emailHtml}}",
+        "emailType": "html",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "1a002455-fa58-5abf-853a-c3aaa0145807",
+      "name": "Send Research Quality Gmail",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        940,
+        260
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    }
+  ],
+  "connections": {
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Run Storage Integrity",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Run Research Quality",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Storage Check Every Six Hours": {
+      "main": [
+        [
+          {
+            "node": "Run Storage Integrity",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run Storage Integrity": {
+      "main": [
+        [
+          {
+            "node": "Prepare Storage Integrity Emails",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Storage Integrity Emails": {
+      "main": [
+        [
+          {
+            "node": "Send Storage Integrity Gmail",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Research Quality Monday 09 Cairo": {
+      "main": [
+        [
+          {
+            "node": "Run Research Quality",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run Research Quality": {
+      "main": [
+        [
+          {
+            "node": "Prepare Research Quality Emails",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Research Quality Emails": {
+      "main": [
+        [
+          {
+            "node": "Send Research Quality Gmail",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Africa/Cairo"
+  },
+  "staticData": null,
+  "active": false,
+  "versionId": "172041fe-d08a-583b-a63e-aea6944eea6a",
+  "id": ""
+}

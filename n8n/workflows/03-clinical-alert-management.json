@@ -1,5 +1,5 @@
 {
-  "name": "09 - Security and Operations Correlation",
+  "name": "03 - Clinical Alert Management",
   "nodes": [
     {
       "parameters": {},
@@ -18,13 +18,13 @@
           "interval": [
             {
               "field": "minutes",
-              "minutesInterval": 5
+              "minutesInterval": 2
             }
           ]
         }
       },
-      "id": "8c7a292f-a576-5224-a932-afda95dcde66",
-      "name": "Every Five Minutes",
+      "id": "68d027ae-fe64-563c-95fb-1ab1aff4d04f",
+      "name": "Clinical Review Every Two Minutes",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
       "position": [
@@ -34,7 +34,7 @@
     },
     {
       "parameters": {
-        "url": "={{(($env.ASCULTICOR_APP_URL || 'http://frontend:3000').replace(/\\/+$/, '')) + '/api/n8n/workflows?action=ops-security'}}",
+        "url": "={{(($env.ASCULTICOR_APP_URL || 'http://frontend:3000').replace(/\\/+$/, '')) + '/api/n8n/workflows?action=clinical-acknowledgement'}}",
         "options": {},
         "sendHeaders": true,
         "headerParameters": {
@@ -59,8 +59,8 @@
         },
         "method": "POST"
       },
-      "id": "540917ec-7ad6-5d83-9915-40759f263bf8",
-      "name": "Run Security and Operations Correlation",
+      "id": "2a36b0ba-2a88-579c-aa30-ce198efb358a",
+      "name": "Run Clinical Alert Management",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
@@ -76,8 +76,8 @@
       "parameters": {
         "jsCode": "const emails = Array.isArray($json.emails) ? $json.emails : [];\n\nreturn emails\n  .filter((item) => item && item.emailTo && item.emailSubject && item.emailText)\n  .map((item) => ({\n    json: {\n      emailFrom: item.emailFrom || '',\n      emailTo: item.emailTo,\n      emailSubject: item.emailSubject,\n      emailText: item.emailText,\n      emailHtml: item.emailHtml || `<pre style=\"white-space:pre-wrap;font-family:Arial,sans-serif\">${String(item.emailText).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</pre>`,\n    },\n  }));\n"
       },
-      "id": "c11d5ccd-a7cb-5e01-9e03-a2a64922b0bc",
-      "name": "Prepare Security and Operations Correlation Emails",
+      "id": "8bd39ba8-1b44-59ad-88c7-413f7034f534",
+      "name": "Prepare Clinical Alert Management Emails",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
@@ -113,36 +113,36 @@
       "main": [
         [
           {
-            "node": "Run Security and Operations Correlation",
+            "node": "Run Clinical Alert Management",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Every Five Minutes": {
+    "Clinical Review Every Two Minutes": {
       "main": [
         [
           {
-            "node": "Run Security and Operations Correlation",
+            "node": "Run Clinical Alert Management",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Run Security and Operations Correlation": {
+    "Run Clinical Alert Management": {
       "main": [
         [
           {
-            "node": "Prepare Security and Operations Correlation Emails",
+            "node": "Prepare Clinical Alert Management Emails",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Prepare Security and Operations Correlation Emails": {
+    "Prepare Clinical Alert Management Emails": {
       "main": [
         [
           {
@@ -161,6 +161,6 @@
   },
   "staticData": null,
   "active": false,
-  "versionId": "4146bf67-6514-5060-b153-a13cd94faa12",
+  "versionId": "c045a5d3-ec4e-5d8c-93d4-338312873589",
   "id": ""
 }

@@ -8,13 +8,29 @@ from pathlib import Path
 
 
 WORKFLOW_DIR = Path(__file__).parent / "workflows"
-EXPECTED = {f"{number:02d}" for number in range(11)}
+EXPECTED_FILES = {
+    "00-connectivity-check.json",
+    "01-process-pending-llm-reports.json",
+    "02-processing-reliability.json",
+    "03-clinical-alert-management.json",
+    "04-device-ota-management.json",
+    "05-data-integrity-research-quality.json",
+    "06-operations-intelligence.json",
+    "07-shared-workflow-failure-handler.json",
+}
+EXPECTED_SCHEDULES = {
+    "02-processing-reliability.json": 2,
+    "03-clinical-alert-management.json": 1,
+    "04-device-ota-management.json": 1,
+    "05-data-integrity-research-quality.json": 2,
+    "06-operations-intelligence.json": 2,
+}
 
 
 def main() -> None:
     files = sorted(WORKFLOW_DIR.glob("*.json"))
-    prefixes = {path.name.split("-", 1)[0] for path in files}
-    assert prefixes == EXPECTED, (prefixes, EXPECTED)
+    filenames = {path.name for path in files}
+    assert filenames == EXPECTED_FILES, (filenames, EXPECTED_FILES)
 
     for path in files:
         workflow = json.loads(path.read_text(encoding="utf-8"))
@@ -39,7 +55,10 @@ def main() -> None:
                     assert target.get("node") in known, (path, target)
 
         error_nodes = [node for node in nodes if node["type"] == "n8n-nodes-base.errorTrigger"]
-        if path.name.startswith("08-"):
+        schedule_nodes = [node for node in nodes if node["type"] == "n8n-nodes-base.scheduleTrigger"]
+        if path.name in EXPECTED_SCHEDULES:
+            assert len(schedule_nodes) == EXPECTED_SCHEDULES[path.name], path
+        if path.name.startswith("07-"):
             assert len(error_nodes) == 1, path
         else:
             assert not error_nodes, path

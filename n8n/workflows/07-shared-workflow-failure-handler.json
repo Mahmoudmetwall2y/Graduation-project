@@ -1,11 +1,11 @@
 {
-  "name": "04 - Clinician Acknowledgement and Escalation",
+  "name": "07 - Shared Workflow Failure Handler",
   "nodes": [
     {
       "parameters": {},
-      "id": "9e2e1210-5211-569b-b85c-cc3aca5617fe",
-      "name": "Manual Trigger",
-      "type": "n8n-nodes-base.manualTrigger",
+      "id": "0de28b49-a52d-5387-874b-7f43a2c261bc",
+      "name": "Workflow Error Trigger",
+      "type": "n8n-nodes-base.errorTrigger",
       "typeVersion": 1,
       "position": [
         0,
@@ -14,27 +14,20 @@
     },
     {
       "parameters": {
-        "rule": {
-          "interval": [
-            {
-              "field": "minutes",
-              "minutesInterval": 2
-            }
-          ]
-        }
+        "jsCode": "const execution = $json.execution || {};\nconst workflow = $json.workflow || {};\nconst error = execution.error || $json.error || {};\nreturn [{\n  json: {\n    workflow_name: workflow.name || $json.workflowName || 'unknown',\n    execution_id: execution.id || $json.executionId || '',\n    last_node: execution.lastNodeExecuted || $json.lastNodeExecuted || '',\n    error: error.message || error.description || String(error || 'Workflow execution failed'),\n    occurred_at: new Date().toISOString(),\n  },\n}];\n"
       },
-      "id": "163c939e-b7d4-54b9-8ae9-c91a60d5efec",
-      "name": "Every Two Minutes",
-      "type": "n8n-nodes-base.scheduleTrigger",
-      "typeVersion": 1.2,
+      "id": "5d5f7be5-1cbc-5c03-a9ff-b0db5d174929",
+      "name": "Build Failure Payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
       "position": [
-        0,
-        160
+        280,
+        0
       ]
     },
     {
       "parameters": {
-        "url": "={{(($env.ASCULTICOR_APP_URL || 'http://frontend:3000').replace(/\\/+$/, '')) + '/api/n8n/workflows?action=clinical-acknowledgement'}}",
+        "url": "={{(($env.ASCULTICOR_APP_URL || 'http://frontend:3000').replace(/\\/+$/, '')) + '/api/n8n/workflows?action=workflow-failure'}}",
         "options": {},
         "sendHeaders": true,
         "headerParameters": {
@@ -57,15 +50,19 @@
             }
           ]
         },
-        "method": "POST"
+        "method": "POST",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{JSON.stringify($json)}}"
       },
-      "id": "d4eb855b-489f-59d3-ae0d-b391bc1a02e6",
-      "name": "Run Clinician Acknowledgement and Escalation",
+      "id": "cc80a6be-4101-52e5-9eba-8cdf2eac10b8",
+      "name": "Record Workflow Failure",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        300,
-        80
+        560,
+        0
       ],
       "alwaysOutputData": true,
       "retryOnFail": true,
@@ -76,13 +73,13 @@
       "parameters": {
         "jsCode": "const emails = Array.isArray($json.emails) ? $json.emails : [];\n\nreturn emails\n  .filter((item) => item && item.emailTo && item.emailSubject && item.emailText)\n  .map((item) => ({\n    json: {\n      emailFrom: item.emailFrom || '',\n      emailTo: item.emailTo,\n      emailSubject: item.emailSubject,\n      emailText: item.emailText,\n      emailHtml: item.emailHtml || `<pre style=\"white-space:pre-wrap;font-family:Arial,sans-serif\">${String(item.emailText).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</pre>`,\n    },\n  }));\n"
       },
-      "id": "e1c0451f-5665-5d03-817c-6cab096c46c8",
-      "name": "Prepare Clinician Acknowledgement and Escalation Emails",
+      "id": "ae9232d5-2a57-5d89-9c33-3da82401b922",
+      "name": "Prepare Failure Email",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        620,
-        80
+        840,
+        0
       ]
     },
     {
@@ -100,8 +97,8 @@
       "type": "n8n-nodes-base.gmail",
       "typeVersion": 2.1,
       "position": [
-        940,
-        80
+        1120,
+        0
       ],
       "retryOnFail": true,
       "maxTries": 3,
@@ -109,40 +106,40 @@
     }
   ],
   "connections": {
-    "Manual Trigger": {
+    "Workflow Error Trigger": {
       "main": [
         [
           {
-            "node": "Run Clinician Acknowledgement and Escalation",
+            "node": "Build Failure Payload",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Every Two Minutes": {
+    "Build Failure Payload": {
       "main": [
         [
           {
-            "node": "Run Clinician Acknowledgement and Escalation",
+            "node": "Record Workflow Failure",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Run Clinician Acknowledgement and Escalation": {
+    "Record Workflow Failure": {
       "main": [
         [
           {
-            "node": "Prepare Clinician Acknowledgement and Escalation Emails",
+            "node": "Prepare Failure Email",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Prepare Clinician Acknowledgement and Escalation Emails": {
+    "Prepare Failure Email": {
       "main": [
         [
           {
@@ -161,6 +158,6 @@
   },
   "staticData": null,
   "active": false,
-  "versionId": "823de356-7925-568b-ac1d-c11ecf2e9750",
+  "versionId": "5cc8832f-561f-55e5-852f-aee0a521702a",
   "id": ""
 }
