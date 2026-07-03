@@ -1,5 +1,5 @@
 {
-  "name": "07 - Alert Escalation",
+  "name": "02 - Session Processing Failure Recovery",
   "nodes": [
     {
       "parameters": {},
@@ -18,13 +18,13 @@
           "interval": [
             {
               "field": "minutes",
-              "minutesInterval": 5
+              "minutesInterval": 2
             }
           ]
         }
       },
-      "id": "8c7a292f-a576-5224-a932-afda95dcde66",
-      "name": "Every Five Minutes",
+      "id": "163c939e-b7d4-54b9-8ae9-c91a60d5efec",
+      "name": "Every Two Minutes",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
       "position": [
@@ -34,7 +34,7 @@
     },
     {
       "parameters": {
-        "url": "={{(($env.ASCULTICOR_APP_URL || 'http://frontend:3000').replace(/\\/+$/, '')) + '/api/n8n/workflows?action=alert-escalation'}}",
+        "url": "={{(($env.ASCULTICOR_APP_URL || 'http://frontend:3000').replace(/\\/+$/, '')) + '/api/n8n/workflows?action=session-recovery'}}",
         "options": {},
         "sendHeaders": true,
         "headerParameters": {
@@ -59,26 +59,29 @@
         },
         "method": "POST"
       },
-      "id": "5e034177-9f1f-5f19-a15d-7efdba61501f",
-      "name": "Run Alert Escalation",
+      "id": "c88dc0fb-3905-5a47-898e-1ba0bee389c4",
+      "name": "Run Session Processing Failure Recovery",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
         300,
         80
       ],
-      "alwaysOutputData": true
+      "alwaysOutputData": true,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
     },
     {
       "parameters": {
         "jsCode": "const emails = Array.isArray($json.emails) ? $json.emails : [];\n\nreturn emails\n  .filter((item) => item && item.emailTo && item.emailSubject && item.emailText)\n  .map((item) => ({\n    json: {\n      emailFrom: item.emailFrom || '',\n      emailTo: item.emailTo,\n      emailSubject: item.emailSubject,\n      emailText: item.emailText,\n      emailHtml: item.emailHtml || `<pre style=\"white-space:pre-wrap;font-family:Arial,sans-serif\">${String(item.emailText).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</pre>`,\n    },\n  }));\n"
       },
-      "id": "8942e0eb-df12-501d-bbff-e740f9739f0f",
-      "name": "Prepare Escalation Emails",
+      "id": "482370fa-c82c-5249-a726-95eafb7b3865",
+      "name": "Prepare Session Processing Failure Recovery Emails",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        600,
+        620,
         80
       ]
     },
@@ -86,8 +89,8 @@
       "parameters": {
         "sendTo": "={{$json.emailTo}}",
         "subject": "={{$json.emailSubject}}",
-        "message": "={{$json.emailText}}",
-        "emailType": "text",
+        "message": "={{$json.emailHtml}}",
+        "emailType": "html",
         "options": {
           "appendAttribution": false
         }
@@ -97,9 +100,12 @@
       "type": "n8n-nodes-base.gmail",
       "typeVersion": 2.1,
       "position": [
-        900,
+        940,
         80
-      ]
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
     }
   ],
   "connections": {
@@ -107,36 +113,36 @@
       "main": [
         [
           {
-            "node": "Run Alert Escalation",
+            "node": "Run Session Processing Failure Recovery",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Every Five Minutes": {
+    "Every Two Minutes": {
       "main": [
         [
           {
-            "node": "Run Alert Escalation",
+            "node": "Run Session Processing Failure Recovery",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Run Alert Escalation": {
+    "Run Session Processing Failure Recovery": {
       "main": [
         [
           {
-            "node": "Prepare Escalation Emails",
+            "node": "Prepare Session Processing Failure Recovery Emails",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Prepare Escalation Emails": {
+    "Prepare Session Processing Failure Recovery Emails": {
       "main": [
         [
           {
@@ -155,6 +161,6 @@
   },
   "staticData": null,
   "active": false,
-  "versionId": "2b48cb27-9bee-5563-9435-c06c045de091",
+  "versionId": "4966e131-9095-587f-97f1-50def3d34c9f",
   "id": ""
 }

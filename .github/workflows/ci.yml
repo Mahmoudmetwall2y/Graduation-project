@@ -135,3 +135,6 @@ jobs:
           test -s supabase/migrations/028_device_name_unique_per_org.sql
           test -s supabase/migrations/029_visitor_role.sql
           test -s supabase/migrations/apply_this_in_supabase.sql
+
+      - name: Validate generated n8n workflows
+        run: python n8n/validate_workflows.py

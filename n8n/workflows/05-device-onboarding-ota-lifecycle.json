@@ -1,0 +1,241 @@
+{
+  "name": "05 - Device Onboarding and OTA Lifecycle",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "9e2e1210-5211-569b-b85c-cc3aca5617fe",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 2
+            }
+          ]
+        }
+      },
+      "id": "163c939e-b7d4-54b9-8ae9-c91a60d5efec",
+      "name": "Every Two Minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{(($env.ASCULTICOR_APP_URL || 'http://frontend:3000').replace(/\\/+$/, '')) + '/api/device/firmware/deployments?action=dispatch'}}",
+        "options": {},
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Host",
+              "value": "={{$env.ASCULTICOR_INTERNAL_HOST_HEADER || ($env.ASCULTICOR_PUBLIC_APP_URL || 'http://frontend:3000').replace(/^https?:\\/\\//, '').replace(/\\/.*$/, '')}}"
+            },
+            {
+              "name": "X-Forwarded-Host",
+              "value": "={{$env.ASCULTICOR_INTERNAL_HOST_HEADER || ($env.ASCULTICOR_PUBLIC_APP_URL || 'http://frontend:3000').replace(/^https?:\\/\\//, '').replace(/\\/.*$/, '')}}"
+            },
+            {
+              "name": "X-Forwarded-Proto",
+              "value": "https"
+            },
+            {
+              "name": "x-internal-token",
+              "value": "={{$env.ASCULTICOR_INTERNAL_API_TOKEN}}"
+            }
+          ]
+        },
+        "method": "POST"
+      },
+      "id": "5969a37a-6cd7-5eca-96a7-2e89ce2b2b7c",
+      "name": "Dispatch Firmware Rollouts",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        280,
+        20
+      ],
+      "alwaysOutputData": true,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "jsCode": "if (!$json || $json.ok !== true || $json.action !== 'firmware-rollout') {\n  throw new Error('Firmware rollout dispatcher returned an invalid response');\n}\nconst results = Array.isArray($json.results) ? $json.results : [];\nreturn [{\n  json: {\n    queued: Number($json.queued || 0),\n    dispatched: results.filter((item) => item.status === 'dispatched').length,\n    retryPending: results.filter((item) => item.status === 'retry_pending').length,\n    results,\n    checkedAt: new Date().toISOString(),\n  },\n}];\n"
+      },
+      "id": "56d21191-f7d6-5a89-acf8-adb6e0654942",
+      "name": "Validate Firmware Dispatch",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        540,
+        20
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{(($env.ASCULTICOR_APP_URL || 'http://frontend:3000').replace(/\\/+$/, '')) + '/api/n8n/workflows?action=device-health'}}",
+        "options": {},
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Host",
+              "value": "={{$env.ASCULTICOR_INTERNAL_HOST_HEADER || ($env.ASCULTICOR_PUBLIC_APP_URL || 'http://frontend:3000').replace(/^https?:\\/\\//, '').replace(/\\/.*$/, '')}}"
+            },
+            {
+              "name": "X-Forwarded-Host",
+              "value": "={{$env.ASCULTICOR_INTERNAL_HOST_HEADER || ($env.ASCULTICOR_PUBLIC_APP_URL || 'http://frontend:3000').replace(/^https?:\\/\\//, '').replace(/\\/.*$/, '')}}"
+            },
+            {
+              "name": "X-Forwarded-Proto",
+              "value": "https"
+            },
+            {
+              "name": "x-internal-token",
+              "value": "={{$env.ASCULTICOR_INTERNAL_API_TOKEN}}"
+            }
+          ]
+        },
+        "method": "POST"
+      },
+      "id": "04779236-2c23-5e94-b2db-1d420a6e425c",
+      "name": "Run Device Health",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        800,
+        20
+      ],
+      "alwaysOutputData": true,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "jsCode": "const emails = Array.isArray($json.emails) ? $json.emails : [];\n\nreturn emails\n  .filter((item) => item && item.emailTo && item.emailSubject && item.emailText)\n  .map((item) => ({\n    json: {\n      emailFrom: item.emailFrom || '',\n      emailTo: item.emailTo,\n      emailSubject: item.emailSubject,\n      emailText: item.emailText,\n      emailHtml: item.emailHtml || `<pre style=\"white-space:pre-wrap;font-family:Arial,sans-serif\">${String(item.emailText).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</pre>`,\n    },\n  }));\n"
+      },
+      "id": "25aa6109-346f-53ca-bfe8-13298bcd18f5",
+      "name": "Prepare Device Lifecycle Emails",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1060,
+        20
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{$json.emailTo}}",
+        "subject": "={{$json.emailSubject}}",
+        "message": "={{$json.emailHtml}}",
+        "emailType": "html",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "7439a336-acf9-58f0-a13d-d5086c9d46a1",
+      "name": "Send Gmail",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        1320,
+        20
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    }
+  ],
+  "connections": {
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Dispatch Firmware Rollouts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Every Two Minutes": {
+      "main": [
+        [
+          {
+            "node": "Dispatch Firmware Rollouts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Dispatch Firmware Rollouts": {
+      "main": [
+        [
+          {
+            "node": "Validate Firmware Dispatch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Firmware Dispatch": {
+      "main": [
+        [
+          {
+            "node": "Run Device Health",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run Device Health": {
+      "main": [
+        [
+          {
+            "node": "Prepare Device Lifecycle Emails",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Device Lifecycle Emails": {
+      "main": [
+        [
+          {
+            "node": "Send Gmail",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Africa/Cairo"
+  },
+  "staticData": null,
+  "active": false,
+  "versionId": "b15c9403-1e1d-5603-8800-40ea043cafdb",
+  "id": ""
+}

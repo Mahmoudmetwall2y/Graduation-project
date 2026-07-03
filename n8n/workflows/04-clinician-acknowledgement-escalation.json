@@ -1,5 +1,5 @@
 {
-  "name": "03 - Device Lifecycle Management",
+  "name": "04 - Clinician Acknowledgement and Escalation",
   "nodes": [
     {
       "parameters": {},
@@ -34,7 +34,7 @@
     },
     {
       "parameters": {
-        "url": "={{(($env.ASCULTICOR_APP_URL || 'http://frontend:3000').replace(/\\/+$/, '')) + '/api/device/firmware/deployments?action=dispatch'}}",
+        "url": "={{(($env.ASCULTICOR_APP_URL || 'http://frontend:3000').replace(/\\/+$/, '')) + '/api/n8n/workflows?action=clinical-acknowledgement'}}",
         "options": {},
         "sendHeaders": true,
         "headerParameters": {
@@ -59,85 +59,38 @@
         },
         "method": "POST"
       },
-      "id": "5969a37a-6cd7-5eca-96a7-2e89ce2b2b7c",
-      "name": "Dispatch Firmware Rollouts",
+      "id": "d4eb855b-489f-59d3-ae0d-b391bc1a02e6",
+      "name": "Run Clinician Acknowledgement and Escalation",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        280,
-        20
+        300,
+        80
       ],
-      "alwaysOutputData": true
-    },
-    {
-      "parameters": {
-        "jsCode": "if (!$json || $json.ok !== true || $json.action !== 'firmware-rollout') {\n  throw new Error('Firmware rollout dispatcher returned an invalid response');\n}\nconst results = Array.isArray($json.results) ? $json.results : [];\nreturn [{\n  json: {\n    queued: Number($json.queued || 0),\n    dispatched: results.filter((item) => item.status === 'dispatched').length,\n    retryPending: results.filter((item) => item.status === 'retry_pending').length,\n    results,\n    checkedAt: new Date().toISOString(),\n  },\n}];\n"
-      },
-      "id": "56d21191-f7d6-5a89-acf8-adb6e0654942",
-      "name": "Validate Firmware Dispatch",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        540,
-        20
-      ]
-    },
-    {
-      "parameters": {
-        "url": "={{(($env.ASCULTICOR_APP_URL || 'http://frontend:3000').replace(/\\/+$/, '')) + '/api/n8n/workflows?action=device-health'}}",
-        "options": {},
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "Host",
-              "value": "={{$env.ASCULTICOR_INTERNAL_HOST_HEADER || ($env.ASCULTICOR_PUBLIC_APP_URL || 'http://frontend:3000').replace(/^https?:\\/\\//, '').replace(/\\/.*$/, '')}}"
-            },
-            {
-              "name": "X-Forwarded-Host",
-              "value": "={{$env.ASCULTICOR_INTERNAL_HOST_HEADER || ($env.ASCULTICOR_PUBLIC_APP_URL || 'http://frontend:3000').replace(/^https?:\\/\\//, '').replace(/\\/.*$/, '')}}"
-            },
-            {
-              "name": "X-Forwarded-Proto",
-              "value": "https"
-            },
-            {
-              "name": "x-internal-token",
-              "value": "={{$env.ASCULTICOR_INTERNAL_API_TOKEN}}"
-            }
-          ]
-        },
-        "method": "POST"
-      },
-      "id": "04779236-2c23-5e94-b2db-1d420a6e425c",
-      "name": "Run Device Health",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [
-        800,
-        20
-      ],
-      "alwaysOutputData": true
+      "alwaysOutputData": true,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
     },
     {
       "parameters": {
         "jsCode": "const emails = Array.isArray($json.emails) ? $json.emails : [];\n\nreturn emails\n  .filter((item) => item && item.emailTo && item.emailSubject && item.emailText)\n  .map((item) => ({\n    json: {\n      emailFrom: item.emailFrom || '',\n      emailTo: item.emailTo,\n      emailSubject: item.emailSubject,\n      emailText: item.emailText,\n      emailHtml: item.emailHtml || `<pre style=\"white-space:pre-wrap;font-family:Arial,sans-serif\">${String(item.emailText).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</pre>`,\n    },\n  }));\n"
       },
-      "id": "80f85b54-cbb5-547f-bc1f-2c9a2f928111",
-      "name": "Prepare Device Health Emails",
+      "id": "e1c0451f-5665-5d03-817c-6cab096c46c8",
+      "name": "Prepare Clinician Acknowledgement and Escalation Emails",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1060,
-        20
+        620,
+        80
       ]
     },
     {
       "parameters": {
         "sendTo": "={{$json.emailTo}}",
         "subject": "={{$json.emailSubject}}",
-        "message": "={{$json.emailText}}",
-        "emailType": "text",
+        "message": "={{$json.emailHtml}}",
+        "emailType": "html",
         "options": {
           "appendAttribution": false
         }
@@ -147,9 +100,12 @@
       "type": "n8n-nodes-base.gmail",
       "typeVersion": 2.1,
       "position": [
-        1320,
-        -40
-      ]
+        940,
+        80
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
     }
   ],
   "connections": {
@@ -157,7 +113,7 @@
       "main": [
         [
           {
-            "node": "Dispatch Firmware Rollouts",
+            "node": "Run Clinician Acknowledgement and Escalation",
             "type": "main",
             "index": 0
           }
@@ -168,47 +124,25 @@
       "main": [
         [
           {
-            "node": "Dispatch Firmware Rollouts",
+            "node": "Run Clinician Acknowledgement and Escalation",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Dispatch Firmware Rollouts": {
+    "Run Clinician Acknowledgement and Escalation": {
       "main": [
         [
           {
-            "node": "Validate Firmware Dispatch",
+            "node": "Prepare Clinician Acknowledgement and Escalation Emails",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Validate Firmware Dispatch": {
-      "main": [
-        [
-          {
-            "node": "Run Device Health",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Run Device Health": {
-      "main": [
-        [
-          {
-            "node": "Prepare Device Health Emails",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Prepare Device Health Emails": {
+    "Prepare Clinician Acknowledgement and Escalation Emails": {
       "main": [
         [
           {
@@ -227,6 +161,6 @@
   },
   "staticData": null,
   "active": false,
-  "versionId": "abc80f11-84c3-5883-8b7b-4178c40217f9",
+  "versionId": "823de356-7925-568b-ac1d-c11ecf2e9750",
   "id": ""
 }

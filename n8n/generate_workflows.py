@@ -84,6 +84,17 @@ def if_positive_node(name: str, value_expression: str, x: int, y: int) -> dict:
     }
 
 
+def error_trigger_node(name: str = "Workflow Error Trigger", x: int = 0, y: int = 0) -> dict:
+    return {
+        "parameters": {},
+        "id": stable_id(name),
+        "name": name,
+        "type": "n8n-nodes-base.errorTrigger",
+        "typeVersion": 1,
+        "position": [x, y],
+    }
+
+
 def no_op_node(name: str, x: int, y: int) -> dict:
     return {
         "parameters": {},
@@ -160,6 +171,17 @@ def http_post_node(
 ) -> dict:
     node = http_get_node(name, url, headers=headers, x=x, y=y, always_output=always_output)
     node["parameters"]["method"] = "POST"
+    return node
+
+
+def http_post_json_node(name: str, url: str, body: str, x: int, y: int) -> dict:
+    node = http_post_node(name, url, headers=internal_api_headers(), x=x, y=y)
+    node["parameters"].update({
+        "sendBody": True,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": body,
+    })
     return node
 
 
@@ -765,6 +787,128 @@ return [{
   },
 }];
 """
+
+
+WORKFLOW_FAILURE_PAYLOAD_JS = r"""
+const execution = $json.execution || {};
+const workflow = $json.workflow || {};
+const error = execution.error || $json.error || {};
+return [{
+  json: {
+    workflow_name: workflow.name || $json.workflowName || 'unknown',
+    execution_id: execution.id || $json.executionId || '',
+    last_node: execution.lastNodeExecuted || $json.lastNodeExecuted || '',
+    error: error.message || error.description || String(error || 'Workflow execution failed'),
+    occurred_at: new Date().toISOString(),
+  },
+}];
+"""
+
+
+def weekly_node(name: str, weekday: int = 1, hour: int = 9, x: int = 0, y: int = 160) -> dict:
+    return {
+        "parameters": {
+            "rule": {
+                "interval": [{
+                    "field": "weeks",
+                    "triggerAtDay": [weekday],
+                    "triggerAtHour": hour,
+                }],
+            },
+        },
+        "id": stable_id(name),
+        "name": name,
+        "type": "n8n-nodes-base.scheduleTrigger",
+        "typeVersion": 1.2,
+        "position": [x, y],
+    }
+
+
+def action_workflow(number: str, title: str, filename: str, action: str, trigger: dict) -> tuple:
+    run_name = f"Run {title}"
+    prepare_name = f"Prepare {title} Emails"
+    nodes = [
+        manual_node(),
+        trigger,
+        with_retry(
+            http_post_node(run_name, frontend_action_url(action), headers=internal_api_headers(), x=300, y=80),
+            tries=3,
+            wait_ms=5000,
+        ),
+        code_node(prepare_name, EMAILS_FROM_RESULT_JS, x=620, y=80),
+        with_retry(gmail_node(x=940, y=80, html=True), tries=3, wait_ms=5000),
+    ]
+    connections = {
+        "Manual Trigger": {"main": [[{"node": run_name, "type": "main", "index": 0}]]},
+        trigger["name"]: {"main": [[{"node": run_name, "type": "main", "index": 0}]]},
+        run_name: {"main": [[{"node": prepare_name, "type": "main", "index": 0}]]},
+        prepare_name: {"main": [[{"node": "Send Gmail", "type": "main", "index": 0}]]},
+    }
+    return (f"{number} - {title}", filename, nodes, connections)
+
+
+def replacement_workflows() -> list[tuple]:
+    device_nodes = [
+        manual_node(),
+        schedule_node("Every Two Minutes", minutes=2),
+        with_retry(http_post_node(
+            "Dispatch Firmware Rollouts",
+            frontend_action_url("dispatch", route="/api/device/firmware/deployments"),
+            headers=internal_api_headers(),
+            x=280,
+            y=20,
+        )),
+        code_node("Validate Firmware Dispatch", FIRMWARE_ROLLOUT_VALIDATE_JS, x=540, y=20),
+        with_retry(http_post_node(
+            "Run Device Health",
+            frontend_action_url("device-health"),
+            headers=internal_api_headers(),
+            x=800,
+            y=20,
+        )),
+        code_node("Prepare Device Lifecycle Emails", EMAILS_FROM_RESULT_JS, x=1060, y=20),
+        with_retry(gmail_node(x=1320, y=20, html=True)),
+    ]
+    device_connections = {
+        "Manual Trigger": {"main": [[{"node": "Dispatch Firmware Rollouts", "type": "main", "index": 0}]]},
+        "Every Two Minutes": {"main": [[{"node": "Dispatch Firmware Rollouts", "type": "main", "index": 0}]]},
+        "Dispatch Firmware Rollouts": {"main": [[{"node": "Validate Firmware Dispatch", "type": "main", "index": 0}]]},
+        "Validate Firmware Dispatch": {"main": [[{"node": "Run Device Health", "type": "main", "index": 0}]]},
+        "Run Device Health": {"main": [[{"node": "Prepare Device Lifecycle Emails", "type": "main", "index": 0}]]},
+        "Prepare Device Lifecycle Emails": {"main": [[{"node": "Send Gmail", "type": "main", "index": 0}]]},
+    }
+
+    error_nodes = [
+        error_trigger_node(),
+        code_node("Build Failure Payload", WORKFLOW_FAILURE_PAYLOAD_JS, x=280, y=0),
+        with_retry(http_post_json_node(
+            "Record Workflow Failure",
+            frontend_action_url("workflow-failure"),
+            "={{JSON.stringify($json)}}",
+            x=560,
+            y=0,
+        )),
+        code_node("Prepare Failure Email", EMAILS_FROM_RESULT_JS, x=840, y=0),
+        with_retry(gmail_node(x=1120, y=0, html=True)),
+    ]
+    error_connections = {
+        "Workflow Error Trigger": {"main": [[{"node": "Build Failure Payload", "type": "main", "index": 0}]]},
+        "Build Failure Payload": {"main": [[{"node": "Record Workflow Failure", "type": "main", "index": 0}]]},
+        "Record Workflow Failure": {"main": [[{"node": "Prepare Failure Email", "type": "main", "index": 0}]]},
+        "Prepare Failure Email": {"main": [[{"node": "Send Gmail", "type": "main", "index": 0}]]},
+    }
+
+    return [
+        action_workflow("02", "Session Processing Failure Recovery", "02-session-failure-recovery.json", "session-recovery", schedule_node("Every Two Minutes", minutes=2)),
+        action_workflow("03", "Report Dead-Letter Queue", "03-report-dead-letter-queue.json", "report-dead-letter", schedule_node("Every Five Minutes", minutes=5)),
+        action_workflow("04", "Clinician Acknowledgement and Escalation", "04-clinician-acknowledgement-escalation.json", "clinical-acknowledgement", schedule_node("Every Two Minutes", minutes=2)),
+        ("05 - Device Onboarding and OTA Lifecycle", "05-device-onboarding-ota-lifecycle.json", device_nodes, device_connections),
+        action_workflow("06", "Backup and Storage Integrity", "06-backup-storage-integrity.json", "storage-integrity", schedule_node("Every Six Hours", hours=6)),
+        action_workflow("07", "Weekly Research and Data Quality", "07-weekly-research-data-quality.json", "research-quality", weekly_node("Monday 09 Cairo", weekday=1, hour=9)),
+        ("08 - Shared Workflow Failure Handler", "08-shared-workflow-failure-handler.json", error_nodes, error_connections),
+        action_workflow("09", "Security and Operations Correlation", "09-security-operations-correlation.json", "ops-security", schedule_node("Every Five Minutes", minutes=5)),
+        action_workflow("10", "Daily Operations Digest and Enrichment", "10-daily-operations-digest.json", "daily-operations", schedule_node("Daily 09 Cairo", daily_hour=9)),
+    ]
 
 
 PREPARE_CLINICAL_ALERT_EMAILS_JS = r"""
@@ -1591,6 +1735,12 @@ def write_workflows() -> None:
             },
         ),
     ]
+
+    workflows = workflows[:2] + replacement_workflows()
+    expected_files = {filename for _, filename, _, _ in workflows}
+    for existing in OUT_DIR.glob("*.json"):
+        if existing.name not in expected_files:
+            existing.unlink()
 
     for name, filename, nodes, connections in workflows:
         path = OUT_DIR / filename

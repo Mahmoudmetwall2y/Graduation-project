@@ -1,30 +1,30 @@
-# AscultiCor n8n Workflows
+# AscultiCor n8n Automation Suite
 
-This folder contains importable n8n workflow templates for the AscultiCor automation layer.
+The importable JSON workflows in `workflows/` form AscultiCor's durable automation and human-operations layer. Raw ECG/PCG streaming, inference, authentication, and device safety remain in MQTT, FastAPI, Next.js, firmware, and Supabase.
 
-## Files
+## Workflow inventory
 
-- `workflows/00-connectivity-check.json`
-- `workflows/01-process-pending-llm-reports.json`
-- `workflows/02-clinical-alert-notifications.json`
-- `workflows/03-device-health-monitoring.json`
-- `workflows/04-daily-digest.json`
-- `workflows/05-recording-summary-enrichment.json`
-- `workflows/06-ops-monitoring.json`
-- `workflows/07-alert-escalation.json`
+- `00-connectivity-check.json` — infrastructure and model readiness
+- `01-process-pending-llm-reports.json` — report queue worker
+- `02-session-failure-recovery.json` — closes stalled session states with audit evidence
+- `03-report-dead-letter-queue.json` — detects exhausted report retries once
+- `04-clinician-acknowledgement-escalation.json` — creates review alerts and escalates unresolved critical alerts
+- `05-device-onboarding-ota-lifecycle.json` — OTA dispatch plus device-health reconciliation
+- `06-backup-storage-integrity.json` — verifies recent recording rows have readable objects
+- `07-weekly-research-data-quality.json` — missing-output and model-version quality report
+- `08-shared-workflow-failure-handler.json` — n8n Error Trigger, audit record, and notification
+- `09-security-operations-correlation.json` — service/queue monitoring correlated with audit anomalies
+- `10-daily-operations-digest.json` — summary enrichment and daily operational digest
 
-The JSON exports are generated from `generate_workflows.py`.
+See `docs/N8N_PRODUCTION_AUTOMATION_SUITE.md` for import order, testing, activation, and the shared error-workflow configuration.
 
-For the supervisor-facing real-device demo sequence, use `docs/REAL_DEVICE_DEMO_RUNBOOK.md` before activating these workflows.
+## Regenerate and validate
 
-## Regenerate
-
-Run from the repo root:
+From the repository root:
 
 ```bash
 python n8n/generate_workflows.py
+python n8n/validate_workflows.py
 ```
 
-## Important
-
-The workflows use n8n Code nodes and read runtime values from environment variables passed to the n8n container. Keep n8n access limited to trusted project members.
+Generated exports are inactive by default. Assign the Gmail OAuth credential, test each workflow manually, and activate schedules only after the expected database and email outcomes are confirmed.

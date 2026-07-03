@@ -1,5 +1,5 @@
 {
-  "name": "04 - Daily Digest",
+  "name": "09 - Security and Operations Correlation",
   "nodes": [
     {
       "parameters": {},
@@ -17,14 +17,14 @@
         "rule": {
           "interval": [
             {
-              "field": "days",
-              "triggerAtHour": 9
+              "field": "minutes",
+              "minutesInterval": 5
             }
           ]
         }
       },
-      "id": "1b06545d-9f25-5431-94ba-3512784274f1",
-      "name": "Daily 09 Cairo",
+      "id": "8c7a292f-a576-5224-a932-afda95dcde66",
+      "name": "Every Five Minutes",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
       "position": [
@@ -34,7 +34,7 @@
     },
     {
       "parameters": {
-        "url": "={{(($env.ASCULTICOR_APP_URL || 'http://frontend:3000').replace(/\\/+$/, '')) + '/api/n8n/workflows?action=daily-digest'}}",
+        "url": "={{(($env.ASCULTICOR_APP_URL || 'http://frontend:3000').replace(/\\/+$/, '')) + '/api/n8n/workflows?action=ops-security'}}",
         "options": {},
         "sendHeaders": true,
         "headerParameters": {
@@ -59,26 +59,29 @@
         },
         "method": "POST"
       },
-      "id": "112bcf4e-02d0-5a5a-96d8-731c78c9812e",
-      "name": "Run Daily Digest",
+      "id": "540917ec-7ad6-5d83-9915-40759f263bf8",
+      "name": "Run Security and Operations Correlation",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
         300,
         80
       ],
-      "alwaysOutputData": true
+      "alwaysOutputData": true,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
     },
     {
       "parameters": {
         "jsCode": "const emails = Array.isArray($json.emails) ? $json.emails : [];\n\nreturn emails\n  .filter((item) => item && item.emailTo && item.emailSubject && item.emailText)\n  .map((item) => ({\n    json: {\n      emailFrom: item.emailFrom || '',\n      emailTo: item.emailTo,\n      emailSubject: item.emailSubject,\n      emailText: item.emailText,\n      emailHtml: item.emailHtml || `<pre style=\"white-space:pre-wrap;font-family:Arial,sans-serif\">${String(item.emailText).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</pre>`,\n    },\n  }));\n"
       },
-      "id": "8dd96dec-e483-5a59-a6ea-fc3e58031577",
-      "name": "Prepare Daily Digest Emails",
+      "id": "c11d5ccd-a7cb-5e01-9e03-a2a64922b0bc",
+      "name": "Prepare Security and Operations Correlation Emails",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        600,
+        620,
         80
       ]
     },
@@ -86,8 +89,8 @@
       "parameters": {
         "sendTo": "={{$json.emailTo}}",
         "subject": "={{$json.emailSubject}}",
-        "message": "={{$json.emailText}}",
-        "emailType": "text",
+        "message": "={{$json.emailHtml}}",
+        "emailType": "html",
         "options": {
           "appendAttribution": false
         }
@@ -97,9 +100,12 @@
       "type": "n8n-nodes-base.gmail",
       "typeVersion": 2.1,
       "position": [
-        900,
+        940,
         80
-      ]
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
     }
   ],
   "connections": {
@@ -107,36 +113,36 @@
       "main": [
         [
           {
-            "node": "Run Daily Digest",
+            "node": "Run Security and Operations Correlation",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Daily 09 Cairo": {
+    "Every Five Minutes": {
       "main": [
         [
           {
-            "node": "Run Daily Digest",
+            "node": "Run Security and Operations Correlation",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Run Daily Digest": {
+    "Run Security and Operations Correlation": {
       "main": [
         [
           {
-            "node": "Prepare Daily Digest Emails",
+            "node": "Prepare Security and Operations Correlation Emails",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Prepare Daily Digest Emails": {
+    "Prepare Security and Operations Correlation Emails": {
       "main": [
         [
           {
@@ -155,6 +161,6 @@
   },
   "staticData": null,
   "active": false,
-  "versionId": "fa136632-7eb4-5e52-801d-e7e4d78d7856",
+  "versionId": "4146bf67-6514-5060-b153-a13cd94faa12",
   "id": ""
 }

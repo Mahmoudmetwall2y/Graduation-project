@@ -473,7 +473,10 @@ async function runDailyDigest(supabase: any) {
   const completedSessions = (sessions || []).filter((session: any) => ['done', 'completed'].includes(session.status)).length
   const errorSessions = (sessions || []).filter((session: any) => session.status === 'error').length
   const murmurCount = (predictions || []).filter((prediction: any) => prediction.modality === 'pcg' && prediction.output_json?.label === 'Murmur').length
-  const abnormalEcgCount = (predictions || []).filter((prediction: any) => prediction.modality === 'ecg' && prediction.output_json?.prediction === 'Abnormal').length
+  const abnormalEcgCount = (predictions || []).filter((prediction: any) =>
+    prediction.modality === 'ecg' &&
+    ['sveb', 'veb', 'fusion'].includes(String(prediction.output_json?.prediction || '').toLowerCase())
+  ).length
   const offlineDevices = (devices || []).filter((device: any) => {
     if (!device.last_seen_at) return true
     return Date.now() - Date.parse(device.last_seen_at) > 5 * 60 * 1000
@@ -714,6 +717,289 @@ async function runAlertEscalation(supabase: any) {
   return result('alert-escalation', { checked: (alerts || []).length, escalated }, emails)
 }
 
+async function runSessionRecovery(supabase: any) {
+  const policies = [
+    { status: 'created', minutes: 5, reason: 'start_not_acknowledged' },
+    { status: 'streaming', minutes: 5, reason: 'stream_stalled' },
+    { status: 'processing', minutes: 20, reason: 'processing_stalled' },
+  ]
+  const recovered: any[] = []
+
+  for (const policy of policies) {
+    const cutoff = isoMinutesAgo(policy.minutes)
+    const { data: sessions, error } = await supabase
+      .from('sessions')
+      .select('id,org_id,device_id,status,created_at,started_at')
+      .eq('status', policy.status)
+      .lt(policy.status === 'created' ? 'created_at' : 'started_at', cutoff)
+      .limit(100)
+    if (error) throw error
+
+    for (const session of sessions || []) {
+      const { data: updated, error: updateError } = await supabase
+        .from('sessions')
+        .update({ status: 'error', ended_at: new Date().toISOString() })
+        .eq('id', session.id)
+        .eq('status', policy.status)
+        .select('id')
+      if (updateError) throw updateError
+      if (!updated?.length) continue
+
+      const { error: auditError } = await supabase.from('audit_logs').insert({
+        org_id: session.org_id,
+        user_id: null,
+        action: 'session_recovered_to_error',
+        entity_type: 'session',
+        entity_id: session.id,
+        metadata: {
+          previous_status: policy.status,
+          reason: policy.reason,
+          source: 'n8n-session-recovery',
+        },
+      })
+      if (auditError) throw auditError
+      recovered.push({ ...session, reason: policy.reason })
+    }
+  }
+
+  const emails = recovered.length ? [email(
+    `[AscultiCor] Recovered ${recovered.length} stalled session${recovered.length === 1 ? '' : 's'}`,
+    [
+      'AscultiCor marked stalled sessions as error so they no longer remain indefinitely active.',
+      '',
+      ...recovered.map((item) => `${item.id}: ${item.status} -> error (${item.reason})`),
+    ].join('\n'),
+  )] : []
+  return result('session-recovery', { checked_policies: policies.length, recovered: recovered.length }, emails)
+}
+
+async function runReportDeadLetter(supabase: any) {
+  const { data: reports, error } = await supabase
+    .from('llm_reports')
+    .select('id,org_id,session_id,device_id,retry_count,max_retries,error_message,created_at')
+    .eq('status', 'error')
+    .order('created_at', { ascending: true })
+    .limit(100)
+  if (error) throw error
+
+  const deadLetters = (reports || []).filter((report: any) =>
+    Number(report.retry_count || 0) >= Number(report.max_retries || 3)
+  )
+  const newlyNotified: any[] = []
+
+  for (const report of deadLetters) {
+    const { data: existing, error: existingError } = await supabase
+      .from('audit_logs')
+      .select('id')
+      .eq('action', 'llm_report_dead_letter_notified')
+      .eq('entity_type', 'llm_report')
+      .eq('entity_id', report.id)
+      .limit(1)
+    if (existingError) throw existingError
+    if (existing?.length) continue
+
+    const { error: auditError } = await supabase.from('audit_logs').insert({
+      org_id: report.org_id,
+      user_id: null,
+      action: 'llm_report_dead_letter_notified',
+      entity_type: 'llm_report',
+      entity_id: report.id,
+      metadata: {
+        session_id: report.session_id,
+        retry_count: report.retry_count,
+        max_retries: report.max_retries,
+        error_message: report.error_message,
+        source: 'n8n-report-dlq',
+      },
+    })
+    if (auditError) throw auditError
+    newlyNotified.push(report)
+  }
+
+  const emails = newlyNotified.length ? [email(
+    `[AscultiCor] ${newlyNotified.length} report${newlyNotified.length === 1 ? '' : 's'} entered the dead-letter queue`,
+    [
+      'These reports exhausted automatic retries and require administrator review.',
+      '',
+      ...newlyNotified.map((item) =>
+        `Report ${item.id} | session ${item.session_id} | retries ${item.retry_count}/${item.max_retries} | ${item.error_message || 'No error detail'}`
+      ),
+    ].join('\n'),
+  )] : []
+  return result('report-dead-letter', {
+    dead_letters: deadLetters.length,
+    newly_notified: newlyNotified.length,
+  }, emails)
+}
+
+async function runClinicalAcknowledgement(supabase: any) {
+  const alerts = await runClinicalAlerts(supabase)
+  const escalations = await runAlertEscalation(supabase)
+  return result('clinical-acknowledgement', {
+    alerts: alerts.summary,
+    escalations: escalations.summary,
+  }, [...alerts.emails, ...escalations.emails])
+}
+
+async function runStorageIntegrity(supabase: any) {
+  const since = isoMinutesAgo(24 * 60)
+  const { data: recordings, error } = await supabase
+    .from('recordings')
+    .select('id,org_id,session_id,modality,storage_path,checksum,created_at')
+    .gte('created_at', since)
+    .order('created_at', { ascending: false })
+    .limit(20)
+  if (error) throw error
+
+  const missing: any[] = []
+  let verified = 0
+  for (const recording of recordings || []) {
+    const { data, error: downloadError } = await supabase.storage
+      .from('recordings')
+      .download(recording.storage_path)
+    if (downloadError || !data || data.size === 0) {
+      missing.push({ ...recording, error: downloadError?.message || 'empty object' })
+    } else {
+      verified += 1
+    }
+  }
+
+  const emails = missing.length ? [email(
+    `[AscultiCor] Storage integrity warning: ${missing.length} object${missing.length === 1 ? '' : 's'}`,
+    [
+      'Database recording rows were found without a readable, non-empty storage object.',
+      '',
+      ...missing.map((item) => `${item.storage_path} | session ${item.session_id} | ${item.error}`),
+    ].join('\n'),
+  )] : []
+  return result('storage-integrity', {
+    sampled: (recordings || []).length,
+    verified,
+    missing: missing.length,
+  }, emails)
+}
+
+async function runResearchQuality(supabase: any) {
+  const since = isoMinutesAgo(7 * 24 * 60)
+  const [{ data: sessions, error: sessionsError }, { data: predictions, error: predictionsError }] = await Promise.all([
+    supabase.from('sessions').select('id,status,device_id,created_at').gte('created_at', since).limit(5000),
+    supabase.from('predictions').select('session_id,modality,model_name,model_version,output_json').gte('created_at', since).limit(10000),
+  ])
+  if (sessionsError) throw sessionsError
+  if (predictionsError) throw predictionsError
+
+  const bySession = new Map<string, Set<string>>()
+  let unknownEcg = 0
+  const modelVersions = new Set<string>()
+  for (const prediction of predictions || []) {
+    if (!bySession.has(prediction.session_id)) bySession.set(prediction.session_id, new Set())
+    bySession.get(prediction.session_id)!.add(prediction.modality)
+    modelVersions.add(`${prediction.model_name}@${prediction.model_version}`)
+    if (prediction.modality === 'ecg' && prediction.output_json?.prediction === 'Unknown') unknownEcg += 1
+  }
+
+  const completed = (sessions || []).filter((item: any) => item.status === 'done')
+  const missingPredictions = completed.filter((item: any) => {
+    const modalities = bySession.get(item.id) || new Set()
+    return !modalities.has('pcg') || !modalities.has('ecg')
+  })
+  const errorSessions = (sessions || []).filter((item: any) => item.status === 'error').length
+  const summary = {
+    period_days: 7,
+    sessions: (sessions || []).length,
+    completed: completed.length,
+    errors: errorSessions,
+    completed_missing_prediction_pair: missingPredictions.length,
+    unknown_ecg_predictions: unknownEcg,
+    model_versions: Array.from(modelVersions).sort(),
+  }
+
+  return result('research-quality', summary, [email(
+    '[AscultiCor] Weekly Research & Data Quality Report',
+    [
+      'AscultiCor weekly research/data-quality summary (engineering use; not clinical evidence).',
+      '',
+      `Sessions: ${summary.sessions}`,
+      `Completed: ${summary.completed}`,
+      `Errors: ${summary.errors}`,
+      `Completed sessions missing ECG/PCG prediction pair: ${summary.completed_missing_prediction_pair}`,
+      `Unknown ECG outputs: ${summary.unknown_ecg_predictions}`,
+      `Model versions: ${summary.model_versions.join(', ') || 'No predictions'}`,
+    ].join('\n'),
+  )])
+}
+
+async function runWorkflowFailure(supabase: any, request: Request) {
+  const body = await request.json().catch(() => ({}))
+  const workflowName = String(body.workflow_name || body.workflowName || 'unknown').slice(0, 160)
+  const executionId = String(body.execution_id || body.executionId || '').slice(0, 160)
+  const errorMessage = String(body.error || body.error_message || 'Workflow execution failed').slice(0, 2000)
+  const { error } = await supabase.from('audit_logs').insert({
+    org_id: null,
+    user_id: null,
+    action: 'n8n_workflow_failed',
+    entity_type: 'n8n_execution',
+    entity_id: null,
+    metadata: {
+      workflow_name: workflowName,
+      execution_id: executionId,
+      error: errorMessage,
+      last_node: body.last_node || body.lastNode || null,
+      occurred_at: body.occurred_at || new Date().toISOString(),
+    },
+  })
+  if (error) throw error
+  return result('workflow-failure', { recorded: 1, workflow_name: workflowName }, [email(
+    `[AscultiCor] n8n workflow failed: ${workflowName}`,
+    `Execution: ${executionId || 'unknown'}\nLast node: ${body.last_node || body.lastNode || 'unknown'}\nError: ${errorMessage}`,
+  )])
+}
+
+async function runSecurityAudit(supabase: any) {
+  const since = isoMinutesAgo(30)
+  const watchedActions = [
+    'device_bootstrap_requested',
+    'session_start_no_ack',
+    'n8n_workflow_failed',
+    'firmware_deployment_failed',
+  ]
+  const { data: logs, error } = await supabase
+    .from('audit_logs')
+    .select('action,entity_type,entity_id,created_at,metadata')
+    .in('action', watchedActions)
+    .gte('created_at', since)
+    .order('created_at', { ascending: false })
+    .limit(500)
+  if (error) throw error
+
+  const counts = Object.fromEntries(watchedActions.map((action) => [
+    action,
+    (logs || []).filter((item: any) => item.action === action).length,
+  ]))
+  const issues: string[] = []
+  if (counts.device_bootstrap_requested > 20) issues.push(`High bootstrap volume: ${counts.device_bootstrap_requested} in 30 minutes`)
+  if (counts.session_start_no_ack > 3) issues.push(`Repeated unacknowledged session starts: ${counts.session_start_no_ack}`)
+  if (counts.n8n_workflow_failed > 3) issues.push(`Repeated n8n workflow failures: ${counts.n8n_workflow_failed}`)
+  if (counts.firmware_deployment_failed > 0) issues.push(`Firmware deployment failures: ${counts.firmware_deployment_failed}`)
+
+  return result('security-audit', { events: (logs || []).length, issues: issues.length, counts }, issues.length ? [email(
+    '[AscultiCor] Security & Audit Anomaly Warning',
+    ['Potential operational/security anomalies were detected:', '', ...issues].join('\n'),
+  )] : [])
+}
+
+async function runOpsSecurity(supabase: any) {
+  const ops = await runOpsMonitoring(supabase)
+  const security = await runSecurityAudit(supabase)
+  return result('ops-security', { ops: ops.summary, security: security.summary }, [...ops.emails, ...security.emails])
+}
+
+async function runDailyOperations(supabase: any) {
+  const enrichment = await runSummaryEnrichment(supabase)
+  const digest = await runDailyDigest(supabase)
+  return result('daily-operations', { enrichment: enrichment.summary, digest: digest.summary }, digest.emails)
+}
+
 export async function POST(request: Request) {
   const unauthorized = requireInternalToken(request)
   if (unauthorized) return unauthorized
@@ -722,6 +1008,15 @@ export async function POST(request: Request) {
   const supabase = serviceClient()
 
   try {
+    if (action === 'session-recovery') return jsonNoStore(await runSessionRecovery(supabase))
+    if (action === 'report-dead-letter') return jsonNoStore(await runReportDeadLetter(supabase))
+    if (action === 'clinical-acknowledgement') return jsonNoStore(await runClinicalAcknowledgement(supabase))
+    if (action === 'storage-integrity') return jsonNoStore(await runStorageIntegrity(supabase))
+    if (action === 'research-quality') return jsonNoStore(await runResearchQuality(supabase))
+    if (action === 'workflow-failure') return jsonNoStore(await runWorkflowFailure(supabase, request))
+    if (action === 'security-audit') return jsonNoStore(await runSecurityAudit(supabase))
+    if (action === 'ops-security') return jsonNoStore(await runOpsSecurity(supabase))
+    if (action === 'daily-operations') return jsonNoStore(await runDailyOperations(supabase))
     if (action === 'clinical-alerts') return jsonNoStore(await runClinicalAlerts(supabase))
     if (action === 'device-health') return jsonNoStore(await runDeviceHealth(supabase))
     if (action === 'daily-digest') return jsonNoStore(await runDailyDigest(supabase))
