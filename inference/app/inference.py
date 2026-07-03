@@ -232,9 +232,8 @@ class InferenceEngine:
             risk_head  : (batch, 1) sigmoid — binary cardiac risk (PTB-trained)
             fc_out     : (batch, 500, 1)     — auxiliary, unused at inference
 
-        Notes:
-            keras.config.enable_unsafe_deserialization() is required because
-            v26 contains custom Lambda layers serialized with Python bytecode.
+        The production artifact contains no Lambda/Python-bytecode layers and
+        must load with Keras safe deserialization enabled.
         """
         cfg = get_model_config("ecg_bilstm")
         if not cfg.enabled:
@@ -249,15 +248,13 @@ class InferenceEngine:
                 )
 
             from tensorflow import keras
-            # Required for v26 — model contains Lambda layers with Python bytecode.
-            # This is safe here because we control the model file.
-            keras.config.enable_unsafe_deserialization()
             # Inference does not need the optimizer or training-only custom
             # losses. Skipping compilation also keeps exported models portable
             # when those Python loss functions are not present in production.
             self.ecg_model = keras.models.load_model(
                 str(cfg.artifact_path), compile=False
             )
+            self._validate_ecg_model_contract()
             logger.info(f"[Tier 3 · ECG Prognosis] Loaded model from {cfg.artifact_path}")
 
             # Load metadata dict (label_encoder_SL.pkl)
@@ -303,6 +300,30 @@ class InferenceEngine:
                 "enabled": True, "pending": False,
             }
 
+
+    def _validate_ecg_model_contract(self):
+        """Fail fast if an ECG artifact is incompatible with runtime tensors."""
+        expected_inputs = {
+            "ecg_input": (500, 1),
+            "rr_input": (9,),
+            "fc_input": (500, 1),
+        }
+        actual_inputs = {
+            tensor.name.split(":", 1)[0]: tuple(int(dim) for dim in tensor.shape[1:])
+            for tensor in self.ecg_model.inputs
+        }
+        if actual_inputs != expected_inputs:
+            raise ValueError(
+                f"ECG model input contract mismatch: expected {expected_inputs}, got {actual_inputs}"
+            )
+
+        expected_outputs = {"class_head", "risk_head", "fc_out"}
+        actual_outputs = set(self.ecg_model.output_names)
+        if actual_outputs != expected_outputs:
+            raise ValueError(
+                f"ECG model output contract mismatch: expected {sorted(expected_outputs)}, "
+                f"got {sorted(actual_outputs)}"
+            )
 
     def _load_severity_model(self):
         """Load Tier 2 functional analysis from its delivered PyTorch checkpoint."""

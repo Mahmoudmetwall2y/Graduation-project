@@ -11,7 +11,7 @@ AscultiCor uses a **centralized model registry** (`inference/app/model_registry.
 | Slot | Key | Name | Status | Artifact |
 |------|-----|------|--------|---------|
 | Model 1 | `pcg_xgboost` | XGBoost PCG Heart Sound Classifier | ✅ **Active** | `new-models/Xgboost/heart_sound_xgboost_model.pkl` |
-| Model 2 | `ecg_bilstm` | ECG AuscultICor v26 SL (Single-Lead) | ✅ **Active** | `new-models/ecg_mitbih_single_lead/AuscultICor_v26_SL.keras` |
+| Model 2 | `ecg_bilstm` | ECG AuscultICor v26 SL (Single-Lead) | ✅ **Active** | `new-models/ecg_mitbih_single_lead/single_lead_updated.keras` |
 | Model 3 | `severity_cnn` | PyTorch CNN Murmur Characterization | ✅ **Active** | `new-models/CNN/best_model.pkl` |
 
 ---
@@ -28,7 +28,7 @@ new-models/
 │   └── preprocessing/
 │       └── YAMNet_*.py                 ← Feature extraction pipeline
 ├── ecg_mitbih_single_lead/
-│   ├── AuscultICor_v26_SL.keras        ← Model 2 (active, single-lead)
+│   ├── single_lead_updated.keras       ← Model 2 (active, single-lead)
 │   └── label_encoder_SL.pkl            ← Metadata dict for Model 2
 └── CNN/
     ├── best_model.pkl                  ← Model 3 PyTorch state_dict
@@ -57,10 +57,10 @@ MODEL_1_ENABLED=true
 MODEL_1_VERSION=v2.0.0
 
 # Model 2 — ECG AuscultICor v26 SL
-MODEL_2_PATH=/new-models/ecg_mitbih_single_lead/AuscultICor_v26_SL.keras
+MODEL_2_PATH=/new-models/ecg_mitbih_single_lead/single_lead_updated.keras
 MODEL_2_META_PATH=/new-models/ecg_mitbih_single_lead/label_encoder_SL.pkl
 MODEL_2_ENABLED=true
-MODEL_2_VERSION=v26.0.0
+MODEL_2_VERSION=v26.1.0
 
 # Model 3 — PyTorch CNN Murmur Characterization
 MODEL_3_PATH=/new-models/CNN/best_model.pkl

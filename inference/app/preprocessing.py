@@ -421,7 +421,7 @@ class ECGPreprocessor:
     """
     Deterministic ECG preprocessing for the AuscultICor v26 SL model.
 
-    Default parameters match the AuscultICor_v26_SL.keras training configuration:
+    Default parameters match the single_lead_updated.keras training configuration:
       sample_rate = 125 Hz  (MIT-BIH native sampling rate)
       window_size = 500     (samples per beat window after resampling)
 

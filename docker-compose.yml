@@ -94,10 +94,10 @@ services:
       - MODEL_1_ENABLED=${MODEL_1_ENABLED:-true}
       - MODEL_1_VERSION=${MODEL_1_VERSION:-v2.0.0}
       # Tier 3: ECG Prognosis (legacy MODEL_2_* names retained for compatibility)
-      - MODEL_2_PATH=${MODEL_2_PATH:-/new-models/ecg_mitbih_single_lead/AuscultICor_v26_SL.keras}
+      - MODEL_2_PATH=${MODEL_2_PATH:-/new-models/ecg_mitbih_single_lead/single_lead_updated.keras}
       - MODEL_2_META_PATH=${MODEL_2_META_PATH:-/new-models/ecg_mitbih_single_lead/label_encoder_SL.pkl}
       - MODEL_2_ENABLED=${MODEL_2_ENABLED:-true}
-      - MODEL_2_VERSION=${MODEL_2_VERSION:-v2.0.0}
+      - MODEL_2_VERSION=${MODEL_2_VERSION:-v26.1.0}
       # Tier 2: Functional Murmur Characterization (legacy MODEL_3_* names)
       - MODEL_3_PATH=${MODEL_3_PATH:-/new-models/CNN/best_model.pkl}
       - MODEL_3_ENABLED=${MODEL_3_ENABLED:-true}

@@ -73,6 +73,9 @@ jobs:
       - name: Python compile smoke check
         run: python -m compileall inference/app
 
+      - name: Validate ECG model artifact
+        run: python inference/scripts/validate_ecg_model.py
+
   firmware:
     name: ESP32 firmware build
     runs-on: ubuntu-latest

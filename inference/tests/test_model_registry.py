@@ -36,7 +36,18 @@ def _make_fake_xgboost():
 
 def _make_fake_keras_ecg():
     """Create a Keras model mock that returns the multi-head output dict."""
+    class FakeTensor:
+        def __init__(self, name, shape):
+            self.name = name
+            self.shape = shape
+
     model = MagicMock()
+    model.inputs = [
+        FakeTensor("ecg_input", (None, 500, 1)),
+        FakeTensor("rr_input", (None, 9)),
+        FakeTensor("fc_input", (None, 500, 1)),
+    ]
+    model.output_names = ["class_head", "risk_head", "fc_out"]
     model.predict.return_value = {
         "class_head": np.array([[0.80, 0.10, 0.05, 0.03, 0.02]]),
         "risk_head": np.array([[0.15]]),
@@ -204,7 +215,7 @@ class TestInferenceEngineMocked:
         # Create dummy model files so path-exists checks pass
         xgb_path = tmp_path / "Xgboost" / "heart_sound_xgboost_model.pkl"
         scaler_path = tmp_path / "Xgboost" / "final_scaler.pkl"
-        ecg_path = tmp_path / "ecg_mitbih_single_lead" / "AuscultICor_v26_SL.keras"
+        ecg_path = tmp_path / "ecg_mitbih_single_lead" / "single_lead_updated.keras"
         meta_path = tmp_path / "ecg_mitbih_single_lead" / "label_encoder_SL.pkl"
         xgb_path.parent.mkdir(parents=True)
         ecg_path.parent.mkdir(parents=True)

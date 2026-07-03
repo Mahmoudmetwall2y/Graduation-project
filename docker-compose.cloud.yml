@@ -1,4 +1,12 @@
 services:
+  inference:
+    environment:
+      - MODEL_2_PATH=/new-models/ecg_mitbih_single_lead/single_lead_updated.keras
+      - MODEL_2_META_PATH=/new-models/ecg_mitbih_single_lead/label_encoder_SL.pkl
+      - MODEL_2_VERSION=v26.1.0
+      - ECG_SAMPLE_RATE=125
+      - ECG_WINDOW_SIZE=500
+
   nginx:
     ports:
       - "${NGINX_N8N_ALT_HTTP_BIND_ADDRESS:-127.0.0.1}:${NGINX_N8N_ALT_HTTP_PORT:-8081}:8081"

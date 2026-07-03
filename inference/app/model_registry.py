@@ -150,7 +150,7 @@ def _build_registry() -> Dict[str, ModelConfig]:
     )
 
     # ── Tier 3: ECG Prognosis (legacy MODEL_2_* configuration) ─────────────
-    # Artifact:  new-models/ecg_mitbih_single_lead/AuscultICor_v26_SL.keras
+    # Artifact:  new-models/ecg_mitbih_single_lead/single_lead_updated.keras
     # Meta:      new-models/ecg_mitbih_single_lead/label_encoder_SL.pkl
     #
     # Architecture: "AuscultICor_Final" — Functional multi-input, multi-output model
@@ -179,7 +179,7 @@ def _build_registry() -> Dict[str, ModelConfig]:
         enabled=_env_bool("MODEL_2_ENABLED", "true"),
         artifact_path=_env_path(
             "MODEL_2_PATH",
-            str(NEW_MODELS_DIR / "ecg_mitbih_single_lead" / "AuscultICor_v26_SL.keras"),
+            str(NEW_MODELS_DIR / "ecg_mitbih_single_lead" / "single_lead_updated.keras"),
         ),
         aux_paths={
             # label_encoder_SL.pkl stores a metadata dict (mit_classes, n_rr, scale, etc.)
