@@ -545,6 +545,12 @@ class InferenceEngine:
                 batch_inputs = self._build_ecg_inputs(windows)
 
                 raw_preds = self.ecg_model.predict(batch_inputs, verbose=0)
+                if not isinstance(raw_preds, dict):
+                    if len(raw_preds) != len(self.ecg_model.output_names):
+                        raise ValueError(
+                            "ECG model returned an unexpected number of output tensors"
+                        )
+                    raw_preds = dict(zip(self.ecg_model.output_names, raw_preds))
 
                 # class_head → (batch, 5) softmax
                 class_preds = np.array(raw_preds["class_head"])

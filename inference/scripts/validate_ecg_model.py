@@ -58,7 +58,11 @@ def main() -> None:
         "fc_input": np.zeros((1, 500, 1), dtype=np.float32),
     }
     outputs = model(inputs, training=False)
-    assert isinstance(outputs, dict), type(outputs)
+    if not isinstance(outputs, dict):
+        assert len(outputs) == len(model.output_names), (
+            len(outputs), model.output_names
+        )
+        outputs = dict(zip(model.output_names, outputs))
 
     class_head = np.asarray(outputs["class_head"])
     risk_head = np.asarray(outputs["risk_head"])
