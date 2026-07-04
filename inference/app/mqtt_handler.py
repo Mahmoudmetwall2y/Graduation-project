@@ -696,6 +696,7 @@ class MQTTHandler:
             "ecg_peak_to_peak_mv": self._coerce_int(meta.get("ecg_peak_to_peak_mv")),
             "pcg_signal_present": meta.get("pcg_signal_present"),
             "pcg_clipping_detected": meta.get("pcg_clipping_detected"),
+            "pcg_capture_enabled": meta.get("pcg_capture_enabled"),
             "pcg_mean_abs_counts": self._coerce_int(meta.get("pcg_mean_abs_counts")),
             "pcg_peak_to_peak_counts": self._coerce_int(meta.get("pcg_peak_to_peak_counts")),
             "pcg_peak_abs_counts": self._coerce_int(meta.get("pcg_peak_abs_counts")),

@@ -61,7 +61,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 #            This volume is also mounted by the frontend at
 #            /app/public/firmware so Next.js serves the binaries.
 ENV FQBN=esp32:esp32:esp32:PartitionScheme=custom \
-    VERSION=3.1.0 \
+    VERSION=3.1.1 \
     SKETCH_DIR=/AscultiCor_esp32 \
     OUTPUT_DIR=/out
     # ESPTOOL is not needed in this image; AscultiCor uses OTA-first

@@ -159,7 +159,7 @@ services:
       # Output volume shared with the frontend (read-write here)
       - firmware_public:/out
     environment:
-      - VERSION=${ASCULTICOR_FIRMWARE_VERSION:-3.1.0}
+      - VERSION=${ASCULTICOR_FIRMWARE_VERSION:-3.1.1}
     restart: "no"   # one-shot: exits after compilation
 
   # ─────────────────────────────────────────────────────────────

@@ -58,7 +58,7 @@
 #define DEFAULT_MQTT_USER       "asculticor"
 #define DEFAULT_MQTT_PASS       "CHANGE_ME_IN_PRODUCTION"
 #define DEFAULT_BOOTSTRAP_URL   ""
-#define FIRMWARE_VERSION        "3.1.0"
+#define FIRMWARE_VERSION        "3.1.1"
 #define PROVISIONING_AP_PREFIX  "AscultiCor-Setup-"
 
 // Public root CA used to validate the Let's Encrypt certificate presented by
@@ -139,7 +139,7 @@ emyPxgcYxn/eR44/KJ4EBs+lVDR3veyJm+kXQ99b21/+jh5Xos1AnX5iItreGCc=
 #define ECG_LO_MINUS  35    // AD8232 leads-off detection -
 
 #define MIC_PIN       33    // MAX9814 analog output (ADC1_CH5)
-                            // MAX9814 Gain → connect to GND (60dB)
+                            // MAX9814 Gain → leave floating for 60dB
                             // MAX9814 A/R  → leave floating (default attack/release)
 
 #define LED_PIN       2     // On-board LED (status indicator)
@@ -193,6 +193,7 @@ uint16_t activeSessionDurationSec  = DEFAULT_SESSION_DURATION_SEC;
 
 // State
 volatile bool     isStreaming       = false;
+volatile bool     pcgCaptureEnabled = false;
 volatile bool     ecgSampleReady   = false;   // Set by ECG timer ISR
 volatile bool     pcgSampleReady   = false;   // Set by PCG timer ISR
 bool              leadsOff         = false;
@@ -375,11 +376,11 @@ bool buildSessionPreflightReport(SessionPreflightReport *report) {
     appendSessionReason(report->reason, sizeof(report->reason), "PCG clipping detected");
   }
 
+  // ECG is required. PCG is optional: its quality is still reported, but an
+  // unavailable microphone must not block a valid ECG-only session.
   report->passed =
     report->ecg_leads_connected &&
-    report->ecg_signal_present &&
-    report->pcg_signal_present &&
-    !report->pcg_clipping_detected;
+    report->ecg_signal_present;
 
   if (report->passed && report->reason[0] == '\0') {
     strlcpy(report->reason, "ok", sizeof(report->reason));
@@ -1323,7 +1324,7 @@ void setupEcgTimer() {
 //   Reads MAX9814 analog output directly in the ISR.
 //   analogRead() takes ~10 µs on ESP32 — well within the 45 µs period.
 void IRAM_ATTR onPcgTimerISR() {
-  if (!isStreaming) return;
+  if (!isStreaming || !pcgCaptureEnabled) return;
 
   if (pcgBufferStates[pcgWriteBufIdx] != PCG_BUF_FILLING) {
     pcgBufferStates[pcgWriteBufIdx] = PCG_BUF_FILLING;
@@ -1693,6 +1694,7 @@ void publishSessionPreflightMeta(const char *type, const SessionPreflightReport 
   doc["ecg_peak_to_peak_mv"] = report.ecg_peak_to_peak_mv;
   doc["pcg_signal_present"] = report.pcg_signal_present;
   doc["pcg_clipping_detected"] = report.pcg_clipping_detected;
+  doc["pcg_capture_enabled"] = report.pcg_signal_present && !report.pcg_clipping_detected;
   doc["pcg_mean_abs_counts"] = report.pcg_mean_abs_counts;
   doc["pcg_peak_to_peak_counts"] = report.pcg_peak_to_peak_counts;
   doc["pcg_peak_abs_counts"] = report.pcg_peak_abs_counts;
@@ -1790,7 +1792,7 @@ void sendHeartbeat() {
 //  PCG STREAMING (timer-driven, send from main loop)
 // ═══════════════════════════════════════════════════════════════
 void processPcgBuffer() {
-  if (!mqtt.connected()) return;
+  if (!mqtt.connected() || !pcgCaptureEnabled) return;
 
   reportPcgPublishBacklogIfNeeded();
 
@@ -1879,6 +1881,7 @@ void startSession(const char* new_session_id, uint16_t requestedDurationSec) {
 
   ecgBufferIdx = 0;
   resetPcgBufferQueue();
+  pcgCaptureEnabled = false;
   stopSessionRequested = false;
 
   SessionPreflightReport preflightReport;
@@ -1891,8 +1894,19 @@ void startSession(const char* new_session_id, uint16_t requestedDurationSec) {
   }
 
   publishSessionPreflightMeta("preflight_ok", preflightReport);
-  publishSessionMeta("start_pcg");
-  delay(150);
+  pcgCaptureEnabled =
+    preflightReport.pcg_signal_present &&
+    !preflightReport.pcg_clipping_detected;
+
+  if (pcgCaptureEnabled) {
+    publishSessionMeta("start_pcg");
+    delay(150);
+  } else {
+    Serial.printf(
+      "[SESSION] PCG unavailable; continuing in ECG-only mode: %s\n",
+      preflightReport.reason
+    );
+  }
   publishSessionMeta("start_ecg");
 
   streamStartMs = millis();
@@ -1909,14 +1923,19 @@ void endSession() {
   setLedPattern(LED_CONNECTED);
   sessionCooldownUntilMs = millis() + (INTER_SESSION_SEC * 1000UL);
 
-  flushPendingPcgBuffers(250);
-  flushPartialPcgBuffer();
+  if (pcgCaptureEnabled) {
+    flushPendingPcgBuffers(250);
+    flushPartialPcgBuffer();
+  }
   flushPartialEcgBuffer();
   delay(50);
 
-  publishSessionMeta("end_pcg");
-  delay(100);
+  if (pcgCaptureEnabled) {
+    publishSessionMeta("end_pcg");
+    delay(100);
+  }
   publishSessionMeta("end_ecg");
+  pcgCaptureEnabled = false;
   publishDeviceStatus();
   lastDeviceStatusMs = millis();
 

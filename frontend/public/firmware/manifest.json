@@ -1,17 +1,16 @@
 {
   "name": "AscultiCor ESP32 Firmware",
-  "version": "3.1.0",
+  "version": "3.1.1",
   "chipFamily": "ESP32",
   "description": "AscultiCor firmware for ESP32-WROOM-32 with AD8232 ECG, MAX9814 PCG, JSON serial provisioning, NVS storage, bootstrap, MQTT streaming, heartbeat, and preflight support.",
   "ota": {
-    "path": "/firmware/asculticor_esp32_v3.1.0.bin",
+    "path": "/firmware/asculticor_esp32_v3.1.1.bin",
     "sha256": "d14e506b2fcb12821415dcafa71cc6b3f24a243d473c7be00dab28c850e5c696",
     "size": 1140560
   },
   "parts": [
     { "path": "/firmware/bootloader.bin", "offset": 4096 },
     { "path": "/firmware/partitions.bin", "offset": 32768 },
-    { "path": "/firmware/asculticor_esp32_v3.1.0.bin", "offset": 65536 }
+    { "path": "/firmware/asculticor_esp32_v3.1.1.bin", "offset": 65536 }
   ]
 }
-
