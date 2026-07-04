@@ -93,7 +93,7 @@ function buildTraceTransform(samples: number[], profile: SignalProfile): TraceTr
 
     return {
       baseline,
-      gain: clamp(0.92 / peak, 0.85, 18),
+      gain: clamp(0.76 / peak, 0.65, 12),
       softClip: false,
     }
   }
@@ -105,7 +105,7 @@ function buildTraceTransform(samples: number[], profile: SignalProfile): TraceTr
 
   return {
     baseline: median,
-    gain: clamp(0.98 / peak, 0.9, 14),
+    gain: clamp(0.82 / peak, 0.65, 10),
     softClip: true,
   }
 }
@@ -115,6 +115,8 @@ function transformSampleValue(value: number, transform: TraceTransform) {
   if (!transform.softClip) return normalized
   return Math.tanh(normalized * 1.35) / Math.tanh(1.35)
 }
+
+const PLOT_PADDING_Y = 18
 
 export const LiveWaveformMonitor = forwardRef<
   LiveWaveformMonitorHandle,
@@ -375,7 +377,8 @@ export const LiveWaveformMonitor = forwardRef<
     const clampY = (value: number, minAmplitude: number, amplitudeSpan: number, height: number) => {
       const normalized = (value - minAmplitude) / amplitudeSpan
       const clamped = Math.min(1, Math.max(0, normalized))
-      return height - (clamped * height)
+      const drawableHeight = Math.max(1, height - (PLOT_PADDING_Y * 2))
+      return PLOT_PADDING_Y + (1 - clamped) * drawableHeight
     }
 
     const resolveRepresentativeSample = (

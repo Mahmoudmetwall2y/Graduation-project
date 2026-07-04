@@ -2,7 +2,7 @@
 // Shared interfaces for the hierarchical session report components.
 // Model 1: pcg_xgboost_classifier  (Heart State — PCG)
 // Model 2: murmur_severity_cnn     (Functional Analysis — PCG Severity)
-// Model 3: ecg_bilstm_predictor    (Cardiac Rhythm Prediction — ECG)
+// Model 3: ecg_auscultIcor_v26_sl  (Cardiac Rhythm Prediction — ECG)
 
 export interface ReportPrintProps {
   isPrintMode?: boolean
@@ -63,6 +63,11 @@ export interface HierarchicalReport {
   model3?: Model3Data
 }
 
+const MODEL3_NAMES = new Set([
+  'ecg_auscultIcor_v26_sl',
+  'ecg_bilstm_predictor',
+])
+
 /** Extract typed model data from raw predictions array */
 export function extractHierarchicalReport(predictions: Prediction[]): HierarchicalReport {
   const report: HierarchicalReport = {}
@@ -77,7 +82,7 @@ export function extractHierarchicalReport(predictions: Prediction[]): Hierarchic
       if (!report.model2 || new Date(p.created_at) > new Date(report.model2.created_at || '')) {
         report.model2 = { ...p.output_json, created_at: p.created_at }
       }
-    } else if (p.model_name === 'ecg_bilstm_predictor') {
+    } else if (MODEL3_NAMES.has(p.model_name)) {
       if (!report.model3 || new Date(p.created_at) > new Date(report.model3.created_at || '')) {
         report.model3 = { ...p.output_json, created_at: p.created_at }
       }
