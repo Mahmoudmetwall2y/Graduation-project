@@ -16,6 +16,7 @@ import json
 import asyncio
 import concurrent.futures
 import socket
+import threading
 from typing import Dict, Any, Optional
 from datetime import datetime, timedelta, timezone
 import logging
@@ -65,6 +66,8 @@ class SessionBuffer:
         self.started_at = datetime.now(timezone.utc)
         self.last_chunk_at = datetime.now(timezone.utc)
         self.ended = False
+        self.finalization_started = False
+        self._finalization_lock = threading.Lock()
 
         # Metadata
         self.valve_position = config.get('valve_position')
@@ -77,6 +80,15 @@ class SessionBuffer:
         self._last_metrics_samples: int = 0
 
         logger.info(f"Created buffer for {modality} session {session_id}")
+
+    def begin_finalization(self) -> bool:
+        """Atomically claim finalization so duplicate end events are harmless."""
+        with self._finalization_lock:
+            if self.finalization_started:
+                return False
+            self.finalization_started = True
+            self.ended = True
+            return True
 
     # Maximum buffer size: 50 MB (prevents unbounded memory growth)
     MAX_BUFFER_BYTES = 50 * 1024 * 1024
@@ -502,11 +514,11 @@ class MQTTHandler:
             if msg_type == 'start_pcg':
                 self._handle_start_pcg(org_id, device_id, session_id, meta)
             elif msg_type == 'end_pcg':
-                self._schedule_async(self._handle_end_pcg(session_id))
+                self._request_session_finalization(session_id, 'pcg', 'device_end')
             elif msg_type == 'start_ecg':
                 self._handle_start_ecg(org_id, device_id, session_id, meta)
             elif msg_type == 'end_ecg':
-                self._schedule_async(self._handle_end_ecg(session_id))
+                self._request_session_finalization(session_id, 'ecg', 'device_end')
             elif msg_type == 'preflight_ok':
                 self._handle_preflight_result(org_id, device_id, session_id, meta, passed=True)
             elif msg_type == 'preflight_failed':
@@ -523,6 +535,31 @@ class MQTTHandler:
             asyncio.run_coroutine_threadsafe(coro, self.loop)
         else:
             logger.error("Cannot schedule async task: event loop not available")
+
+    def _request_session_finalization(
+        self,
+        session_id: str,
+        modality: str,
+        reason: str,
+    ) -> bool:
+        """Schedule exactly one finalizer for a session modality."""
+        buffer_key = f"{session_id}_{modality}"
+        buffer = self.buffers.get(buffer_key)
+        if not buffer:
+            logger.warning(f"No {modality.upper()} buffer for session {session_id}")
+            return False
+        if not buffer.begin_finalization():
+            logger.info(
+                f"Ignoring duplicate {modality.upper()} finalization for session "
+                f"{session_id} ({reason})"
+            )
+            return False
+
+        logger.info(
+            f"Finalizing {modality.upper()} session {session_id} ({reason})"
+        )
+        self._schedule_async(self._force_end_session(session_id, modality))
+        return True
 
     @staticmethod
     def _coerce_int(value: Any) -> Optional[int]:
@@ -809,6 +846,8 @@ class MQTTHandler:
             return
 
         buffer = self.buffers[buffer_key]
+        if buffer.ended:
+            return
 
         # Check if payload is JSON (fallback format)
         try:
@@ -842,7 +881,7 @@ class MQTTHandler:
 
             if duration >= max_duration:
                 logger.warning(f"{modality.upper()} buffer exceeded max duration, ending session")
-                self._schedule_async(self._force_end_session(session_id, modality))
+                self._request_session_finalization(session_id, modality, 'max_duration')
 
         except Exception as e:
             logger.error(f"Error handling {modality} chunk: {e}")
@@ -898,7 +937,6 @@ class MQTTHandler:
             return
 
         buffer = self.buffers[buffer_key]
-        buffer.ended = True
 
         loop = asyncio.get_running_loop()
 
@@ -1075,7 +1113,6 @@ class MQTTHandler:
             return
 
         buffer = self.buffers[buffer_key]
-        buffer.ended = True
 
         loop = asyncio.get_running_loop()
 
