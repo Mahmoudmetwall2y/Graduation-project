@@ -11,6 +11,7 @@ export interface DeviceProvisioningCredentials {
   mqtt_lan_exposure_enabled: boolean
   mqtt_user: string
   mqtt_pass: string
+  mode?: 'real_hardware' | 'simulator'
 }
 
 export interface ProvisioningBundle {

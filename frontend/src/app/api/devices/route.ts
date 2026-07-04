@@ -331,7 +331,8 @@ export async function POST(request: Request) {
           use_tls: mqttTls,
         },
         mqtt_user: usesPerDeviceMqtt ? mqttUsername : sharedMqttUser!,
-        mqtt_pass: usesPerDeviceMqtt ? mqttPassword : sharedMqttPass!
+        mqtt_pass: usesPerDeviceMqtt ? mqttPassword : sharedMqttPass!,
+        mode: sensor_config?.mode === 'simulator' ? 'simulator' : 'real_hardware'
       }
     }, { status: 201 })
   } catch (error: any) {

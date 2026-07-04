@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import QRCode from 'qrcode'
-import { Check, Copy, Loader2, QrCode, RadioTower, RefreshCw, Wifi } from 'lucide-react'
+import { Check, Copy, Download, Loader2, MonitorPlay, QrCode, RadioTower, RefreshCw, Wifi } from 'lucide-react'
 import type { DeviceProvisioningCredentials } from '../../lib/deviceProvisioning'
 import { resolveBootstrapUrl } from '../../lib/deviceProvisioning'
 
@@ -98,6 +98,74 @@ export function DeviceProvisioningWizard({
     ['Device secret', credentials.device_secret],
     ['Bootstrap URL', bootstrapUrl],
   ]
+
+  const downloadSimulatorConfig = useCallback(() => {
+    const config = {
+      type: 'asculticor-patient-simulator-v1',
+      mqtt_host: credentials.mqtt_host,
+      mqtt_port: credentials.mqtt_port,
+      mqtt_tls: credentials.mqtt_tls,
+      mqtt_user: credentials.mqtt_user,
+      mqtt_pass: credentials.mqtt_pass,
+      org_id: credentials.org_id,
+      device_id: credentials.device_id,
+    }
+    const blob = new Blob([JSON.stringify(config, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = `asculticor-simulator-${credentials.device_id.slice(0, 8)}.json`
+    anchor.click()
+    URL.revokeObjectURL(url)
+  }, [credentials])
+
+  if (credentials.mode === 'simulator') {
+    return (
+      <div className="space-y-5">
+        <div className="text-center">
+          <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10">
+            <MonitorPlay className="h-7 w-7 text-primary" />
+          </div>
+          <h2 className="text-xl font-bold text-foreground">Virtual Patient Created</h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Run the simulator locally, choose a patient case, then start a normal session with this device.
+          </p>
+        </div>
+
+        <div className="grid gap-3 md:grid-cols-3">
+          {[
+            ['1', 'Download config', 'The private file contains this virtual device MQTT identity.'],
+            ['2', 'Run simulator', 'Choose normal, murmur, or a rhythm scenario in the terminal.'],
+            ['3', 'Start a session', 'Select this online device; live ECG and PCG feed the real AI pipeline.'],
+          ].map(([number, title, text]) => (
+            <div key={number} className="rounded-2xl border border-primary/20 bg-primary/5 p-4">
+              <div className="mb-2 flex items-center gap-2 font-semibold text-foreground">
+                <span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary text-xs text-primary-foreground">{number}</span>
+                {title}
+              </div>
+              <p className="text-xs leading-5 text-muted-foreground">{text}</p>
+            </div>
+          ))}
+        </div>
+
+        <section className="rounded-2xl border border-border bg-background/70 p-4">
+          <p className="mb-3 text-sm font-semibold text-foreground">Run from the project directory</p>
+          <pre className="overflow-x-auto rounded-xl bg-black/40 p-4 text-xs leading-6 text-cyan-100">{`python -m venv .venv-simulator\n.\\.venv-simulator\\Scripts\\Activate.ps1\npip install -r simulator\\requirements.txt\npython simulator\\asculticor_patient_simulator.py --config <downloaded-json>`}</pre>
+          <button type="button" onClick={downloadSimulatorConfig} className="btn-primary mt-4 w-full justify-center gap-2">
+            <Download className="h-4 w-4" />
+            Download private simulator configuration
+          </button>
+          <p className="mt-3 text-xs text-amber-300">
+            Keep this file private. It contains an MQTT password and cannot be downloaded again after closing this window.
+          </p>
+        </section>
+
+        <button type="button" onClick={onDone} className="btn-primary w-full justify-center">
+          Finish
+        </button>
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-5">

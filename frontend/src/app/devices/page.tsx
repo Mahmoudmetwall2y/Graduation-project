@@ -133,7 +133,13 @@ export default function DevicesPage() {
       const response = await fetch('/api/devices', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ device_name: newDeviceName, device_type: newDeviceType })
+        body: JSON.stringify({
+          device_name: newDeviceName,
+          device_type: newDeviceType === 'simulator' ? 'custom' : newDeviceType,
+          sensor_config: newDeviceType === 'simulator'
+            ? { mode: 'simulator', modalities: ['ecg', 'pcg'], synthetic: true }
+            : {},
+        })
       })
       if (!response.ok) {
         const errorData = await response.json()
@@ -548,10 +554,11 @@ export default function DevicesPage() {
                           <option value="esp32-c3">ESP32-C3</option>
                         </optgroup>
                         <optgroup label="Custom">
+                          <option value="simulator">Virtual patient simulator (ECG + PCG)</option>
                           <option value="custom">Custom Device</option>
                         </optgroup>
                       </select>
-                      <p className="form-hint">Choose the hardware bundle to generate the correct provisioning details.</p>
+                      <p className="form-hint">Choose hardware, or create a virtual patient for full pipeline testing without sensors.</p>
                     </div>
 
                     {/* Hardware info callout */}
