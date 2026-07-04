@@ -10,7 +10,7 @@
  *    device-specific credentials securely.
  *
  * Architecture:
- *   Hardware Timer 0 → ECG sampling  (AD8232, 500 Hz via ADC)
+ *   FreeRTOS task    → ECG sampling  (AD8232, 500 Hz via ADC)
  *   Hardware Timer 1 → PCG sampling  (MAX9814, 22050 Hz via ADC)
  *   Main loop       → MQTT publish, WiFi, session lifecycle
  *
@@ -58,7 +58,7 @@
 #define DEFAULT_MQTT_USER       "asculticor"
 #define DEFAULT_MQTT_PASS       "CHANGE_ME_IN_PRODUCTION"
 #define DEFAULT_BOOTSTRAP_URL   ""
-#define FIRMWARE_VERSION        "3.1.1"
+#define FIRMWARE_VERSION        "3.1.2"
 #define PROVISIONING_AP_PREFIX  "AscultiCor-Setup-"
 
 // Public root CA used to validate the Let's Encrypt certificate presented by
@@ -110,6 +110,8 @@ emyPxgcYxn/eR44/KJ4EBs+lVDR3veyJm+kXQ99b21/+jh5Xos1AnX5iItreGCc=
 #define PCG_SAMPLE_RATE         22050     // Hz (target / training rate — used for display only)
 #define PCG_ACTUAL_SAMPLE_RATE  (1000000 / 45)  // 22222 Hz — real hardware timer rate
 #define ECG_BUFFER_SIZE         500       // 1 s of ECG samples
+#define ECG_QUEUE_SAMPLES       1024      // Decouple 500 Hz acquisition from MQTT publishing
+#define ECG_DRAIN_BATCH         64        // Bound loop work while catching up after network delays
 #define PCG_CHUNK_SAMPLES       512       // Samples per MQTT chunk
 #define DEFAULT_SESSION_DURATION_SEC 15   // Default recording window
 #define MIN_SESSION_DURATION_SEC  8
@@ -194,7 +196,6 @@ uint16_t activeSessionDurationSec  = DEFAULT_SESSION_DURATION_SEC;
 // State
 volatile bool     isStreaming       = false;
 volatile bool     pcgCaptureEnabled = false;
-volatile bool     ecgSampleReady   = false;   // Set by ECG timer ISR
 volatile bool     pcgSampleReady   = false;   // Set by PCG timer ISR
 bool              leadsOff         = false;
 unsigned long     streamStartMs    = 0;
@@ -215,6 +216,13 @@ uint32_t          lastReportedPcgDropCount = 0;
 // ECG Buffers
 int16_t           ecgBuffer[ECG_BUFFER_SIZE];
 int               ecgBufferIdx     = 0;
+int16_t           ecgSampleQueue[ECG_QUEUE_SAMPLES];
+volatile uint16_t ecgQueueHead      = 0;
+volatile uint16_t ecgQueueTail      = 0;
+volatile uint16_t ecgQueueCount     = 0;
+volatile uint32_t ecgDroppedSamples = 0;
+portMUX_TYPE      ecgQueueMux       = portMUX_INITIALIZER_UNLOCKED;
+TaskHandle_t      ecgSamplingTaskHandle = nullptr;
 
 struct SessionPreflightReport {
   bool passed;
@@ -248,8 +256,7 @@ volatile uint8_t  pcgReadyTail     = 0;
 volatile uint8_t  pcgReadyCount    = 0;
 volatile uint32_t pcgDroppedBuffers = 0;
 
-// Hardware timers
-hw_timer_t       *ecgTimer         = NULL;
+// Hardware timer
 hw_timer_t       *pcgTimer         = NULL;
 
 // ═══════════════════════════════════════════════════════════════
@@ -1302,22 +1309,77 @@ int16_t readEcgSample() {
   return mV;
 }
 
-// ═══════════════════════════════════════════════════════════════
-//  HARDWARE TIMERS (ECG 500 Hz + PCG 22050 Hz)
-// ═══════════════════════════════════════════════════════════════
-
-// --- ECG Timer ISR (500 Hz) ---
-void IRAM_ATTR onEcgTimerISR() {
-  ecgSampleReady = true;
+void resetEcgSampleQueue() {
+  portENTER_CRITICAL(&ecgQueueMux);
+  ecgQueueHead = 0;
+  ecgQueueTail = 0;
+  ecgQueueCount = 0;
+  ecgDroppedSamples = 0;
+  portEXIT_CRITICAL(&ecgQueueMux);
 }
 
-void setupEcgTimer() {
-  // ESP32 Core v3.x API: timerBegin(frequency_hz)
-  // 500 Hz → period = 1/500 s → we configure timer at 1 MHz and alarm every 2000 ticks
-  ecgTimer = timerBegin(1000000);                     // 1 MHz base clock
-  timerAttachInterrupt(ecgTimer, &onEcgTimerISR);     // No edge arg in v3.x
-  timerAlarm(ecgTimer, 2000, true, 0);                // 2000 ticks @ 1MHz = 2ms = 500 Hz
-  Serial.println("[ECG] Hardware timer started: 500 Hz");
+bool hasQueuedEcgSamples() {
+  portENTER_CRITICAL(&ecgQueueMux);
+  bool available = ecgQueueCount > 0;
+  portEXIT_CRITICAL(&ecgQueueMux);
+  return available;
+}
+
+bool popEcgSample(int16_t *sample) {
+  if (!sample) return false;
+
+  bool available = false;
+  portENTER_CRITICAL(&ecgQueueMux);
+  if (ecgQueueCount > 0) {
+    *sample = ecgSampleQueue[ecgQueueHead];
+    ecgQueueHead = (ecgQueueHead + 1) % ECG_QUEUE_SAMPLES;
+    ecgQueueCount--;
+    available = true;
+  }
+  portEXIT_CRITICAL(&ecgQueueMux);
+  return available;
+}
+
+void ecgSamplingTask(void *parameter) {
+  const TickType_t intervalTicks = pdMS_TO_TICKS(1000 / ECG_SAMPLE_RATE);
+  TickType_t nextWake = xTaskGetTickCount();
+
+  for (;;) {
+    vTaskDelayUntil(&nextWake, intervalTicks);
+    if (!isStreaming) continue;
+
+    int16_t sample = readEcgSample();
+    portENTER_CRITICAL(&ecgQueueMux);
+    if (ecgQueueCount < ECG_QUEUE_SAMPLES) {
+      ecgSampleQueue[ecgQueueTail] = sample;
+      ecgQueueTail = (ecgQueueTail + 1) % ECG_QUEUE_SAMPLES;
+      ecgQueueCount++;
+    } else {
+      ecgDroppedSamples++;
+    }
+    portEXIT_CRITICAL(&ecgQueueMux);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  ECG SAMPLING TASK + PCG HARDWARE TIMER
+// ═══════════════════════════════════════════════════════════════
+
+void setupEcgSamplingTask() {
+  BaseType_t created = xTaskCreatePinnedToCore(
+    ecgSamplingTask,
+    "ecg-sampler",
+    4096,
+    nullptr,
+    3,
+    &ecgSamplingTaskHandle,
+    1
+  );
+  if (created != pdPASS) {
+    Serial.println("[ECG] ERROR: Could not start 500 Hz sampling task");
+    return;
+  }
+  Serial.println("[ECG] Dedicated sampling task started: 500 Hz, 1024-sample queue");
 }
 
 // --- PCG Timer ISR (22050 Hz) ---
@@ -1781,6 +1843,7 @@ void sendHeartbeat() {
   doc["uptime_sec"]    = millis() / 1000;
   doc["free_heap"]     = ESP.getFreeHeap();
   doc["leads_off"]     = leadsOff;
+  doc["ecg_dropped_samples"] = ecgDroppedSamples;
   doc["pcg_dropped_buffers"] = pcgDroppedBuffers;
 
   char buf[256];
@@ -1842,26 +1905,30 @@ void processPcgBuffer() {
 //       R-peak detection on the server -- NO firmware changes needed.
 //  No additional channels, no hardware modifications required.
 void processEcgSample() {
-  if (!ecgSampleReady) return;
-  ecgSampleReady = false;
+  int drained = 0;
+  int16_t sample = 0;
 
-  if (!isStreaming) return;
+  while (drained < ECG_DRAIN_BATCH && popEcgSample(&sample)) {
+    ecgBuffer[ecgBufferIdx++] = sample;
+    drained++;
 
-  ecgBuffer[ecgBufferIdx++] = readEcgSample();
+    // Send each complete one-second block while the acquisition task keeps
+    // filling the independent ring buffer.
+    if (ecgBufferIdx >= ECG_BUFFER_SIZE) {
+      char topic[160];
+      buildSessionTopic(topic, sizeof(topic), "ecg");
 
-  // Send when buffer is full (every 1 second)
-  if (ecgBufferIdx >= ECG_BUFFER_SIZE) {
-    char topic[160];
-    buildSessionTopic(topic, sizeof(topic), "ecg");
+      size_t payloadBytes = ECG_BUFFER_SIZE * sizeof(int16_t);
+      if (payloadBytes <= MQTT_BUFFER_BYTES) {
+        if (!mqtt.publish(topic, (byte *)ecgBuffer, payloadBytes, false)) {
+          Serial.println("[ECG] WARNING: MQTT publish failed for full chunk");
+        }
+      } else {
+        Serial.println("[ECG] WARNING: buffer exceeds MQTT limit!");
+      }
 
-    size_t payloadBytes = ECG_BUFFER_SIZE * sizeof(int16_t);
-    if (payloadBytes <= MQTT_BUFFER_BYTES) {
-      mqtt.publish(topic, (byte *)ecgBuffer, payloadBytes, false);
-    } else {
-      Serial.println("[ECG] WARNING: buffer exceeds MQTT limit!");
+      ecgBufferIdx = 0;
     }
-
-    ecgBufferIdx = 0;
   }
 }
 
@@ -1880,6 +1947,7 @@ void startSession(const char* new_session_id, uint16_t requestedDurationSec) {
   Serial.printf("\n[SESSION] ═══ Starting session: %s ═══\n", session_id);
 
   ecgBufferIdx = 0;
+  resetEcgSampleQueue();
   resetPcgBufferQueue();
   pcgCaptureEnabled = false;
   stopSessionRequested = false;
@@ -1922,6 +1990,13 @@ void endSession() {
   isStreaming = false;
   setLedPattern(LED_CONNECTED);
   sessionCooldownUntilMs = millis() + (INTER_SESSION_SEC * 1000UL);
+
+  // Allow an in-flight 2 ms sample to enter the queue, then drain every
+  // acquired ECG sample before publishing the final partial block.
+  delay(3);
+  while (hasQueuedEcgSamples()) {
+    processEcgSample();
+  }
 
   if (pcgCaptureEnabled) {
     flushPendingPcgBuffers(250);
@@ -1998,8 +2073,8 @@ void setup() {
   mqtt.setBufferSize(MQTT_BUFFER_BYTES);
   mqtt.setKeepAlive(MQTT_KEEPALIVE_SEC);
 
-  // Hardware timer for precise ECG sampling (500 Hz)
-  setupEcgTimer();
+  // Dedicated real-time task for ECG sampling (500 Hz)
+  setupEcgSamplingTask();
 
   // Hardware timer for precise PCG sampling (22050 Hz via MAX9814)
   setupPcgTimer();

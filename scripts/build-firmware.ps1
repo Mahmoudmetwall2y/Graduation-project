@@ -1,7 +1,7 @@
 param(
   [string]$Sketch = "firmware/asculticor_esp32/AscultiCor_esp32/AscultiCor_esp32.ino",
   [string]$Fqbn = "esp32:esp32:esp32:PartitionScheme=custom",
-  [string]$Version = "3.1.1"
+  [string]$Version = "3.1.2"
 )
 
 $ErrorActionPreference = "Stop"

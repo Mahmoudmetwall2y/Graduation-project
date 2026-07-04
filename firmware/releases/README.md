@@ -6,7 +6,7 @@ Expected release files:
 
 - `bootloader.bin`
 - `partitions.bin`
-- `asculticor_esp32_v3.1.1.bin`
+- `asculticor_esp32_v3.1.2.bin`
 - `manifest.json`
 
 The dashboard reads `/firmware/manifest.json` from `frontend/public/firmware/manifest.json`.
