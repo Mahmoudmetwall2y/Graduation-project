@@ -156,22 +156,35 @@ def generate_ecg(
     sample_rate: int = ECG_SAMPLE_RATE,
     seed: int = 7,
 ) -> np.ndarray:
-    """Generate a repeatable P-QRS-T waveform as signed 16-bit samples."""
+    """Generate a repeatable P-QRS-T waveform as signed 16-bit samples.
+
+    Scaling contract (aligned with inference pipeline):
+      The MQTT handler normalises all int16 data by dividing by 32 768.  So
+      the int16 values here must be chosen so that after that division the
+      float signal has peaks in the 0.5–0.8 range — the same order of
+      magnitude as real MIT-BIH ECG recordings re-scaled from mV.  The old
+      mV-literal encoding (*950, clip ±1 650) produced peaks of only ±0.05
+      in float, which broke R-peak detection and HRV feature extraction in
+      the inference service.
+    """
     times = np.arange(round(duration_sec * sample_rate), dtype=np.float64) / sample_rate
     phase = cardiac_phase(times, scenario, seed)
     waveform = (
-        0.12 * gaussian(phase, 0.18, 0.028)
-        - 0.18 * gaussian(phase, 0.365, 0.010)
-        + 1.00 * gaussian(phase, 0.400, 0.012)
-        - 0.28 * gaussian(phase, 0.435, 0.014)
-        + 0.32 * gaussian(phase, 0.670, 0.055)
+        0.10 * gaussian(phase, 0.18, 0.026)      # P wave  (~10% of R)
+        - 0.08 * gaussian(phase, 0.365, 0.009)   # Q deflection  (~8% of R, narrow)
+        + 1.00 * gaussian(phase, 0.400, 0.012)   # R peak  (unit amplitude)
+        - 0.12 * gaussian(phase, 0.435, 0.012)   # S deflection  (~12% of R, narrow)
+        + 0.18 * gaussian(phase, 0.670, 0.048)   # T wave  (≤18% of R-peak, mirrors MIT-BIH stats)
     )
     rng = np.random.default_rng(seed)
+    # Baseline wander (0.3 Hz respiratory artefact — same as real Holter)
     baseline = 0.025 * np.sin(2 * np.pi * 0.24 * times)
+    # Gaussian noise at ~1% of R-peak amplitude
     noise = rng.normal(0.0, 0.012, times.size)
-    # Match the ESP32 firmware contract: signed int16 values represent
-    # millivolts centered around zero, not full-scale audio samples.
-    samples = np.clip((waveform + baseline + noise) * 950, -1_650, 1_650)
+    # Scale so that after /32768.0 the R-peak sits at ~0.65 float.
+    # 0.65 * 32768 ≈ 21 299  →  use 21 000 as the int16 scale factor.
+    # Clip at ±25 000 to leave headroom and avoid wrap-around.
+    samples = np.clip((waveform + baseline + noise) * 21_000, -25_000, 25_000)
     return samples.astype("<i2")
 
 
@@ -183,33 +196,62 @@ def pcg_sound_burst(
     width: float,
     frequencies: tuple[float, ...],
 ) -> np.ndarray:
-    """Model-aligned S1/S2 burst: damped 40-180 Hz cardiac energy.
+    """Model-aligned S1/S2 burst: damped 20-400 Hz cardiac energy.
 
     The XGBoost/YAMNet PCG pipeline is trained on 22.05 kHz heart audio that is
-    bandpassed at 20-400 Hz and peak-normalized. Very narrow synthetic impulses
-    or broadband differentiated noise can look like artifacts/murmurs. These
-    bursts deliberately stay in the same physiological band as real S1/S2.
+    bandpassed at 20-400 Hz and peak-normalised. The harmonics here are spread
+    across the full 20-400 Hz physiological band so that YAMNet embeddings land
+    in the same sub-space as real stethoscope recordings. Each successive
+    harmonic is attenuated by 0.55 (mimicking the natural roll-off of real
+    heart-sound resonance chambers).
     """
     distance = circular_distance(phase, center)
     after_sound = (distance >= 0) & (distance < width * 3.4)
     envelope = np.where(after_sound, np.exp(-distance / width), 0.0)
     carrier = np.zeros_like(times)
     for index, frequency in enumerate(frequencies):
-        carrier += (0.65 ** index) * np.sin(2 * np.pi * frequency * times)
+        carrier += (0.55 ** index) * np.sin(2 * np.pi * frequency * times)
     carrier /= max(len(frequencies), 1)
     return amplitude * envelope * carrier
 
 
+def pink_noise(times: np.ndarray, rng: np.random.Generator, amplitude: float = 1.0) -> np.ndarray:
+    """Generate approximate pink (1/f) noise via spectral shaping.
+
+    Pink noise is the dominant background in real stethoscope recordings
+    (body sounds, breathing, room acoustics).  Adding it to the synthetic
+    PCG makes YAMNet embeddings cluster much closer to real PCG data.
+    """
+    n = times.size
+    white = rng.normal(0.0, 1.0, n)
+    fft_white = np.fft.rfft(white)
+    freqs = np.fft.rfftfreq(n)
+    # 1/sqrt(f) power shaping → pink spectrum; avoid DC divide-by-zero
+    freqs[0] = 1.0
+    pink_filter = 1.0 / np.sqrt(freqs)
+    pink_filter[0] = 0.0  # suppress DC
+    fft_pink = fft_white * pink_filter
+    result = np.fft.irfft(fft_pink, n=n)
+    return normalize_peak(result, amplitude)
+
+
 def murmur_band(times: np.ndarray, seed: int) -> np.ndarray:
-    """Deterministic 90-320 Hz murmur texture without out-of-band spikes."""
+    """Deterministic 90-420 Hz murmur texture with stochastic broadband energy.
+
+    Extended from 318 Hz to 420 Hz to match the upper range of real murmur
+    spectral content (CirCor / PhysioNet training data).  The stochastic pink
+    noise component ensures the YAMNet embedding path sees broadband content
+    instead of perfectly periodic tones.
+    """
     rng = np.random.default_rng(seed)
-    frequencies = np.array([92.0, 128.0, 164.0, 211.0, 265.0, 318.0])
+    frequencies = np.array([92.0, 128.0, 164.0, 211.0, 245.0, 265.0, 318.0, 370.0, 420.0])
     phases = rng.uniform(0.0, 2 * np.pi, frequencies.size)
     band = np.zeros_like(times)
     for frequency, phase_offset in zip(frequencies, phases):
         band += np.sin(2 * np.pi * frequency * times + phase_offset)
     band /= frequencies.size
-    band += 0.18 * rng.normal(0.0, 1.0, times.size)
+    # Stochastic broadband component (realistic murmur texture)
+    band += 0.22 * rng.normal(0.0, 1.0, times.size)
     return normalize_peak(band, 1.0)
 
 
@@ -221,30 +263,63 @@ def generate_pcg(
 ) -> np.ndarray:
     """Generate model-aligned S1/S2 sounds and optional murmur energy.
 
-    Output intentionally follows the same contract as the ESP32 firmware:
-    signed int16 PCM at 22 050 Hz. The inference service converts this to
-    float audio and then applies the model training path: 20-400 Hz bandpass,
-    10 s crop/pad, librosa/YAMNet normalization. So the simulator should look
-    like plausible phonocardiogram audio before that preprocessing, not like a
-    visualization-only waveform.
+    Output follows the same contract as the ESP32 firmware: signed int16 PCM
+    at 22 050 Hz.  The inference service then applies the full training-path
+    preprocessing:
+      - Traditional track : /32768 → 20-400 Hz bandpass → pad/crop to 10 s
+                            → librosa.normalize → 200 traditional features
+      - YAMNet track      : /32768 → resample to 16 kHz → crop to 3 s
+                            → peak-normalize → 1024-dim embedding
+
+    Key design choices
+    ------------------
+    S1/S2 frequencies: extended harmonic series up to ~380 Hz so the
+      20-400 Hz bandpass passes all harmonics and the YAMNet embedding path
+      sees physiologically realistic broadband content.
+
+    Pink noise floor: realistic stethoscope background so YAMNet embeddings
+      land in the real-PCG region of the embedding space.  Amplitude is kept
+      low enough that a normal scenario stays clearly below the 0.254 murmur
+      threshold.
+
+    Diastolic murmur decay: exponential rate raised from 2.3 → 3.8 and
+      window end pulled back to 0.870 so the tail is ≤10% amplitude before
+      the next systole starts, preventing mis-classification as combined.
     """
     times = np.arange(round(duration_sec * sample_rate), dtype=np.float64) / sample_rate
     phase = cardiac_phase(times, scenario, seed)
 
     rng = np.random.default_rng(seed)
+
+    # ── S1 and S2 heart sounds ────────────────────────────────────────────────
+    # Harmonics now span 20-380 Hz so the full physiological band is covered
+    # after the 20-400 Hz bandpass filter in the training/inference pipeline.
     waveform = (
-        pcg_sound_burst(times, phase, 0.000, 0.86, 0.028, (42.0, 74.0, 112.0, 155.0))
-        + pcg_sound_burst(times, phase, 0.365, 0.62, 0.024, (56.0, 92.0, 138.0, 176.0))
+        pcg_sound_burst(
+            times, phase, 0.000, 0.86, 0.028,
+            (38.0, 68.0, 105.0, 148.0, 198.0, 255.0, 318.0, 380.0),  # S1
+        )
+        + pcg_sound_burst(
+            times, phase, 0.365, 0.62, 0.024,
+            (52.0, 88.0, 130.0, 175.0, 228.0, 290.0, 352.0),          # S2
+        )
     )
 
+    # ── Murmur window ─────────────────────────────────────────────────────────
     if scenario.murmur_timing == "systolic":
         murmur_window = raised_cosine_window(phase, 0.075, 0.335)
     elif scenario.murmur_timing == "diastolic":
-        murmur_window = raised_cosine_window(phase, 0.440, 0.900) * np.exp(-2.3 * np.clip(phase - 0.440, 0, None))
+        # Faster decay (3.8 vs 2.3) and earlier end (0.870 vs 0.900) so the
+        # tail is < 10% amplitude before the next S1 starts — prevents the
+        # model from seeing combined-murmur energy.
+        murmur_window = (
+            raised_cosine_window(phase, 0.440, 0.870)
+            * np.exp(-3.8 * np.clip(phase - 0.440, 0, None))
+        )
     elif scenario.murmur_timing == "combined":
         murmur_window = np.maximum(
             raised_cosine_window(phase, 0.075, 0.335) * 0.95,
-            raised_cosine_window(phase, 0.440, 0.900) * 0.55,
+            raised_cosine_window(phase, 0.440, 0.870) * 0.55,
         )
     else:
         murmur_window = np.zeros_like(phase)
@@ -252,11 +327,21 @@ def generate_pcg(
     if scenario.murmur_strength > 0:
         waveform += scenario.murmur_strength * 0.34 * murmur_band(times, seed + 91) * murmur_window
 
-    # Low-amplitude acquisition floor: enough for realistic feature extraction,
-    # not enough to dominate YAMNet/traditional features for normal cases.
-    waveform += rng.normal(0.0, 0.0045 if scenario.murmur_timing == "none" else 0.0065, times.size)
+    # ── Realistic stethoscope background (pink noise) ─────────────────────────
+    # Real recordings have a 1/f noise floor from body sounds, breathing, and
+    # room acoustics.  YAMNet was trained on such recordings, so adding pink
+    # noise here pulls the embedding much closer to real PCG data.
+    # Amplitude: 0.010 for normal (safe below 0.254 threshold), 0.015 for
+    # pathological (slightly more contact noise from patient movement).
+    noise_amp = 0.010 if scenario.murmur_timing == "none" else 0.015
+    waveform += pink_noise(times, rng, amplitude=noise_amp)
+
+    # Very small additive white noise for dithering (avoids perfect periodicity)
+    waveform += rng.normal(0.0, 0.004, times.size)
+
     waveform = normalize_peak(waveform, 0.92)
-    samples = np.clip(waveform * 18_000, -21_500, 21_500)
+    # Scale so peaks sit at ~0.84 after /32768.0  (0.92 * 30 000 / 32 768 ≈ 0.84)
+    samples = np.clip(waveform * 30_000, -31_500, 31_500)
     return samples.astype("<i2")
 
 
@@ -270,7 +355,10 @@ class AscultiCorSimulator:
         self.streaming_event = threading.Event()
         self.session_lock = threading.Lock()
         self.session_thread: threading.Thread | None = None
-        self.client = mqtt.Client(client_id=f"AscultiCor-Simulator-{config.device_id}")
+        self.client = mqtt.Client(
+            client_id=f"AscultiCor-Simulator-{config.device_id}",
+            clean_session=True,   # always clears zombie sessions on broker side
+        )
         self.client.username_pw_set(config.mqtt_user, config.mqtt_pass)
         if config.mqtt_tls:
             self.client.tls_set_context(ssl.create_default_context())
@@ -283,9 +371,16 @@ class AscultiCorSimulator:
         return f"org/{self.config.org_id}/device/{self.config.device_id}"
 
     def publish_json(self, topic: str, value: dict[str, Any], qos: int = 1, retain: bool = False) -> None:
+        """Publish a JSON payload. Logs a warning on transient disconnect instead of raising.
+
+        rc=4 (MQTT_ERR_NO_CONN) and rc=7 (MQTT_ERR_CONN_LOST) happen when the
+        broker drops us mid-session (e.g. duplicate client-ID takeover).  The
+        paho reconnect loop will restore the connection; raising here would kill
+        the entire process for a transient network event.
+        """
         result = self.client.publish(topic, json.dumps(value, separators=(",", ":")), qos=qos, retain=retain)
         if result.rc != mqtt.MQTT_ERR_SUCCESS:
-            raise RuntimeError(f"MQTT publish failed for {topic}: rc={result.rc}")
+            print(f"[MQTT] publish skipped for {topic}: rc={result.rc} (reconnecting)", file=sys.stderr)
 
     def status_payload(self, status: str = "online", streaming: bool = False) -> dict[str, Any]:
         return {
@@ -324,7 +419,10 @@ class AscultiCorSimulator:
 
         if command.get("command") == "start":
             session_id = str(command.get("session_id") or "")
-            duration = max(8, min(60, int(command.get("duration_sec") or 15)))
+            # Minimum 12 s: the PCG traditional-feature path pads/crops to
+            # exactly 10 s. At 8 s, 2 s of zeros would be appended, skewing
+            # MFCC statistics vs. training data (always ≥ 10 s recordings).
+            duration = max(12, min(60, int(command.get("duration_sec") or 15)))
             if not session_id:
                 print("[CONTROL] Start command is missing session_id", file=sys.stderr)
                 return
@@ -432,7 +530,10 @@ class AscultiCorSimulator:
         except Exception as exc:
             print(f"[SESSION] Streaming failed: {exc}", file=sys.stderr)
         finally:
-            self.publish_json(f"{self.topic_base}/status", self.status_payload(), retain=True)
+            try:
+                self.publish_json(f"{self.topic_base}/status", self.status_payload(), retain=True)
+            except Exception:
+                pass
             self.streaming_event.clear()
             self.stop_event.clear()
 
@@ -441,9 +542,12 @@ class AscultiCorSimulator:
         self.client.will_set(f"{self.topic_base}/status", offline, qos=1, retain=True)
         print(f"[SIMULATOR] Scenario: {self.scenario.title} ({self.scenario.key})")
         print(f"[MQTT] Connecting to {self.config.mqtt_host}:{self.config.mqtt_port} TLS={self.config.mqtt_tls}")
-        self.client.connect(self.config.mqtt_host, self.config.mqtt_port, keepalive=30)
+        self.client.connect(self.config.mqtt_host, self.config.mqtt_port, keepalive=60)
         self.client.loop_start()
         try:
+            # Give the broker a moment to expire any previous session with the
+            # same client-ID before we start sending retained status messages.
+            time.sleep(3)
             while True:
                 time.sleep(10)
                 if self.client.is_connected():
@@ -456,12 +560,15 @@ class AscultiCorSimulator:
             print("\n[SIMULATOR] Stopping...")
         finally:
             self.stop_event.set()
-            if self.client.is_connected():
-                self.publish_json(
-                    f"{self.topic_base}/status",
-                    self.status_payload(status="offline"),
-                    retain=True,
-                )
+            try:
+                if self.client.is_connected():
+                    self.publish_json(
+                        f"{self.topic_base}/status",
+                        self.status_payload(status="offline"),
+                        retain=True,
+                    )
+            except Exception:
+                pass
             self.client.disconnect()
             self.client.loop_stop()
 
