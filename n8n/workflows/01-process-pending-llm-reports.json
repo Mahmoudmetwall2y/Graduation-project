@@ -34,18 +34,18 @@
     },
     {
       "parameters": {
-        "url": "={{(($env.ASCULTICOR_APP_URL || 'http://frontend:3000').replace(/\\/+$/, '')) + '/api/llm?action=process-pending'}}",
+        "url": "={{(($env.ASCULTICOR_APP_URL || 'http://frontend:3000').replace(/\\/+$/, '')) + '/api/llm?action=process-pending&include_email_payloads=1'}}",
         "options": {},
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
             {
               "name": "Host",
-              "value": "={{$env.ASCULTICOR_INTERNAL_HOST_HEADER || ($env.ASCULTICOR_PUBLIC_APP_URL || 'https://srv1621744.hstgr.cloud').replace(/^https?:\\/\\//, '').replace(/\\/.*$/, '')}}"
+              "value": "={{$env.ASCULTICOR_INTERNAL_HOST_HEADER || ($env.ASCULTICOR_PUBLIC_APP_URL || 'http://frontend:3000').replace(/^https?:\\/\\//, '').replace(/\\/.*$/, '')}}"
             },
             {
               "name": "X-Forwarded-Host",
-              "value": "={{$env.ASCULTICOR_INTERNAL_HOST_HEADER || ($env.ASCULTICOR_PUBLIC_APP_URL || 'https://srv1621744.hstgr.cloud').replace(/^https?:\\/\\//, '').replace(/\\/.*$/, '')}}"
+              "value": "={{$env.ASCULTICOR_INTERNAL_HOST_HEADER || ($env.ASCULTICOR_PUBLIC_APP_URL || 'http://frontend:3000').replace(/^https?:\\/\\//, '').replace(/\\/.*$/, '')}}"
             },
             {
               "name": "X-Forwarded-Proto",
@@ -64,30 +64,79 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        300,
+        260,
         80
       ],
-      "alwaysOutputData": true
+      "alwaysOutputData": true,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
     },
     {
       "parameters": {
-        "jsCode": "const emails = Array.isArray($json.emails) ? $json.emails : [];\n\nreturn emails\n  .filter((item) => item && item.emailTo && item.emailSubject && item.emailText)\n  .map((item) => ({\n    json: {\n      emailFrom: item.emailFrom || '',\n      emailTo: item.emailTo,\n      emailSubject: item.emailSubject,\n      emailText: item.emailText,\n    },\n  }));\n"
+        "jsCode": "if (!$json || typeof $json !== 'object' || Array.isArray($json)) {\n  throw new Error('The AscultiCor report worker returned an invalid response payload');\n}\n\nfor (const field of ['processed', 'failed', 'skipped']) {\n  if (!Number.isFinite(Number($json[field] ?? 0))) {\n    throw new Error(`The report worker returned an invalid ${field} count`);\n  }\n}\n\nconst emails = Array.isArray($json.emails) ? $json.emails : [];\nreturn [{\n  json: {\n    emails,\n    emailCount: emails.length,\n    processed: Number($json.processed || 0),\n    failed: Number($json.failed || 0),\n    skipped: Number($json.skipped || 0),\n    automaticallyQueued: Number($json.automatically_queued || 0),\n    checkedAt: new Date().toISOString(),\n  },\n}];\n"
+      },
+      "id": "473efb45-e621-56f5-b566-2de4d6832f48",
+      "name": "Validate Queue Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        500,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "06296c5a-53d9-56dc-b7cd-9539ad7bf88f",
+              "leftValue": "={{$json.emailCount}}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "dc0d6c9b-4705-56d7-a6e3-6af9544fae96",
+      "name": "Emails Ready?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        740,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const emails = Array.isArray($json.emails) ? $json.emails : [];\nconst seen = new Set();\nconst prepared = [];\n\nfor (const item of emails) {\n  if (!item || typeof item !== 'object') continue;\n  const recipient = String(item.emailTo || '').trim().toLowerCase();\n  const subject = String(item.emailSubject || '').trim();\n  const text = String(item.emailText || '').trim();\n  if (!recipient || !recipient.includes('@') || !subject || !text) continue;\n\n  const dedupeKey = `${item.reportId || item.sessionId || subject}:${recipient}`;\n  if (seen.has(dedupeKey)) continue;\n  seen.add(dedupeKey);\n\n  prepared.push({\n    json: {\n      emailFrom: item.emailFrom || '',\n      emailTo: recipient,\n      emailSubject: subject,\n      emailText: text,\n      emailHtml: item.emailHtml || `<pre style=\"white-space:pre-wrap;font-family:Arial,sans-serif\">${text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</pre>`,\n      reportId: item.reportId || null,\n      sessionId: item.sessionId || null,\n      priority: item.priority === 'review' ? 'review' : 'routine',\n      preparedAt: new Date().toISOString(),\n    },\n  });\n}\n\nif (emails.length > 0 && prepared.length === 0) {\n  throw new Error('Report emails were returned, but none passed recipient and payload validation');\n}\n\nreturn prepared;\n"
       },
       "id": "6889d1d8-4f24-5535-b871-6d112b5f91dd",
       "name": "Prepare LLM Report Emails",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        600,
-        80
+        980,
+        0
       ]
     },
     {
       "parameters": {
         "sendTo": "={{$json.emailTo}}",
         "subject": "={{$json.emailSubject}}",
-        "message": "={{$json.emailText}}",
-        "emailType": "text",
+        "message": "={{$json.emailHtml}}",
+        "emailType": "html",
         "options": {
           "appendAttribution": false
         }
@@ -97,8 +146,22 @@
       "type": "n8n-nodes-base.gmail",
       "typeVersion": 2.1,
       "position": [
-        900,
-        80
+        1230,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {},
+      "id": "e7027e94-7bf9-5c06-8f35-dd8aab54a4f4",
+      "name": "No Emails Needed",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        980,
+        180
       ]
     }
   ],
@@ -129,7 +192,36 @@
       "main": [
         [
           {
+            "node": "Validate Queue Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Queue Result": {
+      "main": [
+        [
+          {
+            "node": "Emails Ready?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Emails Ready?": {
+      "main": [
+        [
+          {
             "node": "Prepare LLM Report Emails",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "No Emails Needed",
             "type": "main",
             "index": 0
           }

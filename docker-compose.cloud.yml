@@ -1,4 +1,12 @@
 services:
+  inference:
+    environment:
+      - MODEL_2_PATH=/new-models/ecg_mitbih_single_lead/single_lead_updated.keras
+      - MODEL_2_META_PATH=/new-models/ecg_mitbih_single_lead/label_encoder_SL.pkl
+      - MODEL_2_VERSION=v26.1.0
+      - ECG_SAMPLE_RATE=125
+      - ECG_WINDOW_SIZE=500
+
   nginx:
     ports:
       - "${NGINX_N8N_ALT_HTTP_BIND_ADDRESS:-127.0.0.1}:${NGINX_N8N_ALT_HTTP_PORT:-8081}:8081"
@@ -30,7 +38,7 @@ services:
       - N8N_PORT=5678
       - N8N_EDITOR_BASE_URL=${N8N_EDITOR_BASE_URL:-http://localhost:5678}
       - N8N_PROXY_HOPS=${N8N_PROXY_HOPS:-1}
-      - N8N_PUSH_BACKEND=${N8N_PUSH_BACKEND:-sse}
+      - N8N_PUSH_BACKEND=${N8N_PUSH_BACKEND:-websocket}
       - N8N_BLOCK_ENV_ACCESS_IN_NODE=${N8N_BLOCK_ENV_ACCESS_IN_NODE:-false}
       - WEBHOOK_URL=${N8N_WEBHOOK_URL:-http://localhost:5678/}
       - GENERIC_TIMEZONE=${GENERIC_TIMEZONE:-Africa/Cairo}
@@ -65,6 +73,16 @@ services:
       mosquitto:
         condition: service_healthy
     restart: unless-stopped
+
+  frontend:
+    environment:
+      - MQTT_COMMAND_BROKER_URL=mqtt://mosquitto:1883
+      - MQTT_PUBLIC_HOST=${MQTT_TLS_PUBLIC_HOST:-asculticor.mahmoudmetwall2y.online}
+      - DEVICE_BOOTSTRAP_MQTT_HOST=${MQTT_TLS_PUBLIC_HOST:-asculticor.mahmoudmetwall2y.online}
+      - DEVICE_BOOTSTRAP_MQTT_PORT=8883
+      - DEVICE_BOOTSTRAP_MQTT_TLS=true
+      - MQTT_PUBLIC_PORT=8883
+      - MQTT_PUBLIC_USE_TLS=true
 
 volumes:
   n8n_data:

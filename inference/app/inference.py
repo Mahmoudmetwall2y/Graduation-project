@@ -1,11 +1,23 @@
 """
-ML Inference Engine with Demo Mode support.
-Loads trained models from training output directories.
-Falls back to deterministic mocks if models are missing.
+ML Inference Engine with Model Registry integration.
+
+Loads trained models using the central ModelRegistry (model_registry.py).
+Each model is loaded independently — a failed or disabled model never
+prevents the remaining models from working.
+
+Model slots
+-----------
+  Model 1 – pcg_xgboost   : XGBoost PCG heart-sound classifier (ACTIVE)
+  Tier 2 – severity_cnn   : Functional murmur characterization (ACTIVE)
+  Tier 3 – ecg_bilstm     : ECG prognosis — single-lead, multi-head (ACTIVE)
+
+Falls back to deterministic demo mode if all enabled models fail to load
+and ENABLE_DEMO_MODE=true.
 """
 
 import os
 import json
+import pickle
 import numpy as np
 from typing import Dict, Any, Optional
 import logging
@@ -17,247 +29,413 @@ from .preprocessing import (
     PCGPreprocessor,
     PCGSeverityPreprocessor,
     ECGPreprocessor,
-    get_preprocessing_version
+    get_preprocessing_version,
+)
+from .model_registry import (
+    MODEL_REGISTRY,
+    get_model_config,
+    list_active_models,
+    list_pending_models,
 )
 
 logger = logging.getLogger(__name__)
 
-# ─── Model directories (match training script outputs) ────────────────────────
-PROJECT_ROOT = Path(__file__).parent.parent.parent  # cardiosense/
-MODELS_DIR   = Path(os.getenv("MODELS_DIR", PROJECT_ROOT / "models"))
-
-# Model 1: XGBoost heart sound classifier
-PCG_MODEL_DIR     = MODELS_DIR / "model1_xgboost"
-PCG_MODEL_PATH    = PCG_MODEL_DIR / "xgboost_model.pkl"
-PCG_ENCODER_PATH  = PCG_MODEL_DIR / "label_encoder.pkl"
-PCG_SCALER_PATH   = PCG_MODEL_DIR / "scaler.pkl"
-
-# Model 2: CNN murmur severity (multi-output)
-SEVERITY_MODEL_DIR  = MODELS_DIR / "model2_cnn_severity"
-SEVERITY_MODEL_PATH = SEVERITY_MODEL_DIR / "best_model.keras"
-SEVERITY_CONFIG_PATH = SEVERITY_MODEL_DIR / "config.json"
-
-# Model 3: BiLSTM ECG arrhythmia predictor
-ECG_MODEL_DIR     = MODELS_DIR / "model3_bilstm_ecg"
-ECG_MODEL_PATH    = ECG_MODEL_DIR / "bilstm_model.keras"
-ECG_ENCODER_PATH  = ECG_MODEL_DIR / "label_encoder.pkl"
-ECG_CONFIG_PATH   = ECG_MODEL_DIR / "config.json"
-
-# ─── ECG beat-type → AAMI 5-class mapping ─────────────────────────────────────
-# Training uses 7 individual beat types from MIT-BIH.
-# We map them to the standard AAMI 5-class scheme for clinical reporting.
-BEAT_TO_AAMI = {
-    'N': 'Normal',
-    'L': 'Normal',      # LBBB → superset Normal
-    'R': 'Normal',      # RBBB → superset Normal
-    'A': 'SVEB',        # Atrial premature → Supraventricular ectopic
-    'V': 'VEB',         # PVC → Ventricular ectopic
-    'F': 'Fusion',      # Fusion beat
-    '/': 'Unknown',     # Paced beat → Unknown/other
+# ─── AAMI beat-type mapping (kept for backwards-compat demo mode) ─────────────
+# The Tier 3 ECG model uses its own embedded beat_map; this is only for legacy demo mode.
+_LEGACY_BEAT_TO_AAMI = {
+    "N": "Normal", "L": "Normal", "R": "Normal",
+    "A": "SVEB", "V": "VEB", "F": "Fusion", "/": "Unknown",
 }
 
 
 class InferenceEngine:
     """
-    Main inference engine that orchestrates all 3 models.
-    
-    Graceful degradation: each model loads independently — if one model
-    file is missing or fails to load, the other models still work.
-    The service will start as long as at least one model is available
-    (or demo mode is enabled).
+    Orchestrates all model slots defined in model_registry.MODEL_REGISTRY.
+
+    Design principles
+    -----------------
+    * Each model loads in its own try/except — a broken artifact never
+      prevents other models from loading.
+    * Disabled/pending models are silently skipped; their absence is
+      never a fatal error.
+    * Enabled models with a missing artifact ARE logged as errors, and the
+      system falls back to demo mode if all enabled models fail.
+    * Demo mode remains fully functional for offline development.
+
+    Tier 2 functional analysis is loaded from its PyTorch state_dict independently.
     """
 
     def __init__(self, enable_demo_mode: bool = True):
         self.enable_demo_mode = enable_demo_mode
         self.demo_mode_active = False
 
-        # Per-model availability tracking
-        self.model_status = {
-            'pcg_xgboost': {'loaded': False, 'error': None},
-            'severity_cnn': {'loaded': False, 'error': None},
-            'ecg_bilstm': {'loaded': False, 'error': None},
+        # Per-model runtime status (populated by _load_models)
+        self.model_status: Dict[str, Dict[str, Any]] = {
+            key: {"loaded": False, "error": None, "enabled": cfg.enabled, "pending": not cfg.enabled}
+            for key, cfg in MODEL_REGISTRY.items()
         }
 
-        # Initialize preprocessors from environment so deployment config can
-        # tune capture windows without code edits.
-        pcg_sample_rate = int(os.getenv("PCG_SAMPLE_RATE", 22050))
-        pcg_target_duration = float(os.getenv("PCG_TARGET_DURATION", 10))
-        ecg_sample_rate = int(os.getenv("ECG_SAMPLE_RATE", 360))
-        ecg_window_size = int(os.getenv("ECG_WINDOW_SIZE", 300))
+        # ── Model 1: PCG XGBoost ──────────────────────────────────────────────
+        self.pcg_model = None
+        self.pcg_scaler = None
+        self.pcg_label_encoder = None   # sklearn LabelEncoder (optional)
+        self.pcg_classes: list = []     # resolved class list
+
+        # ── Tier 3: ECG Prognosis ────────────────────────────────────────────
+        self.ecg_model = None
+        self.ecg_meta: Dict[str, Any] = {}   # metadata dict from label_encoder.pkl
+        self.ecg_classes: list = []          # resolved class list
+
+        # ── Tier 2: Functional Murmur Characterization ──────────────────────
+        self.severity_model = None
+        self.severity_device = None
+
+        # ── Signal preprocessors ─────────────────────────────────────────────
+        pcg_sr = int(os.getenv("PCG_SAMPLE_RATE", 22050))
+        pcg_dur = float(os.getenv("PCG_TARGET_DURATION", 10))
+
+        # ECG parameters for AuscultICor v26 SL:
+        #   sample_rate = 125 Hz  (MIT-BIH training rate)
+        #   window_size = 500     (samples per beat window)
+        # NOTE: Changing these requires retraining the model.
+        ecg_sr = int(os.getenv("ECG_SAMPLE_RATE", 125))
+        ecg_ws = int(os.getenv("ECG_WINDOW_SIZE", 500))
         self.ecg_max_windows = int(os.getenv("ECG_MAX_WINDOWS", 12))
 
         self.pcg_preprocessor = PCGPreprocessor(
-            sample_rate=pcg_sample_rate,
-            target_duration=pcg_target_duration,
-        )
-        self.severity_preprocessor = PCGSeverityPreprocessor(
-            sample_rate=pcg_sample_rate,
+            sample_rate=pcg_sr,
+            target_duration=pcg_dur,
         )
         self.ecg_preprocessor = ECGPreprocessor(
-            sample_rate=ecg_sample_rate,
-            window_size=ecg_window_size,
+            sample_rate=ecg_sr,
+            window_size=ecg_ws,
         )
 
-        # Placeholders for models and artifacts
-        self.pcg_model = None
-        self.pcg_label_encoder = None
-        self.pcg_scaler = None
-        self.severity_model = None
-        self.severity_encoders = {}
-        self.severity_config = {}
-        self.ecg_model = None
-        self.ecg_label_encoder = None
-        self.ecg_config = {}
+        self.severity_preprocessor = PCGSeverityPreprocessor(sample_rate=pcg_sr)
 
-        # Load models (each independently)
+        # Load all enabled models
         self._load_models()
+        self._finalize_mode()
 
-        loaded_count = sum(1 for s in self.model_status.values() if s['loaded'])
-        total = len(self.model_status)
-        logger.info(
-            f"InferenceEngine initialized: {loaded_count}/{total} models loaded, "
-            f"demo_mode={self.demo_mode_active}"
-        )
+    # ─── Status ───────────────────────────────────────────────────────────────
 
     def get_model_status(self) -> Dict[str, Any]:
-        """Return per-model availability for the health endpoint."""
-        loaded = sum(1 for s in self.model_status.values() if s['loaded'])
+        """Return per-model availability for the /health endpoint."""
+        loaded = sum(1 for s in self.model_status.values() if s["loaded"])
+        active = sum(1 for s in self.model_status.values() if s["enabled"])
         return {
-            'models_loaded': loaded,
-            'models_total': len(self.model_status),
-            'demo_mode': self.demo_mode_active,
-            'details': {
+            "models_loaded": loaded,
+            "models_active": active,
+            "models_total": len(self.model_status),
+            "demo_mode": self.demo_mode_active,
+            "details": {
                 name: {
-                    'loaded': info['loaded'],
-                    'error': info['error'],
+                    "loaded": info["loaded"],
+                    "enabled": info["enabled"],
+                    "pending": info["pending"],
+                    "error": info["error"],
                 }
                 for name, info in self.model_status.items()
             },
         }
 
+    # ─── Model Loading ────────────────────────────────────────────────────────
+
     def _load_models(self):
         """
-        Load ML models with per-model isolation.
-        
-        Each model loads in its own try/except so that a missing or broken
-        model file never prevents the remaining models from loading.
-        If ALL models fail and demo mode is enabled, falls back to demo.
-        If ALL models fail and demo mode is disabled, raises.
+        Load all enabled model slots from the registry.
+        Each slot is independent — failure in one never blocks the others.
+        Disabled/pending slots are skipped with an info log.
         """
-        import joblib  # import once
+        self._load_pcg_model()
+        self._load_ecg_model()
+        self._load_severity_model()
 
-        # ── Model 1: XGBoost PCG classifier ─────────────────
+        # Log pending slots explicitly
+        for cfg in list_pending_models():
+            logger.info(
+                f"[Model Slot] '{cfg.key}' is PENDING/DISABLED — "
+                f"version={cfg.version}. {cfg.notes}"
+            )
+            self.model_status[cfg.key]["pending"] = True
+
+    def _load_pcg_model(self):
+        """Load Model 1: XGBoost PCG heart sound classifier."""
+        import joblib
+
+        cfg = get_model_config("pcg_xgboost")
+        if not cfg.enabled:
+            logger.info("[Model 1] pcg_xgboost is disabled — skipping.")
+            return
+
         try:
-            if not PCG_MODEL_PATH.exists():
-                raise FileNotFoundError(f"PCG model not found: {PCG_MODEL_PATH}")
-            
-            self.pcg_model = joblib.load(PCG_MODEL_PATH)
-            logger.info(f"Loaded PCG model from {PCG_MODEL_PATH}")
+            if cfg.artifact_path is None or not cfg.artifact_path.exists():
+                raise FileNotFoundError(
+                    f"Model 1 (XGBoost) artifact not found at: {cfg.artifact_path}. "
+                    "Set MODEL_1_PATH in your .env file."
+                )
 
-            if PCG_ENCODER_PATH.exists():
-                self.pcg_label_encoder = joblib.load(PCG_ENCODER_PATH)
-                logger.info(f"Loaded PCG label encoder ({list(self.pcg_label_encoder.classes_)})")
+            self.pcg_model = joblib.load(cfg.artifact_path)
+            logger.info(f"[Model 1] Loaded XGBoost model from {cfg.artifact_path}")
 
-            if PCG_SCALER_PATH.exists():
-                self.pcg_scaler = joblib.load(PCG_SCALER_PATH)
-                logger.info("Loaded PCG feature scaler")
+            # Optional: load scaler
+            scaler_path = cfg.aux_paths.get("scaler")
+            if scaler_path and scaler_path.exists():
+                self.pcg_scaler = joblib.load(scaler_path)
+                logger.info(f"[Model 1] Loaded PCG scaler from {scaler_path}")
+            else:
+                logger.warning(
+                    f"[Model 1] No scaler found at {scaler_path}. "
+                    "Predictions will proceed without feature scaling."
+                )
 
-            self.model_status['pcg_xgboost'] = {'loaded': True, 'error': None}
+            # Optional: load label encoder (sklearn LabelEncoder)
+            encoder_path = cfg.aux_paths.get("encoder")
+            if encoder_path and encoder_path.exists():
+                self.pcg_label_encoder = joblib.load(encoder_path)
+                self.pcg_classes = list(self.pcg_label_encoder.classes_)
+                logger.info(f"[Model 1] Loaded PCG label encoder: {self.pcg_classes}")
+            else:
+                # Use the confirmed default 3-class list
+                self.pcg_classes = cfg.label_mapping.get(
+                    "default_classes", ["normal", "murmur", "artifact"]
+                )
+                logger.info(
+                    f"[Model 1] No label encoder found — using default classes: {self.pcg_classes}"
+                )
 
-        except Exception as e:
-            logger.warning(f"Model 1 (PCG XGBoost) unavailable: {e}")
-            self.model_status['pcg_xgboost'] = {'loaded': False, 'error': str(e)}
+            self.model_status["pcg_xgboost"] = {
+                "loaded": True, "error": None,
+                "enabled": True, "pending": False,
+            }
+            logger.info(f"[Model 1] pcg_xgboost loaded successfully (version={cfg.version})")
 
-        # ── Model 2: CNN murmur severity ────────────────────
+        except Exception as exc:
+            err = str(exc)
+            logger.error(f"[Model 1] pcg_xgboost FAILED to load: {err}")
+            self.model_status["pcg_xgboost"] = {
+                "loaded": False, "error": err,
+                "enabled": True, "pending": False,
+            }
+
+    def _load_ecg_model(self):
+        """
+        Load Tier 3: ECG prognosis (AuscultICor v26 SL, single-lead, multi-head).
+
+        Input signature (v26):
+            ecg_input : (batch, 500, 1)  — single-lead ECG @ 125 Hz
+            rr_input  : (batch, 9)       — 9 HRV features (computed server-side)
+            fc_input  : (batch, 500, 1)  — forecast context (zeros at inference)
+
+        Output heads:
+            class_head : (batch, 5) softmax — arrhythmia class
+            risk_head  : (batch, 1) sigmoid — binary cardiac risk (PTB-trained)
+            fc_out     : (batch, 500, 1)     — auxiliary, unused at inference
+
+        The production artifact contains no Lambda/Python-bytecode layers and
+        must load with Keras safe deserialization enabled.
+        """
+        cfg = get_model_config("ecg_bilstm")
+        if not cfg.enabled:
+            logger.info("[Tier 3 · ECG Prognosis] ecg_bilstm is disabled — skipping.")
+            return
+
         try:
-            if not SEVERITY_MODEL_PATH.exists():
-                raise FileNotFoundError(f"Severity model not found: {SEVERITY_MODEL_PATH}")
-            
+            if cfg.artifact_path is None or not cfg.artifact_path.exists():
+                raise FileNotFoundError(
+                    f"Tier 3 ECG prognosis artifact not found at: {cfg.artifact_path}. "
+                    "Set MODEL_2_PATH in your .env file."
+                )
+
             from tensorflow import keras
-            self.severity_model = keras.models.load_model(str(SEVERITY_MODEL_PATH))
-            logger.info(f"Loaded Severity model from {SEVERITY_MODEL_PATH}")
+            # Inference does not need the optimizer or training-only custom
+            # losses. Skipping compilation also keeps exported models portable
+            # when those Python loss functions are not present in production.
+            self.ecg_model = keras.models.load_model(
+                str(cfg.artifact_path), compile=False
+            )
+            self._validate_ecg_model_contract()
+            logger.info(f"[Tier 3 · ECG Prognosis] Loaded model from {cfg.artifact_path}")
 
-            # Load per-head label encoders
-            for pkl in SEVERITY_MODEL_DIR.glob("encoder_*.pkl"):
-                key = pkl.stem.replace("encoder_", "")
-                self.severity_encoders[key] = joblib.load(pkl)
-            logger.info(f"Loaded {len(self.severity_encoders)} severity encoders")
+            # Load metadata dict (label_encoder_SL.pkl)
+            meta_path = cfg.aux_paths.get("meta")
+            if meta_path and meta_path.exists():
+                with open(meta_path, "rb") as f:
+                    self.ecg_meta = pickle.load(f)
+                logger.info(f"[Tier 3 · ECG Prognosis] Loaded metadata: {list(self.ecg_meta.keys())}")
+            else:
+                logger.warning(
+                    f"[Tier 3 · ECG Prognosis] No metadata file at {meta_path}. "
+                    "Using registry label mapping as fallback."
+                )
 
-            # Load config
-            if SEVERITY_CONFIG_PATH.exists():
-                with open(SEVERITY_CONFIG_PATH) as f:
-                    self.severity_config = json.load(f)
+            # Resolve class list: prefer embedded metadata, fall back to registry
+            mit_classes = self.ecg_meta.get("mit_classes", {})
+            if mit_classes:
+                # Convert {0: 'Normal', ...} → ['Normal', 'SVEB', ...]
+                self.ecg_classes = [
+                    mit_classes[i] for i in sorted(mit_classes.keys())
+                ]
+            else:
+                self.ecg_classes = cfg.label_mapping.get(
+                    "classes", ["Normal", "SVEB", "VEB", "Fusion", "Unknown"]
+                )
+            logger.info(f"[Tier 3 · ECG Prognosis] Classes: {self.ecg_classes}")
 
-            self.model_status['severity_cnn'] = {'loaded': True, 'error': None}
+            self.model_status["ecg_bilstm"] = {
+                "loaded": True, "error": None,
+                "enabled": True, "pending": False,
+            }
+            logger.info(
+                f"[Tier 3 · ECG Prognosis] AuscultICor v26 SL loaded successfully (version={cfg.version}). "
+                "Single-lead mode — compatible with AD8232 3-electrode PCB. "
+                "RR features computed server-side."
+            )
 
-        except Exception as e:
-            logger.warning(f"Model 2 (Severity CNN) unavailable: {e}")
-            self.model_status['severity_cnn'] = {'loaded': False, 'error': str(e)}
+        except Exception as exc:
+            err = str(exc)
+            logger.error(f"[Tier 3 · ECG Prognosis] ecg_bilstm FAILED to load: {err}")
+            self.model_status["ecg_bilstm"] = {
+                "loaded": False, "error": err,
+                "enabled": True, "pending": False,
+            }
 
-        # ── Model 3: BiLSTM ECG predictor ───────────────────
+
+    def _validate_ecg_model_contract(self):
+        """Fail fast if an ECG artifact is incompatible with runtime tensors."""
+        expected_inputs = {
+            "ecg_input": (500, 1),
+            "rr_input": (9,),
+            "fc_input": (500, 1),
+        }
+        actual_inputs = {
+            tensor.name.split(":", 1)[0]: tuple(int(dim) for dim in tensor.shape[1:])
+            for tensor in self.ecg_model.inputs
+        }
+        if actual_inputs != expected_inputs:
+            raise ValueError(
+                f"ECG model input contract mismatch: expected {expected_inputs}, got {actual_inputs}"
+            )
+
+        expected_outputs = {"class_head", "risk_head", "fc_out"}
+        actual_outputs = set(self.ecg_model.output_names)
+        if actual_outputs != expected_outputs:
+            raise ValueError(
+                f"ECG model output contract mismatch: expected {sorted(expected_outputs)}, "
+                f"got {sorted(actual_outputs)}"
+            )
+
+    def _load_severity_model(self):
+        """Load Tier 2 functional analysis from its delivered PyTorch checkpoint."""
+        cfg = get_model_config("severity_cnn")
+        if not cfg.enabled:
+            logger.info("[Tier 2 · Functional] severity_cnn is disabled — skipping.")
+            return
+
         try:
-            if not ECG_MODEL_PATH.exists():
-                raise FileNotFoundError(f"ECG model not found: {ECG_MODEL_PATH}")
-            
-            from tensorflow import keras
-            self.ecg_model = keras.models.load_model(str(ECG_MODEL_PATH))
-            logger.info(f"Loaded ECG model from {ECG_MODEL_PATH}")
+            if cfg.artifact_path is None or not cfg.artifact_path.exists():
+                raise FileNotFoundError(
+                    f"Tier 2 functional CNN artifact not found at: {cfg.artifact_path}. "
+                    "Set MODEL_3_PATH in your .env file."
+                )
 
-            if ECG_ENCODER_PATH.exists():
-                self.ecg_label_encoder = joblib.load(ECG_ENCODER_PATH)
-                logger.info(f"Loaded ECG label encoder ({list(self.ecg_label_encoder.classes_)})")
+            import torch
+            from .severity_cnn import MurmurSeverityCNN
 
-            if ECG_CONFIG_PATH.exists():
-                with open(ECG_CONFIG_PATH) as f:
-                    self.ecg_config = json.load(f)
-                logger.info(f"Loaded ECG config: {self.ecg_config}")
+            classes = cfg.label_mapping["classes"]
+            model = MurmurSeverityCNN(
+                {key: len(labels) for key, labels in classes.items()},
+                input_channels=int(cfg.label_mapping.get("input_channels", 4)),
+            )
+            checkpoint = torch.load(
+                str(cfg.artifact_path), map_location="cpu", weights_only=True
+            )
+            if isinstance(checkpoint, dict) and "state_dict" in checkpoint:
+                checkpoint = checkpoint["state_dict"]
+            if not isinstance(checkpoint, dict):
+                raise TypeError("CNN checkpoint must contain a PyTorch state_dict")
 
-            self.model_status['ecg_bilstm'] = {'loaded': True, 'error': None}
+            model.load_state_dict(checkpoint, strict=True)
+            model.eval()
+            self.severity_model = model
+            self.severity_device = torch.device("cpu")
+            self.model_status["severity_cnn"] = {
+                "loaded": True, "error": None,
+                "enabled": True, "pending": False,
+            }
+            logger.info(
+                f"[Tier 2 · Functional] severity_cnn loaded successfully (version={cfg.version})"
+            )
+        except Exception as exc:
+            err = str(exc)
+            logger.error(f"[Tier 2 · Functional] severity_cnn FAILED to load: {err}")
+            self.model_status["severity_cnn"] = {
+                "loaded": False, "error": err,
+                "enabled": True, "pending": False,
+            }
 
-        except Exception as e:
-            logger.warning(f"Model 3 (ECG BiLSTM) unavailable: {e}")
-            self.model_status['ecg_bilstm'] = {'loaded': False, 'error': str(e)}
-
-        # ── Decide final mode ────────────────────────────────
-        any_loaded = any(s['loaded'] for s in self.model_status.values())
+    def _finalize_mode(self):
+        """Decide whether to run in real or demo mode based on what loaded."""
+        enabled_statuses = [
+            s for k, s in self.model_status.items()
+            if s.get("enabled") and not s.get("pending")
+        ]
+        any_loaded = any(s["loaded"] for s in enabled_statuses)
 
         if any_loaded:
             self.demo_mode_active = False
+            loaded_names = [
+                k for k, s in self.model_status.items() if s["loaded"]
+            ]
+            pending_names = [
+                k for k, s in self.model_status.items() if s.get("pending")
+            ]
+            logger.info(
+                f"InferenceEngine ready: loaded={loaded_names}, pending={pending_names}"
+            )
         elif self.enable_demo_mode:
-            logger.warning("No models loaded — activating DEMO MODE")
+            logger.warning(
+                "No enabled models loaded — activating DEMO MODE. "
+                "Set ENABLE_DEMO_MODE=false with real model files for production."
+            )
             self.demo_mode_active = True
         else:
             errors = "; ".join(
-                f"{k}: {v['error']}" for k, v in self.model_status.items() if v['error']
+                f"{k}: {s['error']}"
+                for k, s in self.model_status.items()
+                if s.get("enabled") and s.get("error")
             )
-            raise RuntimeError(f"All models failed to load and demo mode is disabled: {errors}")
+            raise RuntimeError(
+                f"All enabled models failed to load and demo mode is disabled: {errors}"
+            )
 
-    # ─── PCG Prediction ────────────────────────────────────────────────────────
+    # ─── PCG Prediction ───────────────────────────────────────────────────────
 
     def predict_pcg(self, audio: np.ndarray, sample_rate: int) -> Dict[str, Any]:
         """
         Run PCG classification (Model 1 — XGBoost).
 
-        Returns:
-            {
-                'label': str,
-                'probabilities': dict,
-                'model_version': str,
-                'preprocessing_version': str,
-                'latency_ms': int,
-                'demo_mode': bool
-            }
+        Returns
+        -------
+        {
+            'label': str,
+            'probabilities': dict,
+            'model_name': str,
+            'model_version': str,
+            'preprocessing_version': str,
+            'latency_ms': int,
+            'demo_mode': bool
+        }
         """
         start_time = time.time()
 
         try:
-            # Check model availability
             if not self.demo_mode_active and self.pcg_model is None:
                 return {
-                    'error': 'PCG model not loaded',
-                    'detail': self.model_status['pcg_xgboost'].get('error', 'Unknown'),
-                    'model_name': 'pcg_xgboost_classifier',
-                    'demo_mode': False,
+                    "error": "PCG model not loaded",
+                    "detail": self.model_status["pcg_xgboost"].get("error", "Unknown"),
+                    "model_name": "pcg_xgboost_classifier",
+                    "demo_mode": False,
                 }
 
             # Preprocess
@@ -265,7 +443,6 @@ class InferenceEngine:
             feature_array = self.pcg_preprocessor.features_to_array(features)
             feature_array = feature_array.reshape(1, -1)
 
-            # Scale features if scaler is available
             if self.pcg_scaler is not None:
                 feature_array = self.pcg_scaler.transform(feature_array)
 
@@ -274,233 +451,256 @@ class InferenceEngine:
                 result = self._demo_pcg_prediction(audio)
             else:
                 probs = self.pcg_model.predict_proba(feature_array)[0]
+                classes = self.pcg_classes  # ['artifact', 'murmur', 'normal']
 
-                # Use the loaded label encoder for class names
-                if self.pcg_label_encoder is not None:
-                    classes = list(self.pcg_label_encoder.classes_)
+                # ── Custom murmur threshold from Final__XGBoost.py training script ──
+                # During training a threshold of 0.254 was applied to murmur
+                # probability (index 1) to maximise clinical sensitivity.
+                # Below that threshold we pick the better of artifact vs. normal.
+                # This MUST mirror the threshold used when the model was evaluated.
+                MURMUR_IDX = 1        # alphabetical order: 0=artifact, 1=murmur, 2=normal
+                MURMUR_THRESHOLD = 0.254
+
+                if probs[MURMUR_IDX] > MURMUR_THRESHOLD:
+                    pred_idx = MURMUR_IDX
                 else:
-                    classes = ['normal', 'murmur', 'artifact', 'extrahls']
+                    # Suppress murmur column; choose between artifact(0) and normal(2)
+                    pred_idx = 0 if probs[0] >= probs[2] else 2
 
-                label = classes[np.argmax(probs)]
+                label = classes[pred_idx]
 
                 result = {
-                    'label': label.capitalize(),
-                    'probabilities': {
+                    "label": label.capitalize(),
+                    "confidence": float(probs[pred_idx]),
+                    "murmur_probability": float(probs[MURMUR_IDX]),
+                    "probabilities": {
                         cls.capitalize(): float(probs[i])
                         for i, cls in enumerate(classes)
-                    }
+                    },
                 }
 
-            # Add metadata
+            cfg = get_model_config("pcg_xgboost")
             latency = int((time.time() - start_time) * 1000)
             result.update({
-                'model_name': 'pcg_xgboost_classifier',
-                'model_version': 'v1.0.0' if not self.demo_mode_active else 'demo',
-                'preprocessing_version': get_preprocessing_version(),
-                'latency_ms': latency,
-                'demo_mode': self.demo_mode_active
+                "model_name": "pcg_xgboost_classifier",
+                "model_version": cfg.version if not self.demo_mode_active else "demo",
+                "preprocessing_version": get_preprocessing_version(),
+                "latency_ms": latency,
+                "demo_mode": self.demo_mode_active,
             })
 
             logger.info(f"PCG prediction: {result['label']} ({latency}ms)")
             return result
 
-        except Exception as e:
-            logger.error(f"PCG prediction error: {e}")
+        except Exception as exc:
+            logger.error(f"PCG prediction error: {exc}")
             raise
 
-    # ─── Murmur Severity Prediction ────────────────────────────────────────────
+    # ─── ECG Prediction ───────────────────────────────────────────────────────
+
+    def predict_ecg(self, ecg: np.ndarray, sample_rate: int) -> Dict[str, Any]:
+        """
+        Run Tier 3 ECG prognosis (AuscultICor v26 SL, single-lead, multi-head).
+
+        The model has 3 input tensors:
+          - ecg_input : (batch, 500, 1)  — single-lead ECG @ 125 Hz
+          - rr_input  : (batch, 9)       — 9 HRV statistics computed from signal
+          - fc_input  : (batch, 500, 1)  — forecast context (zeros at inference)
+
+        Returns
+        -------
+        {
+            'prediction': str,        — arrhythmia class name
+            'confidence': float,      — class probability
+            'risk_score': float,      — cardiac risk score (0–1)
+            'risk_label': str,        — 'low' | 'moderate' | 'high'
+            'probabilities': dict,    — per-class probabilities
+            'heart_rate_bpm': float,
+            'windows_analyzed': int,
+            'model_name': str,
+            'model_version': str,
+        }
+        """
+        start_time = time.time()
+
+        try:
+            if not self.demo_mode_active and self.ecg_model is None:
+                return {
+                    "error": "ECG model not loaded",
+                    "detail": self.model_status["ecg_bilstm"].get("error", "Unknown"),
+                    "model_name": "ecg_auscultIcor_v26_sl",
+                    "demo_mode": False,
+                }
+
+            # Build preprocessed signal
+            prepared = self._prepare_ecg_signal(ecg, sample_rate)
+            heart_rate = self._estimate_heart_rate(
+                prepared, self.ecg_preprocessor.sample_rate
+            )
+
+            if self.demo_mode_active:
+                result = self._demo_ecg_prediction(ecg)
+            else:
+                windows = self._build_ecg_windows(prepared)
+                batch_inputs = self._build_ecg_inputs(windows)
+
+                raw_preds = self.ecg_model.predict(batch_inputs, verbose=0)
+                if not isinstance(raw_preds, dict):
+                    if len(raw_preds) != len(self.ecg_model.output_names):
+                        raise ValueError(
+                            "ECG model returned an unexpected number of output tensors"
+                        )
+                    raw_preds = dict(zip(self.ecg_model.output_names, raw_preds))
+
+                # class_head → (batch, 5) softmax
+                class_preds = np.array(raw_preds["class_head"])
+                mean_class = np.mean(class_preds, axis=0)
+
+                # risk_head → (batch, 1) sigmoid (PTB-trained, clinically validated)
+                risk_preds = np.array(raw_preds["risk_head"])
+                mean_risk = float(np.mean(risk_preds))
+
+                pred_idx = int(np.argmax(mean_class))
+                classes = self.ecg_classes or ["Normal", "SVEB", "VEB", "Fusion", "Unknown"]
+                prediction = classes[pred_idx]
+                confidence = float(mean_class[pred_idx])
+
+                probabilities = {
+                    cls: float(mean_class[i])
+                    for i, cls in enumerate(classes)
+                }
+
+                # Three-tier risk label: low / moderate / high
+                if mean_risk >= 0.7:
+                    risk_label = "high"
+                elif mean_risk >= 0.3:
+                    risk_label = "moderate"
+                else:
+                    risk_label = "low"
+
+                result = {
+                    "prediction": prediction,
+                    "confidence": confidence,
+                    "risk_score": round(mean_risk, 4),
+                    "risk_label": risk_label,
+                    "probabilities": probabilities,
+                    "heart_rate_bpm": heart_rate,
+                    "windows_analyzed": int(class_preds.shape[0]),
+                }
+
+            cfg = get_model_config("ecg_bilstm")
+            latency = int((time.time() - start_time) * 1000)
+            result.update({
+                "model_name": "ecg_auscultIcor_v26_sl",
+                "model_version": cfg.version if not self.demo_mode_active else "demo",
+                "preprocessing_version": get_preprocessing_version(),
+                "latency_ms": latency,
+                "demo_mode": self.demo_mode_active,
+            })
+
+            logger.info(
+                f"ECG prediction: {result.get('prediction')} "
+                f"risk={result.get('risk_score')} ({latency}ms)"
+            )
+            return result
+
+        except Exception as exc:
+            logger.error(f"ECG prediction error: {exc}")
+            raise
+
+
+    # ─── Tier 2 Functional Murmur Characterization ───────────────────────────
 
     def predict_murmur_severity(
         self,
         audio: np.ndarray,
-        sample_rate: int
+        sample_rate: int,
+        valve_position: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
-        """
-        Run murmur severity analysis (Model 2 — CNN multi-output).
-        Returns 6 classification heads using trained label encoders.
-        """
+        """Run the delivered six-head PyTorch CNN on PCG audio."""
+        cfg = get_model_config("severity_cnn")
+
+        if not cfg.enabled:
+            logger.info("[Tier 2 · Functional] predict_murmur_severity called while disabled.")
+            return {
+                "status": "disabled",
+                "model_name": "murmur_severity_cnn",
+                "model_version": cfg.version,
+                "message": "The murmur characterization model is disabled by configuration.",
+                "demo_mode": self.demo_mode_active,
+            }
+
+        if self.severity_model is None:
+            return {
+                "error": "Severity model not loaded",
+                "detail": self.model_status["severity_cnn"].get("error", "Unknown"),
+                "model_name": "murmur_severity_cnn",
+                "demo_mode": False,
+            }
+
         start_time = time.time()
-
         try:
-            # Check model availability
-            if not self.demo_mode_active and self.severity_model is None:
-                return {
-                    'error': 'Severity model not loaded',
-                    'detail': self.model_status['severity_cnn'].get('error', 'Unknown'),
-                    'model_name': 'murmur_severity_cnn',
-                    'demo_mode': False,
-                }
-
-            # Preprocess
-            spectrogram = self.severity_preprocessor.process(audio, original_sr=sample_rate)
-
-            # Add batch and channel dimensions
-            spectrogram = np.expand_dims(spectrogram, axis=0)   # Batch
-            spectrogram = np.expand_dims(spectrogram, axis=-1)  # Channel
-
-            # Predict
             if self.demo_mode_active:
                 result = self._demo_severity_prediction()
             else:
-                predictions = self.severity_model.predict(spectrogram)
+                import torch
 
-                # Use the trained label encoders for each head
-                label_keys = self.severity_config.get(
-                    'label_keys',
-                    list(self.severity_encoders.keys())
+                channel_order = tuple(cfg.label_mapping.get(
+                    "channel_order", ["AV", "MV", "PV", "TV"]
+                ))
+                model_input = self.severity_preprocessor.process_multichannel(
+                    audio,
+                    sample_rate,
+                    valve_position=valve_position,
+                    channel_order=channel_order,
+                )
+                tensor = torch.from_numpy(model_input).unsqueeze(0).to(
+                    self.severity_device, dtype=torch.float32
+                )
+                with torch.inference_mode():
+                    logits = self.severity_model(tensor)
+
+                classes = cfg.label_mapping["classes"]
+                output_names = cfg.label_mapping["head_to_output"]
+                result = {}
+                for head, head_logits in logits.items():
+                    probabilities = torch.softmax(head_logits, dim=-1)[0].cpu().numpy()
+                    result[output_names[head]] = self._parse_head(
+                        probabilities, classes[head]
+                    )
+                normalized_position = (valve_position or "").strip().upper()
+                result["valve_position"] = valve_position
+                result["input_strategy"] = (
+                    "position_channel_with_missing_channels_floored"
+                    if normalized_position in channel_order
+                    else "single_recording_replicated_across_channels"
                 )
 
-                result = {}
-                for i, key in enumerate(label_keys):
-                    if isinstance(predictions, dict):
-                        pred_arr = predictions[key][0]
-                    elif isinstance(predictions, list):
-                        pred_arr = predictions[i][0]
-                    else:
-                        pred_arr = predictions[0]
-
-                    encoder = self.severity_encoders.get(key)
-                    if encoder is not None:
-                        labels = list(encoder.classes_)
-                    else:
-                        labels = [f"class_{j}" for j in range(len(pred_arr))]
-
-                    result[key] = self._parse_head(pred_arr, labels)
-
-            # Add metadata
             latency = int((time.time() - start_time) * 1000)
             result.update({
-                'model_name': 'murmur_severity_cnn',
-                'model_version': 'v1.0.0' if not self.demo_mode_active else 'demo',
-                'preprocessing_version': get_preprocessing_version(),
-                'latency_ms': latency,
-                'demo_mode': self.demo_mode_active
+                "model_name": "murmur_severity_cnn",
+                "model_version": cfg.version if not self.demo_mode_active else "demo",
+                "preprocessing_version": get_preprocessing_version(),
+                "latency_ms": latency,
+                "demo_mode": self.demo_mode_active,
             })
-
             logger.info(f"Severity prediction completed ({latency}ms)")
             return result
 
-        except Exception as e:
-            logger.error(f"Severity prediction error: {e}")
+        except Exception as exc:
+            logger.error(f"Severity prediction error: {exc}")
             raise
 
-    # ─── ECG Prediction ────────────────────────────────────────────────────────
-
-    def predict_ecg(self, ecg: np.ndarray, sample_rate: int) -> Dict[str, Any]:
-        """
-        Run ECG prediction (Model 3 — BiLSTM).
-        Maps 7 training beat types to 5 AAMI clinical classes.
-
-        Returns:
-            {
-                'prediction': str,       # AAMI class name
-                'beat_type': str,        # raw beat type from model
-                'confidence': float,
-                'probabilities': dict,   # AAMI class probabilities
-                'raw_probabilities': dict, # per beat-type probabilities
-            }
-        """
-        start_time = time.time()
-
-        try:
-            # Check model availability
-            if not self.demo_mode_active and self.ecg_model is None:
-                return {
-                    'error': 'ECG model not loaded',
-                    'detail': self.model_status['ecg_bilstm'].get('error', 'Unknown'),
-                    'model_name': 'ecg_bilstm_predictor',
-                    'demo_mode': False,
-                }
-
-            prepared_signal = self._prepare_ecg_signal(ecg, sample_rate)
-            ecg_windows = self._build_ecg_windows(prepared_signal)
-            processed_batch = self._format_ecg_windows(ecg_windows)
-
-            # Predict
-            if self.demo_mode_active:
-                result = self._demo_ecg_prediction(ecg)
-            else:
-                prediction = self.ecg_model.predict(processed_batch, verbose=0)
-                mean_prediction = np.mean(prediction, axis=0)
-
-                # Get beat-type classes from trained label encoder
-                if self.ecg_label_encoder is not None:
-                    beat_classes = list(self.ecg_label_encoder.classes_)
-                else:
-                    beat_classes = self.ecg_config.get(
-                        'classes', ['N', 'V', 'L', 'R', 'A', '/', 'F']
-                    )
-
-                pred_idx = np.argmax(mean_prediction)
-                beat_type = beat_classes[pred_idx]
-
-                # Raw probabilities per beat type
-                raw_probs = {
-                    bt: float(mean_prediction[i])
-                    for i, bt in enumerate(beat_classes)
-                }
-
-                # Map to AAMI 5-class scheme
-                aami_label = BEAT_TO_AAMI.get(beat_type, 'Unknown')
-                aami_probs = self._aggregate_aami_probs(mean_prediction, beat_classes)
-                aami_confidence = float(aami_probs.get(aami_label, 0.0))
-                heart_rate_bpm = self._estimate_heart_rate(
-                    prepared_signal,
-                    self.ecg_preprocessor.sample_rate
-                )
-
-                result = {
-                    'prediction': aami_label,
-                    'beat_type': beat_type,
-                    'confidence': aami_confidence,
-                    'probabilities': aami_probs,
-                    'raw_probabilities': raw_probs,
-                    'heart_rate_bpm': heart_rate_bpm,
-                    'windows_analyzed': int(processed_batch.shape[0]),
-                }
-
-            # Add metadata
-            latency = int((time.time() - start_time) * 1000)
-            result.update({
-                'model_name': 'ecg_bilstm_predictor',
-                'model_version': 'v1.0.0' if not self.demo_mode_active else 'demo',
-                'preprocessing_version': get_preprocessing_version(),
-                'latency_ms': latency,
-                'demo_mode': self.demo_mode_active
-            })
-
-            logger.info(f"ECG prediction: {result['prediction']} ({latency}ms)")
-            return result
-
-        except Exception as e:
-            logger.error(f"ECG prediction error: {e}")
-            raise
-
-    # ─── Helpers ───────────────────────────────────────────────────────────────
-
-    def _aggregate_aami_probs(
-        self,
-        raw_probs: np.ndarray,
-        beat_classes: list
-    ) -> Dict[str, float]:
-        """
-        Aggregate per-beat-type probabilities into AAMI 5-class probabilities.
-        Multiple beat types map to the same AAMI class, so we sum them.
-        """
-        aami_probs = {'Normal': 0.0, 'SVEB': 0.0, 'VEB': 0.0, 'Fusion': 0.0, 'Unknown': 0.0}
-        for i, bt in enumerate(beat_classes):
-            aami_class = BEAT_TO_AAMI.get(bt, 'Unknown')
-            aami_probs[aami_class] += float(raw_probs[i])
-        return aami_probs
+    # ─── ECG Signal Helpers ───────────────────────────────────────────────────
 
     def _prepare_ecg_signal(self, ecg: np.ndarray, original_sr: int) -> np.ndarray:
-        """Apply ECG preprocessing stages while preserving the full recording."""
+        """Apply ECG preprocessing stages (resample, bandpass, baseline, denoise)."""
         prepared = ecg.astype(np.float32)
 
         if original_sr and original_sr != self.ecg_preprocessor.sample_rate:
             prepared = scipy_signal.resample(
                 prepared,
-                int(len(prepared) * self.ecg_preprocessor.sample_rate / original_sr)
+                int(len(prepared) * self.ecg_preprocessor.sample_rate / original_sr),
             )
 
         prepared = self.ecg_preprocessor._bandpass_filter(prepared)
@@ -514,7 +714,7 @@ class InferenceEngine:
         stride = max(1, window_size // 2)
 
         if ecg.size <= window_size:
-            padded = np.pad(ecg, (0, max(0, window_size - ecg.size)), mode='edge')
+            padded = np.pad(ecg, (0, max(0, window_size - ecg.size)), mode="edge")
             return np.expand_dims(padded[:window_size], axis=0)
 
         starts = list(range(0, ecg.size - window_size + 1, stride))
@@ -525,22 +725,107 @@ class InferenceEngine:
             selected = np.linspace(0, len(starts) - 1, self.ecg_max_windows, dtype=int)
             starts = [starts[idx] for idx in selected]
 
-        windows = [ecg[start:start + window_size] for start in starts]
-        return np.stack(windows, axis=0)
+        windows = [ecg[s : s + window_size] for s in starts]
+        return np.stack(windows, axis=0)  # (batch, window_size)
 
-    def _format_ecg_windows(self, ecg_windows: np.ndarray) -> np.ndarray:
-        """Normalize each ECG window and format it for the BiLSTM input."""
-        normalized = []
-        for window in ecg_windows:
-            normalized_window = self.ecg_preprocessor._normalize(window)
-            normalized.append(normalized_window)
+    def _build_ecg_inputs(self, ecg_windows: np.ndarray) -> Dict[str, np.ndarray]:
+        """
+        Build the three input tensors required by AuscultICor v26 SL.
 
-        batch = np.stack(normalized, axis=0).astype(np.float32)
-        batch = np.expand_dims(batch, axis=-1)
-        batch = np.pad(batch, ((0, 0), (0, 0), (0, 1)), 'constant')
-        return batch
+        ecg_input : (batch, 500, 1)   single-lead ECG (no duplication needed)
+        rr_input  : (batch, 9)        HRV statistics estimated from the signal
+        fc_input  : (batch, 500, 1)   forecast context — zeros at inference
 
-    def _estimate_heart_rate(self, ecg: np.ndarray, sample_rate: int) -> Optional[float]:
+        The v26 model is single-lead by design — no shim required.
+        RR features are computed server-side from peak detection.
+        """
+        batch_size = ecg_windows.shape[0]
+        window_size = self.ecg_preprocessor.window_size  # 500
+
+        # Normalize each window (z-score)
+        normalized = np.stack(
+            [self.ecg_preprocessor._normalize(w) for w in ecg_windows],
+            axis=0,
+        ).astype(np.float32)  # (batch, 500)
+
+        # ── ecg_input: single-lead → (batch, 500, 1) ────────────────────────
+        # v26 is trained on single-lead ECG; add channel dim only.
+        ecg_single = normalized[:, :, np.newaxis]  # (batch, 500, 1)
+
+        # ── rr_input: 9 HRV features estimated from peak detection ───────────
+        rr_features = self._estimate_rr_features(
+            normalized, self.ecg_preprocessor.sample_rate
+        )  # (batch, 9)
+
+        # ── fc_input: forecast context — zeros at inference time ─────────────
+        # During training, fc_input was the next-beat waveform target.
+        # At inference time we feed zeros; the forecast head output is ignored.
+        fc_context = np.zeros((batch_size, window_size, 1), dtype=np.float32)
+
+        return {
+            "ecg_input": ecg_single,
+            "rr_input": rr_features,
+            "fc_input": fc_context,
+        }
+
+    def _estimate_rr_features(
+        self, windows: np.ndarray, sample_rate: int
+    ) -> np.ndarray:
+        """
+        Compute 9 summary RR-interval features per window.
+
+        Features (in order):
+          0: mean RR (s)
+          1: std RR (s)
+          2: rmssd (s)
+          3: estimated BPM
+          4: NN50 count
+          5: pNN50 (%)
+          6: min RR (s)
+          7: max RR (s)
+          8: range RR (s)
+
+        TODO(model2-pipeline): For best accuracy, compute these from the full
+        continuous recording rather than per-window segments.
+        """
+        batch_size = windows.shape[0]
+        features = np.zeros((batch_size, 9), dtype=np.float32)
+
+        for i, window in enumerate(windows):
+            energy = np.abs(window)
+            prominence = max(np.std(energy) * 0.8, 0.02)
+            min_dist = max(1, int(sample_rate * 0.25))
+
+            try:
+                from scipy.signal import find_peaks
+                peaks, _ = find_peaks(energy, distance=min_dist, prominence=prominence)
+            except Exception:
+                peaks = np.array([])
+
+            if peaks.size >= 2:
+                rr = np.diff(peaks) / float(sample_rate)
+                rr = rr[(rr >= 0.25) & (rr <= 2.0)]
+            else:
+                rr = np.array([0.8])  # 75 BPM default
+
+            mean_rr = float(np.mean(rr))
+            std_rr = float(np.std(rr)) if len(rr) > 1 else 0.0
+            diffs = np.diff(rr) if len(rr) > 1 else np.array([0.0])
+            rmssd = float(np.sqrt(np.mean(diffs ** 2)))
+            bpm = 60.0 / mean_rr if mean_rr > 0 else 75.0
+            nn50 = int(np.sum(np.abs(diffs) > 0.05))
+            pnn50 = float(nn50 / len(diffs) * 100) if len(diffs) > 0 else 0.0
+            min_rr = float(np.min(rr))
+            max_rr = float(np.max(rr))
+            range_rr = max_rr - min_rr
+
+            features[i] = [mean_rr, std_rr, rmssd, bpm, nn50, pnn50, min_rr, max_rr, range_rr]
+
+        return features
+
+    def _estimate_heart_rate(
+        self, ecg: np.ndarray, sample_rate: int
+    ) -> Optional[float]:
         """Estimate heart rate from R-peak intervals on the preprocessed ECG."""
         if ecg.size < sample_rate * 2:
             return None
@@ -567,155 +852,101 @@ class InferenceEngine:
 
     def _parse_head(self, probs: np.ndarray, labels: list) -> Dict[str, Any]:
         """Parse multi-class head output."""
-        pred_idx = np.argmax(probs)
+        pred_idx = int(np.argmax(probs))
         return {
-            'predicted': labels[pred_idx],
-            'probabilities': {
-                labels[i]: float(probs[i])
-                for i in range(len(labels))
-            }
+            "predicted": labels[pred_idx],
+            "probabilities": {
+                labels[i]: float(probs[i]) for i in range(len(labels))
+            },
         }
 
-    # ========== DEMO MODE PREDICTIONS ==========
+    # ─── Demo Mode Predictions ────────────────────────────────────────────────
 
-    def _demo_pcg_prediction(self, audio: np.ndarray, scenario: str = 'normal') -> Dict[str, Any]:
-        """Deterministic demo PCG prediction."""
+    def _demo_pcg_prediction(self, audio: np.ndarray, scenario: str = "normal") -> Dict[str, Any]:
+        """Deterministic demo PCG prediction (3-class: normal, murmur, artifact)."""
         scenario_labels = {
-            'normal': 'Normal',
-            'tachycardia': 'Normal',
-            'bradycardia': 'Normal',
-            'systolic_murmur': 'Murmur',
-            'diastolic_murmur': 'Murmur',
-            'combined_murmur': 'Murmur',
-            'abnormal_ecg': 'Normal',
-            'afib': 'Normal',
+            "normal": "Normal", "tachycardia": "Normal", "bradycardia": "Normal",
+            "systolic_murmur": "Murmur", "diastolic_murmur": "Murmur", "combined_murmur": "Murmur",
+            "abnormal_ecg": "Normal", "afib": "Normal",
         }
+        expected = scenario_labels.get(scenario, "Normal")
 
-        expected_label = scenario_labels.get(scenario, 'Normal')
-
-        if expected_label == 'Murmur':
+        if expected == "Murmur":
             return {
-                'label': 'Murmur',
-                'probabilities': {
-                    'Normal': 0.20,
-                    'Murmur': 0.70,
-                    'Artifact': 0.10
-                }
+                "label": "Murmur",
+                "probabilities": {"Normal": 0.20, "Murmur": 0.75, "Artifact": 0.05},
             }
-        elif expected_label == 'Artifact':
-            return {
-                'label': 'Artifact',
-                'probabilities': {
-                    'Normal': 0.15,
-                    'Murmur': 0.20,
-                    'Artifact': 0.65
-                }
-            }
-        else:
-            return {
-                'label': 'Normal',
-                'probabilities': {
-                    'Normal': 0.75,
-                    'Murmur': 0.15,
-                    'Artifact': 0.10
-                }
-            }
+        return {
+            "label": "Normal",
+            "probabilities": {"Normal": 0.80, "Murmur": 0.12, "Artifact": 0.08},
+        }
 
     def _demo_severity_prediction(self) -> Dict[str, Any]:
-        """Deterministic demo severity prediction."""
+        """Deterministic functional prediction used when demo mode is active."""
         return {
-            'murmur_locations': {
-                'predicted': 'MV',
-                'probabilities': {
-                    'AV': 0.10, 'MV': 0.45, 'PV': 0.12, 'TV': 0.08,
-                    'Left heart': 0.08, 'Right heart': 0.05,
-                    'AV+Right': 0.04, 'MV+Right': 0.03,
-                    'Multiple (3+)': 0.03, 'Other': 0.02
-                }
+            "murmur_locations": {
+                "predicted": "MV",
+                "probabilities": {
+                    "AV": 0.10, "MV": 0.45, "PV": 0.12, "TV": 0.08,
+                    "Left heart": 0.08, "Right heart": 0.05,
+                    "AV+Right": 0.04, "MV+Right": 0.03,
+                    "Multiple (3+)": 0.03, "Other": 0.02,
+                },
             },
-            'systolic_timing': {
-                'predicted': 'Mid-systolic',
-                'probabilities': {
-                    'Early-systolic': 0.10, 'Mid-systolic': 0.50,
-                    'Late-systolic': 0.15, 'Holosystolic': 0.20,
-                    'Unknown': 0.05
-                }
+            "systolic_grading": {
+                "predicted": "III/VI",
+                "probabilities": {
+                    "I/VI": 0.05, "II/VI": 0.12, "III/VI": 0.38,
+                    "IV/VI": 0.22, "V/VI": 0.10, "VI/VI": 0.05, "Unknown": 0.08,
+                },
             },
-            'systolic_shape': {
-                'predicted': 'Crescendo-decrescendo',
-                'probabilities': {
-                    'Crescendo': 0.15, 'Decrescendo': 0.18,
-                    'Crescendo-decrescendo': 0.50, 'Plateau': 0.12,
-                    'Unknown': 0.05
-                }
-            },
-            'systolic_grading': {
-                'predicted': 'III/VI',
-                'probabilities': {
-                    'I/VI': 0.05, 'II/VI': 0.12, 'III/VI': 0.38,
-                    'IV/VI': 0.22, 'V/VI': 0.10, 'VI/VI': 0.05,
-                    'Unknown': 0.08
-                }
-            },
-            'systolic_pitch': {
-                'predicted': 'Medium',
-                'probabilities': {
-                    'Low': 0.18, 'Medium': 0.50, 'High': 0.25,
-                    'Unknown': 0.07
-                }
-            },
-            'systolic_quality': {
-                'predicted': 'Blowing',
-                'probabilities': {
-                    'Blowing': 0.48, 'Harsh': 0.28,
-                    'Musical': 0.15, 'Unknown': 0.09
-                }
-            }
         }
 
     def _demo_ecg_prediction(self, ecg: np.ndarray) -> Dict[str, Any]:
-        """Deterministic demo ECG prediction (AAMI 5-class)."""
-        variance = np.var(ecg)
+        """Deterministic demo ECG prediction (5-class SVEB/VEB/etc.)."""
+        variance = float(np.var(ecg))
+        heart_rate = self._estimate_heart_rate(
+            ecg.astype(np.float32), self.ecg_preprocessor.sample_rate
+        )
 
         if variance > 2.0:
             return {
-                'prediction': 'VEB',
-                'beat_type': 'V',
-                'confidence': 0.68,
-                'heart_rate_bpm': 96.0,
-                'windows_analyzed': 1,
-                'probabilities': {
-                    'Normal': 0.12, 'SVEB': 0.10,
-                    'VEB': 0.68, 'Fusion': 0.06,
-                    'Unknown': 0.04
+                "prediction": "VEB",
+                "confidence": 0.68,
+                "risk_score": 0.75,
+                "risk_label": "high",
+                "heart_rate_bpm": heart_rate or 96.0,
+                "windows_analyzed": 1,
+                "probabilities": {
+                    "Normal": 0.12, "SVEB": 0.10,
+                    "VEB": 0.68, "Fusion": 0.06, "Unknown": 0.04,
                 },
-                'raw_probabilities': {'V': 0.68, 'N': 0.12, 'A': 0.10, 'F': 0.06, '/': 0.04}
+                "pipeline_note": "Demo mode active.",
             }
         elif variance > 1.0:
             return {
-                'prediction': 'SVEB',
-                'beat_type': 'A',
-                'confidence': 0.62,
-                'heart_rate_bpm': 88.0,
-                'windows_analyzed': 1,
-                'probabilities': {
-                    'Normal': 0.20, 'SVEB': 0.62,
-                    'VEB': 0.08, 'Fusion': 0.05,
-                    'Unknown': 0.05
+                "prediction": "SVEB",
+                "confidence": 0.62,
+                "risk_score": 0.45,
+                "risk_label": "low",
+                "heart_rate_bpm": heart_rate or 88.0,
+                "windows_analyzed": 1,
+                "probabilities": {
+                    "Normal": 0.20, "SVEB": 0.62,
+                    "VEB": 0.08, "Fusion": 0.05, "Unknown": 0.05,
                 },
-                'raw_probabilities': {'A': 0.62, 'N': 0.20, 'V': 0.08, 'F': 0.05, '/': 0.05}
+                "pipeline_note": "Demo mode active.",
             }
-        else:
-            return {
-                'prediction': 'Normal',
-                'beat_type': 'N',
-                'confidence': 0.81,
-                'heart_rate_bpm': 72.0,
-                'windows_analyzed': 1,
-                'probabilities': {
-                    'Normal': 0.81, 'SVEB': 0.08,
-                    'VEB': 0.05, 'Fusion': 0.03,
-                    'Unknown': 0.03
-                },
-                'raw_probabilities': {'N': 0.81, 'A': 0.08, 'V': 0.05, 'F': 0.03, '/': 0.03}
-            }
+        return {
+            "prediction": "Normal",
+            "confidence": 0.81,
+            "risk_score": 0.10,
+            "risk_label": "low",
+            "heart_rate_bpm": heart_rate or 72.0,
+            "windows_analyzed": 1,
+            "probabilities": {
+                "Normal": 0.81, "SVEB": 0.08,
+                "VEB": 0.05, "Fusion": 0.03, "Unknown": 0.03,
+            },
+            "pipeline_note": "Demo mode active.",
+        }

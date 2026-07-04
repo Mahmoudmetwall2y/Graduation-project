@@ -1,0 +1,17 @@
+1.6 Clinical Context and Target Use Case
+
+The development of AscultiCor is fundamentally motivated by specific clinical scenarios where traditional diagnostic tools are either unavailable or impractical. The primary target use case is the primary care clinic in resource-constrained environments. In these settings, general practitioners often lack immediate access to 12-lead ECG machines or echocardiography, relying solely on traditional acoustic stethoscopes. AscultiCor bridges this diagnostic gap by providing an affordable, highly portable device that captures both electrical and acoustic cardiac data simultaneously. 
+
+When a patient, such as a hypothetical "Mr. Ahmed Ali" presenting with palpitations and shortness of breath, visits the clinic, the operator flow is designed to be frictionless. The clinician unboxes the ESP32-based device, ensures it is provisioned to their clinic's organization via the Next.js dashboard, and attaches the three standard ECG electrodes and the PCG acoustic pad to the patient's chest. Upon initiating the session via the dashboard, the device streams synchronized physiological data over MQTT. Within seconds of the session's conclusion, the FastAPI inference service processes the data, and the clinician views the AI-derived cardiac risk score, AAMI beat classifications, and murmur probabilities directly on their screen.
+
+A secondary target use case is post-discharge ambulatory monitoring for patients recovering from cardiac events. In this scenario, the device's continuous MQTT telemetry and n8n-automated clinical alerts become paramount. If a patient exhibits a sudden increase in their cardiac risk score or a high frequency of ventricular ectopic beats (VEB) while at home, the n8n Workflow 02 automatically dispatches a CRITICAL priority email alert to their supervising cardiologist, containing a deep link to the anomalous session for immediate review.
+
+1.7 Project Scope and Constraints
+
+To ensure the project remained focused and viable within the six-month graduation timeframe, several strict constraints were established across all five team workstreams. 
+
+The most prominent constraint was the hardware Bill of Materials (BOM) budget. The IoT team was challenged to engineer the physical device for under $15 USD total component cost. This strict financial limitation necessitated the use of the ESP32 microcontroller and low-cost analog modules (AD8232 and MAX9814) rather than expensive medical-grade digital acquisition systems, shifting the burden of signal quality from hardware to software preprocessing and AI robustness.
+
+Operationally, the Cloud and DevOps team was constrained by hosting limitations. The entire software stack—comprising the frontend, backend, AI inference service, MQTT broker, and n8n automation engine—had to operate performantly on a standard Linux Virtual Private Server (VPS) equipped with only 2 vCPUs and 4 GB of RAM. This constraint drove the architectural decision to use lightweight XGBoost models and quantized neural networks rather than massive, memory-intensive transformer models, and necessitated aggressive Docker optimization.
+
+From a regulatory perspective, AscultiCor is explicitly scoped as an educational and research platform. It is not currently validated as Software as a Medical Device (SaMD) under FDA 510(k) or CE Medical Device Regulation (MDR) frameworks. The AI predictions are designed to act as clinical decision support tools—flagging anomalous recordings for human physician review—rather than autonomous diagnostic authorities.

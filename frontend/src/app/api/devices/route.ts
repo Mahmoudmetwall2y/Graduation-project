@@ -5,7 +5,8 @@ import { randomUUID } from 'crypto'
 import bcrypt from 'bcryptjs'
 import { buildDeviceMqttCredentials } from '../../../lib/mqttCredentials'
 
-const DEVICE_OFFLINE_THRESHOLD_MS = 90 * 1000
+const DEVICE_OFFLINE_THRESHOLD_MS = 25 * 1000
+const VALID_DEVICE_TYPES = new Set(['esp32', 'esp32-s3', 'esp32-c3', 'sonocardia-kit', 'custom'])
 
 function isMissingMqttCredentialColumns(error: unknown) {
   const message = JSON.stringify(error ?? '').toLowerCase()
@@ -52,9 +53,14 @@ function getRequestOrigin(request: Request) {
 }
 
 function getBootstrapBaseUrl(request: Request) {
-  const configured = process.env.DEVICE_BOOTSTRAP_PUBLIC_BASE_URL?.trim()
+  const configured = (
+    process.env.DEVICE_BOOTSTRAP_URL ||
+    process.env.NEXT_PUBLIC_DEVICE_BOOTSTRAP_URL ||
+    process.env.DEVICE_BOOTSTRAP_PUBLIC_BASE_URL ||
+    process.env.NEXT_PUBLIC_APP_URL
+  )?.trim()
   if (configured) {
-    return configured.replace(/\/$/, '')
+    return configured.replace(/\/api\/device\/bootstrap$/, '').replace(/\/$/, '')
   }
 
   return getRequestOrigin(request)
@@ -72,6 +78,45 @@ function isLoopbackHost(host: string) {
 function parseBoolean(value: string | undefined, fallback = false) {
   if (!value) return fallback
   return ['1', 'true', 'yes', 'on'].includes(value.toLowerCase())
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value))
+}
+
+function validateDeviceCreateBody(body: any) {
+  const deviceName = typeof body?.device_name === 'string' ? body.device_name.trim() : ''
+  const deviceType = typeof body?.device_type === 'string' && body.device_type
+    ? body.device_type
+    : 'esp32'
+  const notes = typeof body?.notes === 'string' ? body.notes.trim() : ''
+  const sensorConfig = body?.sensor_config === undefined ? {} : body.sensor_config
+
+  if (!deviceName || deviceName.length > 120) {
+    return { error: 'Device name is required and must be 120 characters or fewer.' }
+  }
+
+  if (!VALID_DEVICE_TYPES.has(deviceType)) {
+    return { error: 'Invalid device_type.' }
+  }
+
+  if (notes.length > 2000) {
+    return { error: 'Notes must be 2000 characters or fewer.' }
+  }
+
+  if (!isPlainObject(sensorConfig)) {
+    return { error: 'sensor_config must be an object.' }
+  }
+
+  return {
+    value: {
+      device_name: deviceName,
+      device_type: deviceType,
+      device_group_id: typeof body?.device_group_id === 'string' && body.device_group_id ? body.device_group_id : null,
+      notes: notes || null,
+      sensor_config: sensorConfig,
+    },
+  }
 }
 
 // GET /api/devices - List all devices
@@ -129,14 +174,16 @@ export async function POST(request: Request) {
     const supabase = createRouteHandlerClient({ cookies })
     const body = await request.json()
 
-    const { device_name, device_type = 'esp32', device_group_id, notes, sensor_config } = body
+    const validation = validateDeviceCreateBody(body)
 
-    if (!device_name) {
+    if ('error' in validation) {
       return NextResponse.json(
-        { error: 'Device name is required' },
+        { error: validation.error },
         { status: 400 }
       )
     }
+
+    const { device_name, device_type, device_group_id, notes, sensor_config } = validation.value
 
     // Get current user
     const { data: { user } } = await supabase.auth.getUser()
@@ -243,9 +290,22 @@ export async function POST(request: Request) {
     const bootstrapUrl = `${bootstrapBaseUrl}/api/device/bootstrap`
     const bootstrapHost = new URL(bootstrapBaseUrl).host
     const mqttHost =
-      process.env.DEVICE_BOOTSTRAP_MQTT_HOST?.trim() || stripPort(new URL(bootstrapBaseUrl).host)
-    const mqttPort = Number(process.env.DEVICE_BOOTSTRAP_MQTT_PORT || 1883)
-    const mqttTls = parseBoolean(process.env.DEVICE_BOOTSTRAP_MQTT_TLS, false)
+      process.env.MQTT_PUBLIC_HOST?.trim() ||
+      process.env.NEXT_PUBLIC_MQTT_PUBLIC_HOST?.trim() ||
+      process.env.DEVICE_BOOTSTRAP_MQTT_HOST?.trim() ||
+      stripPort(new URL(bootstrapBaseUrl).host)
+    const mqttPort = Number(
+      process.env.MQTT_PUBLIC_PORT ||
+      process.env.NEXT_PUBLIC_MQTT_PUBLIC_PORT ||
+      process.env.DEVICE_BOOTSTRAP_MQTT_PORT ||
+      1883
+    )
+    const mqttTls = parseBoolean(
+      process.env.MQTT_PUBLIC_USE_TLS ||
+      process.env.NEXT_PUBLIC_MQTT_USE_TLS ||
+      process.env.DEVICE_BOOTSTRAP_MQTT_TLS,
+      false
+    )
     const mqttLanExposureEnabled = !isLoopbackHost(
       process.env.MQTT_BIND_ADDRESS || '127.0.0.1'
     )
@@ -263,6 +323,13 @@ export async function POST(request: Request) {
         mqtt_port: mqttPort,
         mqtt_tls: mqttTls,
         mqtt_lan_exposure_enabled: mqttLanExposureEnabled,
+        firmware_version: process.env.NEXT_PUBLIC_ASCULTICOR_FIRMWARE_VERSION || '3.1.0',
+        environment: process.env.NEXT_PUBLIC_DEPLOYMENT_MODE === 'vps' ? 'vps' : 'local',
+        mqtt: {
+          host: mqttHost,
+          port: mqttPort,
+          use_tls: mqttTls,
+        },
         mqtt_user: usesPerDeviceMqtt ? mqttUsername : sharedMqttUser!,
         mqtt_pass: usesPerDeviceMqtt ? mqttPassword : sharedMqttPass!
       }

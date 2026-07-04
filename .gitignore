@@ -1,8 +1,11 @@
 # Environment variables
+# IMPORTANT: 'env' (no extension) is the production secrets file — NEVER commit it
+env
 .env
 .env.cloud
 .env.local
 .env.*.local
+.env.*
 
 # Dependencies
 node_modules/
@@ -22,6 +25,7 @@ ENV/
 *.swo
 *~
 .playwright-cli/
+
 # OS
 .DS_Store
 Thumbs.db
@@ -36,6 +40,7 @@ logs/
 .gitnexus/
 .claude/skills/gitnexus/
 .agent/
+
 # Build outputs
 dist/
 build/
@@ -44,14 +49,11 @@ out/
 *.egg-info/
 *.tsbuildinfo
 
-# Models (large files)
-inference/models/*.pkl
-inference/models/*.h5
-inference/models/*.pt
-inference/models/*.pth
-!inference/models/.gitkeep
+# Runtime model artifacts are versioned with the application so a clean
+# production clone contains everything required by the inference service.
 
 specs/
+
 # Data
 *.wav
 *.bin
@@ -75,17 +77,22 @@ tmp/
 temp/
 cache/
 .cache/
-
+Asculticor_Gra*
+Chapter*
+CHAPTER*
 # Build artifacts
 frontend/.next/
 frontend/out/
 frontend/dist/
+frontend/tailwind_err.txt
+frontend/output.css
 
 # Large binary files
 *.pdf
 *.zip
 *.tar.gz
 minikube-*
+*.docx
 
 # System files
 nul

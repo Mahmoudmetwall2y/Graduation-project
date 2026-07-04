@@ -20,6 +20,7 @@ import {
   LiveWaveformFrame,
 } from '../../../components/session/LiveWaveformMonitor'
 import { extractHierarchicalReport } from './types'
+import { buildSessionReportDocument } from '../../../lib/reportExport'
 
 interface Session {
   id: string
@@ -71,11 +72,31 @@ interface SessionNote {
   author_name?: string | null
 }
 
+interface SessionEvent {
+  id: string
+  action: string
+  metadata: any
+  created_at: string
+}
+
 interface SessionSummaryResponse {
   session: Session
   predictions: Prediction[]
   notes: SessionNote[]
+  events: SessionEvent[]
   deidentifyExports: boolean
+}
+
+interface LLMReportSummary {
+  id: string
+  status: 'pending' | 'generating' | 'completed' | 'error'
+  error_message?: string | null
+  created_at: string
+  completed_at?: string | null
+  model_name?: string | null
+  model_version?: string | null
+  report_text?: string | null
+  report_json?: Record<string, any> | null
 }
 
 interface LiveWaveformResponse {
@@ -87,12 +108,6 @@ interface LiveWaveformResponse {
   lastLiveAt: string | null
   sessionStatus: string
 }
-
-// Waveform utilities — shared with dashboard page
-import {
-  generateEcgWaveformSamples,
-  generatePcgWaveformSamples,
-} from '../../../lib/waveform'
 
 function escapeHtml(value: unknown): string {
   return String(value ?? '')
@@ -123,11 +138,14 @@ export default function SessionDetailPage() {
     pcg: false,
   })
   const [notes, setNotes] = useState<SessionNote[]>([])
+  const [sessionEvents, setSessionEvents] = useState<SessionEvent[]>([])
   const [noteDraft, setNoteDraft] = useState('')
   const [savingNote, setSavingNote] = useState(false)
   const [lastLiveAt, setLastLiveAt] = useState<string | null>(null)
   const [deidentifyExports, setDeidentifyExports] = useState(false)
   const [activeReportTab, setActiveReportTab] = useState<ActiveReportTab>('model1')
+  const [llmReport, setLlmReport] = useState<LLMReportSummary | null>(null)
+  const [queueingLlmReport, setQueueingLlmReport] = useState(false)
   const [uiNow, setUiNow] = useState(() => Date.now())
   const deleteModalRef = useRef<HTMLDivElement | null>(null)
   const deletePrimaryRef = useRef<HTMLButtonElement | null>(null)
@@ -138,9 +156,6 @@ export default function SessionDetailPage() {
   const wasSessionActiveRef = useRef(false)
   const supabase = createClientComponentClient()
   const { showToast } = useToast()
-
-  const fallbackEcg = useMemo(() => generateEcgWaveformSamples(1800), [])
-  const fallbackPcg = useMemo(() => generatePcgWaveformSamples(2700), [])
 
   const fetchAppJson = useCallback(async <T,>(input: string): Promise<T> => {
     const response = await fetch(input, {
@@ -165,6 +180,7 @@ export default function SessionDetailPage() {
       setSession(payload.session)
       setPredictions(payload.predictions || [])
       setNotes(payload.notes || [])
+      setSessionEvents(payload.events || [])
       setDeidentifyExports(Boolean(payload.deidentifyExports))
     } catch (fetchError) {
       console.error('Error fetching session summary:', fetchError)
@@ -173,6 +189,50 @@ export default function SessionDetailPage() {
       setLoading(false)
     }
   }, [fetchAppJson, sessionId])
+
+  const fetchLlmReport = useCallback(async () => {
+    if (!sessionId) return
+
+    try {
+      const payload = await fetchAppJson<{ reports: LLMReportSummary[] }>(
+        `/api/llm?session_id=${encodeURIComponent(sessionId)}`
+      )
+      setLlmReport(payload.reports?.[0] || null)
+    } catch (fetchError) {
+      console.error('Error fetching LLM report status:', fetchError)
+    }
+  }, [fetchAppJson, sessionId])
+
+  const handleQueueLlmReport = useCallback(async () => {
+    if (!session || session.status !== 'done') return
+
+    setQueueingLlmReport(true)
+    try {
+      const response = await fetch('/api/llm', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          session_id: session.id,
+          device_id: session.device_id,
+        }),
+      })
+      const payload = await response.json().catch(() => ({}))
+      if (!response.ok) {
+        throw new Error(payload?.error || `Request failed with status ${response.status}`)
+      }
+
+      if (payload.report) {
+        setLlmReport(payload.report)
+      }
+      showToast(payload.message || 'AI-assisted report queued', 'success')
+    } catch (queueError: any) {
+      console.error('Error queueing LLM report:', queueError)
+      showToast(queueError?.message || 'Failed to queue AI-assisted report', 'error')
+    } finally {
+      setQueueingLlmReport(false)
+    }
+  }, [session, showToast])
 
   const applyLiveWaveformPayload = useCallback((payload: LiveWaveformResponse) => {
     liveMetricsCursorRef.current = payload.cursor || liveMetricsCursorRef.current
@@ -288,7 +348,8 @@ export default function SessionDetailPage() {
 
     fetchSessionSummary()
     fetchLiveWaveforms(true)
-  }, [fetchLiveWaveforms, fetchSessionSummary, sessionId])
+    fetchLlmReport()
+  }, [fetchLiveWaveforms, fetchLlmReport, fetchSessionSummary, sessionId])
 
   const isSessionActive = Boolean(
     session && (session.status === 'streaming' || session.status === 'processing')
@@ -306,6 +367,12 @@ export default function SessionDetailPage() {
     )
     return () => window.clearInterval(summaryInterval)
   }, [fetchSessionSummary, isSessionActive, sessionId])
+
+  useEffect(() => {
+    if (!sessionId || session?.status !== 'done') return
+    const reportInterval = window.setInterval(fetchLlmReport, 5000)
+    return () => window.clearInterval(reportInterval)
+  }, [fetchLlmReport, session?.status, sessionId])
 
   useEffect(() => {
     if (!sessionId || !isSessionActive) return
@@ -397,6 +464,25 @@ export default function SessionDetailPage() {
     return () => window.removeEventListener('keydown', handleKey)
   }, [showDeleteConfirm])
 
+  // MEDIUM-04: PCG buffer overflow toast
+  // When the firmware ISR drops audio buffers, the inference service records a
+  // session_stream_warning event. We surface this to the user as a persistent
+  // warning toast so signal quality issues are never invisible.
+  useEffect(() => {
+    const overflowEvent = sessionEvents.find(
+      (e) =>
+        e.action === 'session_stream_warning' &&
+        (e.metadata?.type === 'warning_pcg_overflow' || e.metadata?.reason === 'warning_pcg_overflow')
+    )
+    if (overflowEvent) {
+      showToast(
+        '⚠️ PCG Buffer Overflow detected — some audio samples were dropped by the device. Signal quality may be reduced.',
+        'warning'
+      )
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionEvents])
+
   const timelineItems = useMemo(() => {
     const items: Array<{
       id: string
@@ -457,6 +543,47 @@ export default function SessionDetailPage() {
       })
     })
 
+    sessionEvents.forEach((event) => {
+      const metadata = event.metadata || {}
+      const actionLabels: Record<string, string> = {
+        session_preflight_passed: 'Signal preflight passed',
+        session_preflight_failed: 'Signal preflight failed',
+        session_stream_warning: 'Device stream warning',
+        session_timeout: 'Session stream timeout',
+        session_timeout_db: 'Session timeout',
+        pcg_inference_completed: 'PCG inference completed',
+        pcg_inference_failed: 'PCG inference failed',
+        ecg_inference_completed: 'ECG inference completed',
+        ecg_inference_failed: 'ECG inference failed',
+        note_added: 'Clinical note added',
+      }
+      const warningActions = new Set([
+        'session_preflight_failed',
+        'session_stream_warning',
+        'session_timeout',
+        'session_timeout_db',
+        'pcg_inference_failed',
+        'ecg_inference_failed',
+      ])
+      const successActions = new Set([
+        'session_preflight_passed',
+        'pcg_inference_completed',
+        'ecg_inference_completed',
+      ])
+
+      items.push({
+        id: `event-${event.id}`,
+        time: event.created_at,
+        title: actionLabels[event.action] || event.action.replace(/_/g, ' '),
+        description: metadata.reason || metadata.error || metadata.type || metadata.result,
+        tone: warningActions.has(event.action)
+          ? 'warning'
+          : successActions.has(event.action)
+            ? 'success'
+            : 'info',
+      })
+    })
+
     notes.forEach((note) => {
       items.push({
         id: `note-${note.id}`,
@@ -470,7 +597,7 @@ export default function SessionDetailPage() {
     return items
       .sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime())
       .slice(0, 12)
-  }, [session, predictions, notes, lastLiveAt])
+  }, [session, predictions, notes, sessionEvents, lastLiveAt])
 
   const modelSummary = useMemo(() => {
     const map = new Map<string, { name: string; version: string; modality: string; count: number; lastSeen: string }>()
@@ -521,21 +648,21 @@ export default function SessionDetailPage() {
     ? 'Live sweep'
     : isSessionActive
       ? lastLiveAt
-        ? 'Stale'
-        : 'Awaiting signal'
+        ? 'Signal stale'
+        : 'Waiting for ESP32 signal'
       : lastLiveAt
         ? 'Captured'
-        : 'Simulated'
+        : 'No capture yet'
   const ecgLabel = waveformAvailability.ecg
     ? (isSessionActive && isLiveFresh ? 'Live sweep' : 'Final trace')
     : isSessionActive
-      ? 'Awaiting live'
-      : 'Simulated'
+      ? 'Waiting for ESP32 signal'
+      : 'Captured trace unavailable'
   const pcgLabel = waveformAvailability.pcg
     ? (isSessionActive && isLiveFresh ? 'Live sweep' : 'Final trace')
     : isSessionActive
-      ? 'Awaiting live'
-      : 'Simulated'
+      ? 'Waiting for ESP32 signal'
+      : 'Captured trace unavailable'
 
   const handleAddNote = async () => {
     if (!noteDraft.trim()) return
@@ -625,6 +752,16 @@ export default function SessionDetailPage() {
   }
 
   const buildPrintReport = () => {
+    return buildSessionReportDocument({
+      session: session!,
+      predictions,
+      report: llmReport,
+      deidentify: deidentifyExports,
+      notes: notes.map((item) => item.note),
+    })
+
+    /* Legacy session export retained temporarily for reference; the shared
+       professional report renderer above is now the single export path.
     const preds = predictions.map(p => {
       const label = p.output_json?.label || p.output_json?.prediction || 'N/A'
       const confidence = p.output_json?.confidence
@@ -759,9 +896,10 @@ export default function SessionDetailPage() {
         ${deidentifyExports ? '<p style="color:#999;">Notes omitted in de-identified export.</p>' : notesHtml}
 
         <div class="disclaimer">
-          ⚠ <strong>AI Advisory Disclaimer:</strong> This report is generated by AI models for clinical decision support only.
-          Results should be reviewed by a qualified healthcare professional before any clinical action.
-          Models: PCG XGBoost Classifier, Murmur Severity CNN, ECG BiLSTM Predictor.
+          ⚠ <strong>AI Advisory — NOT A MEDICAL DIAGNOSIS:</strong> This report is generated by machine-learning models
+          for educational and research purposes only. All results must be reviewed and confirmed by a qualified healthcare
+          professional before any clinical decision is made. AscultiCor is a graduation research project and is
+          not a certified medical device. Models: PCG XGBoost Classifier · Murmur Severity CNN · ECG BiLSTM Predictor.
         </div>
 
         <div style="margin-top:28px;display:flex;gap:16px;align-items:center;">
@@ -777,6 +915,9 @@ export default function SessionDetailPage() {
       </body>
       </html>
     `
+  }
+
+    */
   }
 
   const handleExportCSV = () => {
@@ -948,6 +1089,21 @@ export default function SessionDetailPage() {
           Back to Dashboard
         </Link>
 
+        {/* AI Safety Disclaimer — visible on every session page */}
+        <div
+          role="note"
+          aria-label="AI advisory disclaimer"
+          className="flex items-start gap-3 rounded-xl border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-950/40 px-4 py-3 text-amber-800 dark:text-amber-300 text-sm"
+        >
+          <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-amber-600 dark:text-amber-400" />
+          <span>
+            <strong>AI Advisory — Not a Medical Diagnosis:</strong> All predictions on this page are generated by
+            machine-learning models for educational and research purposes only. Results must be reviewed and
+            confirmed by a qualified healthcare professional before any clinical decision is made.
+            AscultiCor is a graduation research project, not a certified medical device.
+          </span>
+        </div>
+
         {/* Session Header */}
         <div className="surface-card p-6 fade-in">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -993,6 +1149,37 @@ export default function SessionDetailPage() {
               </span>
 
               {/* Action buttons */}
+              <button
+                onClick={handleQueueLlmReport}
+                disabled={
+                  session.status !== 'done' ||
+                  queueingLlmReport ||
+                  llmReport?.status === 'pending' ||
+                  llmReport?.status === 'generating' ||
+                  llmReport?.status === 'completed'
+                }
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium bg-violet-50 dark:bg-violet-950/30 text-violet-700 dark:text-violet-300 hover:bg-violet-100 dark:hover:bg-violet-950/50 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                title={session.status === 'done' ? 'Queue an AI-assisted report' : 'Available after the session completes'}
+              >
+                {queueingLlmReport || llmReport?.status === 'generating' ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <FileText className="w-4 h-4" />
+                )}
+                <span className="hidden sm:inline">
+                  {queueingLlmReport
+                    ? 'Queueing...'
+                    : llmReport?.status === 'completed'
+                      ? 'Report Ready'
+                      : llmReport?.status === 'generating'
+                        ? 'Generating...'
+                        : llmReport?.status === 'pending'
+                          ? 'Report Queued'
+                          : llmReport?.status === 'error'
+                            ? 'Retry Report'
+                            : 'AI Report'}
+                </span>
+              </button>
               <button
                 onClick={handleExportPDF}
                 className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium bg-accent hover:bg-accent/80 text-foreground transition-colors"
@@ -1045,6 +1232,14 @@ export default function SessionDetailPage() {
           ))}
         </div>
 
+        {isSessionActive && !isLiveFresh && (
+          <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200 slide-up">
+            {lastLiveAt
+              ? 'Live data is stale. Keep the ESP32 powered on, confirm Wi-Fi/MQTT connection, and check the Serial Monitor for stream warnings.'
+              : 'Waiting for the ESP32 to send live ECG/PCG frames. Confirm the device is online and the start command was acknowledged.'}
+          </div>
+        )}
+
         {/* Signal Visualizations */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* ECG Waveform */}
@@ -1065,7 +1260,6 @@ export default function SessionDetailPage() {
               accentGlow="rgba(20, 184, 166, 0.55)"
               amplitudeRange={[-0.35, 1.15]}
               fallbackSampleRate={300}
-              fallbackSamples={fallbackEcg}
               isSessionActive={isSessionActive}
               playbackLatencyMs={ecgPlaybackLatency}
               sampleLabel="ECG"
@@ -1093,7 +1287,6 @@ export default function SessionDetailPage() {
               accentGlow="rgba(244, 63, 94, 0.55)"
               amplitudeRange={[-1.0, 1.0]}
               fallbackSampleRate={900}
-              fallbackSamples={fallbackPcg}
               isSessionActive={isSessionActive}
               playbackLatencyMs={pcgPlaybackLatency}
               sampleLabel="PCG"
@@ -1215,7 +1408,13 @@ export default function SessionDetailPage() {
                 return <Model1StateCard data={hierarchicalReport.model1} />
               }
               if (activeReportTab === 'model2') {
-                return <Model2DiagnosticCard data={hierarchicalReport.model2} murmurDetected={murmurDetected} />
+                return (
+                  <Model2DiagnosticCard
+                    data={hierarchicalReport.model2}
+                    murmurDetected={murmurDetected}
+                    sessionStatus={session.status}
+                  />
+                )
               }
               if (activeReportTab === 'model3') {
                 return <Model3PrognosisCard data={hierarchicalReport.model3} />

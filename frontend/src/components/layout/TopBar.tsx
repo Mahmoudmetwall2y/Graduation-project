@@ -3,8 +3,6 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs'
 import {
-  Moon,
-  Sun,
   User,
   Bell,
   Settings,
@@ -15,16 +13,25 @@ import {
   ClipboardList,
   LogOut,
   Activity,
+  Heart,
 } from 'lucide-react'
+import Image from 'next/image'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
+import { useUserRole } from '../../hooks/useUserRole'
 
-const navItems = [
+const adminNavItems = [
   { label: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
   { label: 'Sessions', href: '/sessions', icon: ClipboardList },
   { label: 'Patients', href: '/patients', icon: Users },
   { label: 'Devices', href: '/devices', icon: Cpu },
   { label: 'Reports', href: '/reports', icon: FileText },
+]
+
+const visitorNavItems = [
+  { label: 'Sessions', href: '/sessions', icon: ClipboardList },
+  { label: 'Devices', href: '/devices', icon: Cpu },
+  { label: 'Reports', href: '/reports', icon: Heart },
 ]
 
 const isActivePath = (pathname: string, href: string) => {
@@ -39,6 +46,7 @@ export function TopBar() {
   const supabase = createClientComponentClient()
   const pathname = usePathname()
   const router = useRouter()
+  const { isAdmin, loading: roleLoading } = useUserRole()
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => {
@@ -76,19 +84,22 @@ export function TopBar() {
 
   if (pathname === '/' || pathname?.startsWith('/auth')) return null
 
+  // Show nav items based on role (while loading, show visitor set to avoid flash of admin links)
+  const navItems = !roleLoading && isAdmin ? adminNavItems : visitorNavItems
+
   return (
     <header className="topbar-shell">
       <div className="topbar-row">
-        <Link href="/" className="topbar-brand">
-          <div className="topbar-brand-mark">
-            <svg viewBox="0 0 24 24" className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2.25">
-              <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
-            </svg>
-          </div>
-          <div className="leading-tight">
-            <p className="topbar-brand-title">AscultiCor</p>
-            <p className="topbar-brand-sub">Pulse Intelligence</p>
-          </div>
+        <Link href={isAdmin ? '/' : '/sessions'} className="topbar-brand">
+          <Image
+            src="/asculticor-logo-wordmark.png"
+            alt="AscultiCor"
+            width={132}
+            height={44}
+            className="block h-7 w-36 object-contain"
+            priority
+            unoptimized
+          />
         </Link>
 
         <div className="topbar-actions">
@@ -97,11 +108,22 @@ export function TopBar() {
             {timeLabel || 'Live'}
           </div>
 
+          {/* Role badge */}
+          {!roleLoading && (
+            <span className={`hidden sm:inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wide ${
+              isAdmin
+                ? 'bg-emerald-900/30 text-emerald-400 border border-emerald-700/30'
+                : 'bg-hud-cyan/10 text-hud-cyan/80 border border-hud-cyan/20'
+            }`}>
+              {isAdmin ? 'Admin' : 'Visitor'}
+            </span>
+          )}
 
-
-          <Link href="/alerts" className="topbar-action" title="Alerts" aria-label="Alerts">
-            <Bell className="w-4 h-4" />
-          </Link>
+          {isAdmin && (
+            <Link href="/alerts" className="topbar-action" title="Alerts" aria-label="Alerts">
+              <Bell className="w-4 h-4" />
+            </Link>
+          )}
 
           <Link href="/settings" className="topbar-action" title="Settings" aria-label="Settings">
             <Settings className="w-4 h-4" />
@@ -144,4 +166,3 @@ export function TopBar() {
     </header>
   )
 }
-

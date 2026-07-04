@@ -16,14 +16,14 @@ logger = logging.getLogger(__name__)
 
 class SupabaseClient:
     """Wrapper for Supabase operations."""
-    
+
     def __init__(self):
         url = os.getenv("SUPABASE_URL")
         key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
-        
+
         if not url or not key:
             raise ValueError("SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must be set")
-        
+
         self.client: Client = create_client(url, key)
         self.storage = self.client.storage
         logger.info("Supabase client initialized")
@@ -50,9 +50,9 @@ class SupabaseClient:
             "storage": storage_ok,
             "ok": database_ok and storage_ok,
         }
-    
+
     # ========== SESSION OPERATIONS ==========
-    
+
     def get_session(self, session_id: str) -> Optional[Dict[str, Any]]:
         """Get session by ID."""
         try:
@@ -61,10 +61,10 @@ class SupabaseClient:
         except Exception as e:
             logger.error(f"Error getting session {session_id}: {e}")
             return None
-    
+
     def update_session_status(
-        self, 
-        session_id: str, 
+        self,
+        session_id: str,
         status: str,
         ended_at: Optional[str] = None
     ) -> bool:
@@ -73,7 +73,7 @@ class SupabaseClient:
             update_data = {"status": status}
             if ended_at:
                 update_data["ended_at"] = ended_at
-            
+
             (
                 self.client.table("sessions")
                 .update(update_data)
@@ -100,7 +100,7 @@ class SupabaseClient:
         ended_at: Optional[str] = None
     ) -> bool:
         """Atomically update session status only if current status matches expected_status.
-        
+
         This prevents race conditions where multiple handlers try to transition
         the same session simultaneously. Returns True if the update was applied.
         """
@@ -116,7 +116,7 @@ class SupabaseClient:
                 .eq("status", expected_status)  # Only update if status matches
                 .execute()
             )
-            
+
             refreshed = self.get_session(session_id)
             if refreshed and refreshed.get("status") == new_status:
                 logger.info(
@@ -131,17 +131,17 @@ class SupabaseClient:
         except Exception as e:
             logger.error(f"Error in conditional status update: {e}")
             return False
-    
+
     def get_stale_sessions(self, max_duration_minutes: int) -> List[Dict[str, Any]]:
         """Get sessions that have been in streaming/processing state for too long."""
         try:
             from datetime import timedelta
             cutoff_time = datetime.now(timezone.utc) - timedelta(minutes=max_duration_minutes)
-            
+
             response = self.client.table("sessions").select("id, org_id, status, created_at").in_(
                 "status", ["streaming", "processing"]
             ).lt("created_at", cutoff_time.isoformat()).execute()
-            
+
             return response.data or []
         except Exception as e:
             logger.error(f"Error getting stale sessions: {e}")
@@ -208,9 +208,35 @@ class SupabaseClient:
         except Exception as e:
             logger.error(f"Error ensuring session exists: {e}")
             return False
-    
+
     # ========== DEVICE OPERATIONS ==========
-    
+
+    def device_exists(self, device_id: str, org_id: str) -> bool:
+        """Return whether an MQTT device topic still maps to a known device."""
+        try:
+            response = (
+                self.client.table("devices")
+                .select("id, org_id")
+                .eq("id", device_id)
+                .limit(1)
+                .execute()
+            )
+            device = response.data[0] if response.data else None
+            if not device:
+                return False
+
+            if device.get("org_id") != org_id:
+                logger.warning(
+                    f"Ignoring MQTT message for device {device_id}: topic org {org_id} "
+                    f"does not match database org {device.get('org_id')}"
+                )
+                return False
+
+            return True
+        except Exception as e:
+            logger.error(f"Error checking device {device_id}: {e}")
+            return False
+
     def update_device_last_seen(self, device_id: str) -> bool:
         """Update device last_seen_at timestamp."""
         return self.update_device_status(
@@ -272,9 +298,103 @@ class SupabaseClient:
         except Exception as e:
             logger.error(f"Error creating device telemetry: {e}")
             return False
-    
+
+    def update_firmware_deployment_from_event(
+        self,
+        device_id: str,
+        state: str,
+        target_version: Optional[str] = None,
+        detail: Optional[str] = None,
+    ) -> bool:
+        """Advance the newest active OTA deployment for a device."""
+        state_map = {
+            "downloading": "downloading",
+            "installing": "installing",
+            "rebooting": "rebooting",
+            "failed": "failed",
+            "rejected": "failed",
+        }
+        status = state_map.get(state)
+        if not status:
+            return True
+
+        try:
+            query = (
+                self.client.table("firmware_deployments")
+                .select("id, metadata")
+                .eq("device_id", device_id)
+                .in_("status", ["dispatched", "downloading", "installing", "rebooting"])
+                .order("requested_at", desc=True)
+                .limit(1)
+                .execute()
+            )
+            if not query.data:
+                return True
+
+            deployment = query.data[0]
+            metadata = deployment.get("metadata") or {}
+            metadata.update({
+                "device_state": state,
+                "target_version": target_version,
+                "device_detail": detail,
+                "last_device_event_at": datetime.now(timezone.utc).isoformat(),
+            })
+            updates: Dict[str, Any] = {"status": status, "metadata": metadata}
+            if status == "failed":
+                updates["last_error"] = detail or state
+                updates["completed_at"] = datetime.now(timezone.utc).isoformat()
+
+            self.client.table("firmware_deployments").update(updates).eq(
+                "id", deployment["id"]
+            ).execute()
+            return True
+        except Exception as e:
+            logger.error(f"Error updating firmware deployment: {e}")
+            return False
+
+    def reconcile_firmware_deployment(
+        self,
+        device_id: str,
+        firmware_version: Optional[str],
+    ) -> bool:
+        """Mark a rebooting deployment successful once the new version checks in."""
+        if not firmware_version:
+            return True
+        try:
+            query = (
+                self.client.table("firmware_deployments")
+                .select("id, release_id, metadata, firmware_releases(version)")
+                .eq("device_id", device_id)
+                .in_("status", ["dispatched", "downloading", "installing", "rebooting"])
+                .order("requested_at", desc=True)
+                .limit(1)
+                .execute()
+            )
+            if not query.data:
+                return True
+            deployment = query.data[0]
+            release = deployment.get("firmware_releases") or {}
+            if release.get("version") != firmware_version:
+                return True
+
+            metadata = deployment.get("metadata") or {}
+            metadata.update({
+                "confirmed_version": firmware_version,
+                "confirmed_at": datetime.now(timezone.utc).isoformat(),
+            })
+            self.client.table("firmware_deployments").update({
+                "status": "succeeded",
+                "completed_at": datetime.now(timezone.utc).isoformat(),
+                "last_error": None,
+                "metadata": metadata,
+            }).eq("id", deployment["id"]).execute()
+            return True
+        except Exception as e:
+            logger.error(f"Error reconciling firmware deployment: {e}")
+            return False
+
     # ========== RECORDING OPERATIONS ==========
-    
+
     def create_recording(
         self,
         org_id: str,
@@ -298,16 +418,16 @@ class SupabaseClient:
                 "storage_path": storage_path,
                 "checksum": checksum
             }).execute()
-            
+
             recording_id = response.data[0]["id"]
             logger.info(f"Created recording {recording_id}")
             return recording_id
         except Exception as e:
             logger.error(f"Error creating recording: {e}")
             return None
-    
+
     # ========== PREDICTION OPERATIONS ==========
-    
+
     def create_prediction(
         self,
         org_id: str,
@@ -331,14 +451,14 @@ class SupabaseClient:
                 "output_json": output_json,
                 "latency_ms": latency_ms
             }).execute()
-            
+
             prediction_id = response.data[0]["id"]
             logger.info(f"Created prediction {prediction_id}")
             return prediction_id
         except Exception as e:
             logger.error(f"Error creating prediction: {e}")
             return None
-    
+
     def create_murmur_severity(
         self,
         org_id: str,
@@ -348,7 +468,7 @@ class SupabaseClient:
         severity_data: Dict[str, Any]
     ) -> Optional[str]:
         """Create murmur severity entry.
-        
+
         The severity CNN outputs keys like systolic_timing, systolic_shape, etc.
         Map them to the DB columns (location_json, timing_json, shape_json, etc.).
         Missing keys are stored as empty dicts.
@@ -366,16 +486,16 @@ class SupabaseClient:
                 "pitch_json": severity_data.get('systolic_pitch', severity_data.get('pitch', {})),
                 "quality_json": severity_data.get('systolic_quality', severity_data.get('quality', {}))
             }).execute()
-            
+
             severity_id = response.data[0]["id"]
             logger.info(f"Created murmur severity {severity_id}")
             return severity_id
         except Exception as e:
             logger.error(f"Error creating murmur severity: {e}")
             return None
-    
+
     # ========== LIVE METRICS OPERATIONS ==========
-    
+
     def create_live_metrics(
         self,
         org_id: str,
@@ -393,9 +513,9 @@ class SupabaseClient:
         except Exception as e:
             logger.error(f"Error creating live metrics: {e}")
             return False
-    
+
     # ========== STORAGE OPERATIONS ==========
-    
+
     def upload_file(
         self,
         bucket: str,
@@ -415,9 +535,9 @@ class SupabaseClient:
         except Exception as e:
             logger.error(f"Error uploading file: {e}")
             return False
-    
+
     # ========== AUDIT LOG OPERATIONS ==========
-    
+
     def create_audit_log(
         self,
         org_id: str,
@@ -441,9 +561,9 @@ class SupabaseClient:
         except Exception as e:
             logger.error(f"Error creating audit log: {e}")
             return False
-    
+
     # ========== UTILITY FUNCTIONS ==========
-    
+
     @staticmethod
     def compute_checksum(data: bytes) -> str:
         """Compute SHA-256 checksum of data."""

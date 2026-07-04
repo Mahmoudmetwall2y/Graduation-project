@@ -14,6 +14,7 @@ import { useToast } from '../components/Toast'
 // Libraries for PDF generation
 import jsPDF from 'jspdf'
 import html2canvas from 'html2canvas'
+import { buildSessionReportDocument, ExportLlmReport } from '../../lib/reportExport'
 
 interface AggregateStats {
     totalSessions: number
@@ -29,11 +30,18 @@ interface ReportSession {
     status: string
     patient?: { full_name: string, mrn: string | null } | null
     predictions?: {
+        modality: string
+        model_name: string
+        model_version: string
+        latency_ms: number
+        created_at: string
         output_json: {
             confidence: number
-            label: string
+            label?: string
+            prediction?: string
         }
     }[] | null
+    llm_reports?: ExportLlmReport[] | null
 }
 
 function escapeHtml(value: unknown): string {
@@ -104,7 +112,8 @@ export default function ReportsPage() {
           status,
           patient_id,
           patient:patients(full_name, mrn),
-          predictions(output_json)
+          predictions(modality, model_name, model_version, latency_ms, created_at, output_json),
+          llm_reports(status, model_name, model_version, report_text, report_json, completed_at)
         `)
                 .order('created_at', { ascending: false })
                 .limit(50) // Limit to recent 50 for performance
@@ -191,6 +200,17 @@ export default function ReportsPage() {
                     </div>
                 </div>
             `
+
+            const completedReport = session.llm_reports
+                ?.filter((report) => report.status === 'completed')
+                .sort((a, b) => new Date(b.completed_at || 0).getTime() - new Date(a.completed_at || 0).getTime())[0]
+            const professionalDocument = buildSessionReportDocument({
+                session,
+                predictions: session.predictions || [],
+                report: completedReport || null,
+            })
+            const parsedDocument = new DOMParser().parseFromString(professionalDocument, 'text/html')
+            reportContainer.innerHTML = `${parsedDocument.head.innerHTML}${parsedDocument.body.innerHTML}`
             document.body.appendChild(reportContainer)
 
             const canvas = await html2canvas(reportContainer, { scale: 2 })

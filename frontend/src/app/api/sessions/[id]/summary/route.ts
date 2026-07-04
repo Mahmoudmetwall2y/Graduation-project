@@ -2,6 +2,8 @@ import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs'
 import { cookies } from 'next/headers'
 import { NextResponse } from 'next/server'
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
 function jsonNoStore(body: unknown, status = 200) {
   return NextResponse.json(body, {
     status,
@@ -16,6 +18,10 @@ export async function GET(
   { params }: { params: { id: string } }
 ) {
   try {
+    if (!UUID_RE.test(params.id)) {
+      return jsonNoStore({ error: 'Invalid session id' }, 400)
+    }
+
     const supabase = createRouteHandlerClient({ cookies })
 
     const {
@@ -48,7 +54,12 @@ export async function GET(
       return jsonNoStore({ error: 'Session not found' }, 404)
     }
 
-    const [{ data: settingsData }, { data: predictions, error: predictionsError }, { data: notes, error: notesError }] = await Promise.all([
+    const [
+      { data: settingsData },
+      { data: predictions, error: predictionsError },
+      { data: notes, error: notesError },
+      { data: events, error: eventsError },
+    ] = await Promise.all([
       supabase
         .from('org_settings')
         .select('deidentify_exports')
@@ -64,15 +75,24 @@ export async function GET(
         .select('id, note, created_at, author_id')
         .eq('session_id', params.id)
         .order('created_at', { ascending: false }),
+      supabase
+        .from('audit_logs')
+        .select('id, action, metadata, created_at')
+        .eq('entity_type', 'session')
+        .eq('entity_id', params.id)
+        .order('created_at', { ascending: false })
+        .limit(20),
     ])
 
     if (predictionsError) throw predictionsError
     if (notesError) throw notesError
+    if (eventsError) throw eventsError
 
     return jsonNoStore({
       session,
       predictions: predictions || [],
       notes: notes || [],
+      events: events || [],
       deidentifyExports: Boolean(settingsData?.deidentify_exports),
     })
   } catch (error) {

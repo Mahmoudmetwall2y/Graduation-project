@@ -16,10 +16,10 @@ VALUES (
 -- 2. CREATE USER PROFILE
 -- ============================================================
 
--- User created in Supabase Auth:
+-- User created in Supabase Auth (create this user manually in Supabase Auth dashboard):
 -- ID: 4d4187e3-c290-4ea0-9edd-87f1a0d901fa
 -- Email: admin@asculticor.local
--- Password: asculticor123
+-- Password: set your own strong password in Supabase Auth dashboard
 -- NOTE: Replace with your own dashboard-created user before running in shared environments
 
 INSERT INTO profiles (id, org_id, full_name, role, created_at)
@@ -36,7 +36,7 @@ ON CONFLICT (id) DO NOTHING;
 -- 3. CREATE DEVICE
 -- ============================================================
 
--- Device secret: demo_secret_2024
+-- Device secret: see project README for demo credentials. DO NOT commit real secrets in comments.
 INSERT INTO devices (id, org_id, owner_user_id, device_name, device_secret_hash, created_at)
 VALUES (
     '00000000-0000-0000-0000-000000000004'::uuid,

@@ -50,6 +50,22 @@ async def lifespan(app: FastAPI):
         mqtt_handler = MQTTHandler()
         mqtt_handler.start()
         logger.info("MQTT handler started successfully")
+
+        # Warn loudly if demo mode is active so it is never invisible
+        if mqtt_handler.inference_engine.demo_mode_active:
+            logger.warning("=" * 60)
+            logger.warning("DEMO MODE ACTIVE — all predictions are deterministic mock values.")
+            logger.warning("Set ENABLE_DEMO_MODE=false and mount real models for real-device use.")
+            logger.warning("=" * 60)
+        else:
+            status = mqtt_handler.inference_engine.get_model_status()
+            loaded = status['models_loaded']
+            total = status['models_total']
+            pending = [k for k, v in status['details'].items() if v.get('pending')]
+            logger.info(
+                f"Real inference mode active — {loaded}/{total} ML models loaded. "
+                f"Pending (disabled) slots: {pending}"
+            )
     except Exception as e:
         logger.error(f"Failed to start MQTT handler: {e}")
         raise
@@ -160,9 +176,10 @@ def require_internal_token(request: Request):
     """Protect internal operational endpoints with a shared token."""
     configured = os.getenv("INFERENCE_INTERNAL_TOKEN")
     if not configured:
+        # Return 503 (not 500) to avoid leaking that the variable is missing
         raise HTTPException(
-            status_code=500,
-            detail="INFERENCE_INTERNAL_TOKEN is not configured"
+            status_code=503,
+            detail="Internal token not configured"
         )
 
     provided = request.headers.get("x-internal-token")
@@ -220,7 +237,13 @@ async def health_check(request: Request):
         models_loaded=model_info['models_loaded'],
         models_total=model_info['models_total'],
         models={
-            name: ModelDetail(loaded=detail['loaded'], error=detail['error'])
+            name: ModelDetail(
+                loaded=detail['loaded'],
+                error=(
+                    detail.get('error') or
+                    ("PENDING — model not yet delivered" if detail.get('pending') else None)
+                )
+            )
             for name, detail in model_info['details'].items()
         },
     )
@@ -253,7 +276,7 @@ async def get_config(request: Request):
         ecg_max_duration=float(os.getenv("ECG_MAX_DURATION", 60)),
         stream_timeout_sec=int(os.getenv("STREAM_TIMEOUT_SEC", 10)),
         metrics_update_hz=float(os.getenv("METRICS_UPDATE_HZ", 10)),
-        demo_mode=os.getenv("ENABLE_DEMO_MODE", "true").lower() == "true"
+        demo_mode=os.getenv("ENABLE_DEMO_MODE", "false").lower() == "true"
     )
 
 
@@ -293,22 +316,41 @@ async def get_metrics(request: Request):
 @app.post("/simulate")
 async def simulate_inference(request: Request):
     """
-    Optional endpoint to test inference pipeline without MQTT.
-    For debugging and testing.
+    Simulation status endpoint.
+    Full pipeline simulation requires a real ESP32 device or publishing binary
+    MQTT data on the correct session topics. See docs/REAL_DEVICE_DEMO_RUNBOOK.md.
     """
     require_internal_token(request)
 
     global mqtt_handler
-    
-    if not mqtt_handler:
-        raise HTTPException(status_code=503, detail="Service not initialized")
-    
-    # This could trigger a simulated data flow
-    # For now, just return demo mode status
-    
+
+    models_loaded: Dict[str, bool] = {}
+    demo_mode_active: Optional[bool] = None
+
+    if mqtt_handler:
+        engine = mqtt_handler.inference_engine
+        demo_mode_active = engine.demo_mode_active
+        model_status = engine.get_model_status()
+        models_loaded = {
+            k: v['loaded']
+            for k, v in model_status['details'].items()
+        }
+        models_pending = [
+            k for k, v in model_status['details'].items() if v.get('pending')
+        ]
+
     return {
-        "message": "Use the demo_publisher.py script for full simulation",
-        "demo_mode": mqtt_handler.inference_engine.demo_mode_active
+        "status": "simulation_requires_real_device_or_mqtt_publish",
+        "message": (
+            "Direct API simulation is not available. "
+            "To run a full pipeline test, connect a real ESP32 sensor or publish "
+            "binary PCG/ECG MQTT data on the correct session topics. "
+            "See docs/REAL_DEVICE_DEMO_RUNBOOK.md for the topic format and payload spec."
+        ),
+        "demo_mode_active": demo_mode_active,
+        "models_loaded": models_loaded,
+        "models_pending": models_pending,
+        "docs": "docs/REAL_DEVICE_DEMO_RUNBOOK.md",
     }
 
 

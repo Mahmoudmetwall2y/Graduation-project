@@ -1,0 +1,299 @@
+{
+  "name": "02 - Processing Reliability",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "9e2e1210-5211-569b-b85c-cc3aca5617fe",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 2
+            }
+          ]
+        }
+      },
+      "id": "265034cd-ecfa-529b-abed-fd4f2a87011b",
+      "name": "Session Recovery Every Two Minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        140
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{(($env.ASCULTICOR_APP_URL || 'http://frontend:3000').replace(/\\/+$/, '')) + '/api/n8n/workflows?action=session-recovery'}}",
+        "options": {},
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Host",
+              "value": "={{$env.ASCULTICOR_INTERNAL_HOST_HEADER || ($env.ASCULTICOR_PUBLIC_APP_URL || 'http://frontend:3000').replace(/^https?:\\/\\//, '').replace(/\\/.*$/, '')}}"
+            },
+            {
+              "name": "X-Forwarded-Host",
+              "value": "={{$env.ASCULTICOR_INTERNAL_HOST_HEADER || ($env.ASCULTICOR_PUBLIC_APP_URL || 'http://frontend:3000').replace(/^https?:\\/\\//, '').replace(/\\/.*$/, '')}}"
+            },
+            {
+              "name": "X-Forwarded-Proto",
+              "value": "https"
+            },
+            {
+              "name": "x-internal-token",
+              "value": "={{$env.ASCULTICOR_INTERNAL_API_TOKEN}}"
+            }
+          ]
+        },
+        "method": "POST"
+      },
+      "id": "895707dc-de33-5355-aadd-873e25731733",
+      "name": "Run Session Recovery",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        300,
+        0
+      ],
+      "alwaysOutputData": true,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "jsCode": "const emails = Array.isArray($json.emails) ? $json.emails : [];\n\nfunction escapeHtml(value) {\n  return String(value ?? '')\n    .replace(/&/g, '&amp;')\n    .replace(/</g, '&lt;')\n    .replace(/>/g, '&gt;')\n    .replace(/\"/g, '&quot;')\n    .replace(/'/g, '&#039;');\n}\n\nfunction emailTheme(subject, text) {\n  const content = `${subject} ${text}`.toLowerCase();\n  if (/critical|failed|failure|dead.?letter|offline|missing|error/.test(content)) {\n    return { state: 'Action required', color: '#a53f4b', background: '#fff0f1', border: '#e7a8af' };\n  }\n  if (/warning|degraded|stale|recovered|alert|review|issue/.test(content)) {\n    return { state: 'Review recommended', color: '#9a6700', background: '#fff7df', border: '#efd58a' };\n  }\n  return { state: 'Operational update', color: '#0f766e', background: '#e7f7f4', border: '#99d9cf' };\n}\n\nfunction cleanTitle(subject) {\n  return String(subject || 'AscultiCor operational notification')\n    .replace(/^\\[AscultiCor\\]\\s*/i, '')\n    .trim();\n}\n\nfunction structuredBody(text) {\n  const lines = String(text || '').split(/\\r?\\n/).map((line) => line.trim()).filter(Boolean);\n  const rows = [];\n  const paragraphs = [];\n\n  for (const line of lines) {\n    const match = line.match(/^([^:]{2,42}):\\s*(.+)$/);\n    if (match) {\n      rows.push(`<tr>\n        <td valign=\"top\" style=\"width:38%;padding:10px 12px;border-top:1px solid #e7edf2;color:#607286;font-size:12px;font-weight:700;\">${escapeHtml(match[1])}</td>\n        <td valign=\"top\" style=\"padding:10px 12px;border-top:1px solid #e7edf2;color:#172b40;font-size:13px;line-height:1.5;word-break:break-word;\">${escapeHtml(match[2])}</td>\n      </tr>`);\n    } else {\n      paragraphs.push(`<div style=\"margin:0 0 9px;color:#314459;font-size:14px;line-height:1.65;\">${escapeHtml(line)}</div>`);\n    }\n  }\n\n  return {\n    paragraphs: paragraphs.join(''),\n    rows: rows.join(''),\n  };\n}\n\nfunction operationalEmail(subject, text) {\n  const theme = emailTheme(subject, text);\n  const title = cleanTitle(subject);\n  const body = structuredBody(text);\n  const checkedAt = new Intl.DateTimeFormat('en-GB', {\n    dateStyle: 'medium',\n    timeStyle: 'short',\n    timeZone: 'Africa/Cairo',\n  }).format(new Date());\n\n  const details = body.rows\n    ? `<tr><td style=\"padding:8px 30px 24px;\">\n        <table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"border:1px solid #dce4eb;border-radius:10px;overflow:hidden;background:#ffffff;\">\n          <tr><td colspan=\"2\" style=\"padding:11px 12px;background:#eef3f6;color:#526579;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.6px;\">Operational details</td></tr>\n          ${body.rows}\n        </table>\n      </td></tr>`\n    : '';\n\n  return `<!doctype html>\n<html>\n<head>\n  <meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\n  <style>@media only screen and (max-width:620px){.shell{width:100%!important}.content-pad{padding-left:20px!important;padding-right:20px!important}}</style>\n</head>\n<body style=\"margin:0;padding:0;background:#f2f6f8;font-family:Arial,Helvetica,sans-serif;color:#172b40;\">\n  <div style=\"display:none;max-height:0;overflow:hidden;opacity:0;\">${escapeHtml(title)} \u2014 AscultiCor automated operational notification.</div>\n  <table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"background:#f2f6f8;\">\n    <tr><td align=\"center\" style=\"padding:28px 12px;\">\n      <table role=\"presentation\" class=\"shell\" width=\"680\" cellspacing=\"0\" cellpadding=\"0\" style=\"width:680px;max-width:100%;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 6px 22px rgba(11,31,58,.08);\">\n        <tr><td class=\"content-pad\" style=\"padding:26px 30px;background:#0b1f3a;border-bottom:5px solid #0f766e;\">\n          <div style=\"color:#7bd3c7;font-size:12px;font-weight:800;letter-spacing:1.4px;text-transform:uppercase;\">AscultiCor Operations</div>\n          <div style=\"margin-top:7px;color:#ffffff;font-size:25px;font-weight:800;line-height:1.25;\">${escapeHtml(title)}</div>\n          <div style=\"margin-top:12px;\"><span style=\"display:inline-block;padding:5px 10px;border-radius:999px;border:1px solid ${theme.border};background:${theme.background};color:${theme.color};font-size:12px;font-weight:700;line-height:1;\">${escapeHtml(theme.state)}</span></div>\n        </td></tr>\n        <tr><td class=\"content-pad\" style=\"padding:24px 30px 10px;\">\n          <div style=\"padding:16px 18px;border-left:4px solid ${theme.color};border-radius:8px;background:${theme.background};\">\n            ${body.paragraphs || '<div style=\"color:#314459;font-size:14px;line-height:1.65;\">An AscultiCor operational event was recorded.</div>'}\n          </div>\n        </td></tr>\n        ${details}\n        <tr><td class=\"content-pad\" style=\"padding:18px 30px;background:#f5f8fa;border-top:1px solid #e2e8ee;color:#607286;font-size:12px;line-height:1.6;\">\n          Generated ${escapeHtml(checkedAt)} (Africa/Cairo)<br>\n          Automated by n8n \u00b7 Review operational and clinical alerts in AscultiCor.\n        </td></tr>\n      </table>\n    </td></tr>\n  </table>\n</body>\n</html>`;\n}\n\nreturn emails\n  .filter((item) => item && item.emailTo && item.emailSubject && item.emailText)\n  .map((item) => ({\n    json: {\n      emailFrom: item.emailFrom || '',\n      emailTo: item.emailTo,\n      emailSubject: item.emailSubject,\n      emailText: item.emailText,\n      emailHtml: operationalEmail(item.emailSubject, item.emailText),\n    },\n  }));\n"
+      },
+      "id": "4b42bf38-c570-59e2-a3a1-e98c3020b4b2",
+      "name": "Prepare Session Recovery Emails",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        620,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{$json.emailTo}}",
+        "subject": "={{$json.emailSubject}}",
+        "message": "={{$json.emailHtml}}",
+        "emailType": "html",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "2569787f-1a34-5afd-9dc3-172ebff486ae",
+      "name": "Send Session Recovery Gmail",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        940,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 5
+            }
+          ]
+        }
+      },
+      "id": "11745b1d-761b-513d-b95f-388f9b00c4c5",
+      "name": "Report DLQ Every Five Minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{(($env.ASCULTICOR_APP_URL || 'http://frontend:3000').replace(/\\/+$/, '')) + '/api/n8n/workflows?action=report-dead-letter'}}",
+        "options": {},
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Host",
+              "value": "={{$env.ASCULTICOR_INTERNAL_HOST_HEADER || ($env.ASCULTICOR_PUBLIC_APP_URL || 'http://frontend:3000').replace(/^https?:\\/\\//, '').replace(/\\/.*$/, '')}}"
+            },
+            {
+              "name": "X-Forwarded-Host",
+              "value": "={{$env.ASCULTICOR_INTERNAL_HOST_HEADER || ($env.ASCULTICOR_PUBLIC_APP_URL || 'http://frontend:3000').replace(/^https?:\\/\\//, '').replace(/\\/.*$/, '')}}"
+            },
+            {
+              "name": "X-Forwarded-Proto",
+              "value": "https"
+            },
+            {
+              "name": "x-internal-token",
+              "value": "={{$env.ASCULTICOR_INTERNAL_API_TOKEN}}"
+            }
+          ]
+        },
+        "method": "POST"
+      },
+      "id": "778c447b-734d-54aa-8886-c5e3326090f7",
+      "name": "Run Report Dead Letter",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        300,
+        260
+      ],
+      "alwaysOutputData": true,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "jsCode": "const emails = Array.isArray($json.emails) ? $json.emails : [];\n\nfunction escapeHtml(value) {\n  return String(value ?? '')\n    .replace(/&/g, '&amp;')\n    .replace(/</g, '&lt;')\n    .replace(/>/g, '&gt;')\n    .replace(/\"/g, '&quot;')\n    .replace(/'/g, '&#039;');\n}\n\nfunction emailTheme(subject, text) {\n  const content = `${subject} ${text}`.toLowerCase();\n  if (/critical|failed|failure|dead.?letter|offline|missing|error/.test(content)) {\n    return { state: 'Action required', color: '#a53f4b', background: '#fff0f1', border: '#e7a8af' };\n  }\n  if (/warning|degraded|stale|recovered|alert|review|issue/.test(content)) {\n    return { state: 'Review recommended', color: '#9a6700', background: '#fff7df', border: '#efd58a' };\n  }\n  return { state: 'Operational update', color: '#0f766e', background: '#e7f7f4', border: '#99d9cf' };\n}\n\nfunction cleanTitle(subject) {\n  return String(subject || 'AscultiCor operational notification')\n    .replace(/^\\[AscultiCor\\]\\s*/i, '')\n    .trim();\n}\n\nfunction structuredBody(text) {\n  const lines = String(text || '').split(/\\r?\\n/).map((line) => line.trim()).filter(Boolean);\n  const rows = [];\n  const paragraphs = [];\n\n  for (const line of lines) {\n    const match = line.match(/^([^:]{2,42}):\\s*(.+)$/);\n    if (match) {\n      rows.push(`<tr>\n        <td valign=\"top\" style=\"width:38%;padding:10px 12px;border-top:1px solid #e7edf2;color:#607286;font-size:12px;font-weight:700;\">${escapeHtml(match[1])}</td>\n        <td valign=\"top\" style=\"padding:10px 12px;border-top:1px solid #e7edf2;color:#172b40;font-size:13px;line-height:1.5;word-break:break-word;\">${escapeHtml(match[2])}</td>\n      </tr>`);\n    } else {\n      paragraphs.push(`<div style=\"margin:0 0 9px;color:#314459;font-size:14px;line-height:1.65;\">${escapeHtml(line)}</div>`);\n    }\n  }\n\n  return {\n    paragraphs: paragraphs.join(''),\n    rows: rows.join(''),\n  };\n}\n\nfunction operationalEmail(subject, text) {\n  const theme = emailTheme(subject, text);\n  const title = cleanTitle(subject);\n  const body = structuredBody(text);\n  const checkedAt = new Intl.DateTimeFormat('en-GB', {\n    dateStyle: 'medium',\n    timeStyle: 'short',\n    timeZone: 'Africa/Cairo',\n  }).format(new Date());\n\n  const details = body.rows\n    ? `<tr><td style=\"padding:8px 30px 24px;\">\n        <table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"border:1px solid #dce4eb;border-radius:10px;overflow:hidden;background:#ffffff;\">\n          <tr><td colspan=\"2\" style=\"padding:11px 12px;background:#eef3f6;color:#526579;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.6px;\">Operational details</td></tr>\n          ${body.rows}\n        </table>\n      </td></tr>`\n    : '';\n\n  return `<!doctype html>\n<html>\n<head>\n  <meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\n  <style>@media only screen and (max-width:620px){.shell{width:100%!important}.content-pad{padding-left:20px!important;padding-right:20px!important}}</style>\n</head>\n<body style=\"margin:0;padding:0;background:#f2f6f8;font-family:Arial,Helvetica,sans-serif;color:#172b40;\">\n  <div style=\"display:none;max-height:0;overflow:hidden;opacity:0;\">${escapeHtml(title)} \u2014 AscultiCor automated operational notification.</div>\n  <table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"background:#f2f6f8;\">\n    <tr><td align=\"center\" style=\"padding:28px 12px;\">\n      <table role=\"presentation\" class=\"shell\" width=\"680\" cellspacing=\"0\" cellpadding=\"0\" style=\"width:680px;max-width:100%;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 6px 22px rgba(11,31,58,.08);\">\n        <tr><td class=\"content-pad\" style=\"padding:26px 30px;background:#0b1f3a;border-bottom:5px solid #0f766e;\">\n          <div style=\"color:#7bd3c7;font-size:12px;font-weight:800;letter-spacing:1.4px;text-transform:uppercase;\">AscultiCor Operations</div>\n          <div style=\"margin-top:7px;color:#ffffff;font-size:25px;font-weight:800;line-height:1.25;\">${escapeHtml(title)}</div>\n          <div style=\"margin-top:12px;\"><span style=\"display:inline-block;padding:5px 10px;border-radius:999px;border:1px solid ${theme.border};background:${theme.background};color:${theme.color};font-size:12px;font-weight:700;line-height:1;\">${escapeHtml(theme.state)}</span></div>\n        </td></tr>\n        <tr><td class=\"content-pad\" style=\"padding:24px 30px 10px;\">\n          <div style=\"padding:16px 18px;border-left:4px solid ${theme.color};border-radius:8px;background:${theme.background};\">\n            ${body.paragraphs || '<div style=\"color:#314459;font-size:14px;line-height:1.65;\">An AscultiCor operational event was recorded.</div>'}\n          </div>\n        </td></tr>\n        ${details}\n        <tr><td class=\"content-pad\" style=\"padding:18px 30px;background:#f5f8fa;border-top:1px solid #e2e8ee;color:#607286;font-size:12px;line-height:1.6;\">\n          Generated ${escapeHtml(checkedAt)} (Africa/Cairo)<br>\n          Automated by n8n \u00b7 Review operational and clinical alerts in AscultiCor.\n        </td></tr>\n      </table>\n    </td></tr>\n  </table>\n</body>\n</html>`;\n}\n\nreturn emails\n  .filter((item) => item && item.emailTo && item.emailSubject && item.emailText)\n  .map((item) => ({\n    json: {\n      emailFrom: item.emailFrom || '',\n      emailTo: item.emailTo,\n      emailSubject: item.emailSubject,\n      emailText: item.emailText,\n      emailHtml: operationalEmail(item.emailSubject, item.emailText),\n    },\n  }));\n"
+      },
+      "id": "bb9b3b1c-41ac-5601-aa32-b62033b8a557",
+      "name": "Prepare Report Dead Letter Emails",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        620,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{$json.emailTo}}",
+        "subject": "={{$json.emailSubject}}",
+        "message": "={{$json.emailHtml}}",
+        "emailType": "html",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "9dc60abc-4001-5134-bb6d-c2d3d5cf03c9",
+      "name": "Send Report Dead Letter Gmail",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        940,
+        260
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    }
+  ],
+  "connections": {
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Run Session Recovery",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Run Report Dead Letter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Session Recovery Every Two Minutes": {
+      "main": [
+        [
+          {
+            "node": "Run Session Recovery",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run Session Recovery": {
+      "main": [
+        [
+          {
+            "node": "Prepare Session Recovery Emails",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Session Recovery Emails": {
+      "main": [
+        [
+          {
+            "node": "Send Session Recovery Gmail",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Report DLQ Every Five Minutes": {
+      "main": [
+        [
+          {
+            "node": "Run Report Dead Letter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run Report Dead Letter": {
+      "main": [
+        [
+          {
+            "node": "Prepare Report Dead Letter Emails",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Report Dead Letter Emails": {
+      "main": [
+        [
+          {
+            "node": "Send Report Dead Letter Gmail",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Africa/Cairo"
+  },
+  "staticData": null,
+  "active": false,
+  "versionId": "4640c8ec-448c-5a20-ae90-75763cf7ec3a",
+  "id": ""
+}

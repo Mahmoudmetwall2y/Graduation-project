@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
+import Image from 'next/image'
 import {
   Activity,
   Cpu,
@@ -19,7 +20,10 @@ import {
   ArrowUpRight,
   BarChart3,
   Stethoscope,
-  ShieldAlert
+  ShieldAlert,
+  Server,
+  BrainCircuit,
+  FileText
 } from 'lucide-react'
 import {
   AreaChart,
@@ -76,7 +80,39 @@ interface DailyActivity {
 }
 
 // Waveform utilities — shared with session detail page
-import { generateEcgWaveform, generatePcgWaveform, buildWaveformSeries } from '../../lib/waveform'
+import { buildWaveformSeries } from '../../lib/waveform'
+
+interface SystemHealth {
+  status: 'healthy' | 'degraded' | 'unhealthy' | 'unknown' | string
+  checkedAt?: string
+  services?: {
+    supabase?: { status?: string; error?: string | null }
+    inference?: { status?: string; error?: string | null }
+    inferenceMetrics?: { status?: string; error?: string | null }
+  }
+  devices?: {
+    total?: number
+    online?: number
+    stale?: number
+    offline?: number
+  }
+  sessions?: {
+    active?: number
+  }
+  reports?: {
+    pending?: number
+    generating?: number
+  }
+  inference?: {
+    mqttConnected?: boolean
+    supabaseConnected?: boolean
+    storageConnected?: boolean
+    demoMode?: boolean
+    activeSessions?: number
+    modelsLoaded?: number
+    modelsTotal?: number
+  }
+}
 
 export default function Dashboard() {
   const [sessions, setSessions] = useState<Session[]>([])
@@ -97,6 +133,7 @@ export default function Dashboard() {
   const [ecgData, setEcgData] = useState<any[]>([])
   const [pcgData, setPcgData] = useState<any[]>([])
   const [deviceTelemetry, setDeviceTelemetry] = useState<any>(null)
+  const [systemHealth, setSystemHealth] = useState<SystemHealth | null>(null)
 
   const [error, setError] = useState<string | null>(null)
   const router = useRouter()
@@ -110,11 +147,18 @@ export default function Dashboard() {
         return
       }
 
-      const { data: profile } = await supabase
+      const { data: profile, error: profileError } = await supabase
         .from('profiles')
         .select('role')
         .eq('id', user.id)
         .single()
+
+      // If we can't read the profile (network error, not a role mismatch),
+      // don't lock the user out — show a degraded dashboard instead.
+      if (profileError && profileError.code !== 'PGRST116') {
+        // PGRST116 = 'no rows returned' (genuine non-admin); other errors are transient
+        console.warn('Profile fetch error (non-fatal):', profileError.message)
+      }
 
       if (profile?.role !== 'admin') {
         setIsAdmin(false)
@@ -247,6 +291,18 @@ export default function Dashboard() {
         )
       }
 
+      const healthResponse = await fetch('/api/health', { cache: 'no-store' })
+      if (healthResponse.ok) {
+        setSystemHealth(await healthResponse.json())
+      } else {
+        setSystemHealth({
+          status: 'degraded',
+          services: {
+            inference: { status: 'unknown', error: 'Health endpoint unavailable' },
+          },
+        })
+      }
+
       // Build real weekly activity from sessions
       const weekAgo = new Date()
       weekAgo.setDate(weekAgo.getDate() - 6)
@@ -308,9 +364,12 @@ export default function Dashboard() {
   useEffect(() => {
     fetchDashboardData()
 
-    // Polling remains the supported live path because browser MQTT topics are
-    // not produced by the backend and Supabase realtime is intentionally limited.
-    const interval = setInterval(fetchDashboardData, 5000)
+    // Poll every 15 seconds (reduced from 5s to lower Supabase query load).
+    // Each poll makes ~12 queries. At 15s cadence, 10 concurrent admins
+    // generate ~480 queries/minute — within Supabase free tier limits.
+    // TODO: Replace polling with Supabase Realtime subscriptions on sessions + devices
+    //       for instant updates without the query overhead.
+    const interval = setInterval(fetchDashboardData, 15000)
 
     return () => {
       clearInterval(interval)
@@ -321,6 +380,12 @@ export default function Dashboard() {
   const completedSessions = sessions.filter(s => s.status === 'done').length
   const alertCount = sessions.filter(s => s.status === 'error').length
   const lastUpdatedLabel = lastUpdated ? `Updated ${lastUpdated.toLocaleTimeString()}` : 'Updating...'
+  const healthStatus = systemHealth?.status || 'unknown'
+  const reportQueueCount = (systemHealth?.reports?.pending || 0) + (systemHealth?.reports?.generating || 0)
+  const inferenceModels = systemHealth?.inference?.modelsTotal
+    ? `${systemHealth.inference.modelsLoaded || 0}/${systemHealth.inference.modelsTotal}`
+    : '—'
+  const latestSessionStatus = sessions[0]?.status || 'No capture yet'
 
   const getStatusBadge = (status: string) => {
     const map: Record<string, string> = {
@@ -379,24 +444,9 @@ export default function Dashboard() {
   }
 
   if (!isAdmin && !loading && !error) {
-    return (
-      <div className="page-wrapper">
-        <div className="page-content flex flex-col items-center justify-center min-h-[60vh] space-y-4">
-          <div className="p-4 rounded-full bg-red-50/10 dark:bg-red-950/30">
-            <ShieldAlert className="w-12 h-12 text-destructive mx-auto mb-2" />
-          </div>
-          <h2 className="text-2xl font-bold text-foreground mb-2">Access Denied</h2>
-          <p className="text-muted-foreground max-w-sm text-center">
-            Admin privileges are required to view the clinical dashboard. Contact your system administrator to request access.
-          </p>
-          <div className="mt-6 flex gap-4">
-            <Link href="/" className="btn-primary">
-              Return Home
-            </Link>
-          </div>
-        </div>
-      </div>
-    )
+    // Visitors don't have dashboard access — redirect them to their sessions list
+    router.replace('/sessions')
+    return null
   }
 
 
@@ -408,11 +458,15 @@ export default function Dashboard() {
       <div className="page-wrapper">
         <div className="page-content">
           <div className="max-w-2xl mx-auto text-center py-16 fade-in">
-            <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-teal-500 to-teal-700 flex items-center justify-center mx-auto mb-6 shadow-xl">
-              <svg viewBox="0 0 32 32" className="logo-mark" aria-hidden="true">
-                <path d="M3 16h6l2.2-6.2 3.6 12.4 2.8-7.2 1.8 1.8H29" fill="none" stroke="white" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-            </div>
+            <Image
+              src="/asculticor-logo-wordmark.png"
+              alt="AscultiCor"
+              width={300}
+              height={65}
+              className="mx-auto mb-6 h-auto w-72 max-w-full object-contain"
+              priority
+              unoptimized
+            />
             <h1 className="text-3xl font-bold text-foreground tracking-tight mb-3">
               Welcome to <span className="gradient-text">AscultiCor</span>
             </h1>
@@ -441,8 +495,8 @@ export default function Dashboard() {
                 <div className="p-2.5 rounded-xl bg-blue-50 dark:bg-blue-950/30 w-fit mb-3">
                   <Wifi className="w-5 h-5 text-blue-600 dark:text-blue-400" />
                 </div>
-                <h3 className="font-semibold text-foreground mb-1">Flash & Provision</h3>
-                <p className="text-sm text-muted-foreground mb-4">Flash firmware and send credentials via Serial Monitor</p>
+                <h3 className="font-semibold text-foreground mb-1">Wi-Fi Onboarding</h3>
+                <p className="text-sm text-muted-foreground mb-4">Connect a preloaded device through its secure setup network</p>
                 <span className="inline-flex items-center text-sm text-muted-foreground">
                   <Clock className="w-3.5 h-3.5 mr-1" /> After step 1
                 </span>
@@ -478,8 +532,13 @@ export default function Dashboard() {
   // Calculate patient age string
   const getPatientAge = (dob: string | null) => {
     if (!dob) return '—'
-    const diff = Date.now() - new Date(dob).getTime()
-    const age = Math.abs(new Date(diff).getUTCFullYear() - 1970)
+    const birthDate = new Date(dob)
+    const today = new Date()
+    let age = today.getFullYear() - birthDate.getFullYear()
+    const monthDiff = today.getMonth() - birthDate.getMonth()
+    if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
+      age--
+    }
     return `${age} yrs`
   }
 
@@ -487,11 +546,8 @@ export default function Dashboard() {
   const activePatientAge = latestPatient ? getPatientAge(latestPatient.dob) : "—"
   const activePatientSex = latestPatient ? (latestPatient.sex ? latestPatient.sex.charAt(0).toUpperCase() + latestPatient.sex.slice(1) : "Unknown") : "—"
 
-  // Fallbacks for when no active signal — track whether we're using demo data
-  const defaultEcg = generateEcgWaveform(60)
-  const defaultPcg = generatePcgWaveform(60)
-  const isEcgDemo = ecgData.length === 0
-  const isPcgDemo = pcgData.length === 0
+  const hasEcgData = ecgData.length > 0
+  const hasPcgData = pcgData.length > 0
 
   return (
     <div className="relative h-full overflow-hidden" style={{ backgroundColor: 'var(--hud-bg-base)' }}>
@@ -518,6 +574,44 @@ export default function Dashboard() {
           </button>
         </div>
 
+        <div className="grid grid-cols-2 xl:grid-cols-4 gap-2 mb-3 fade-in">
+          <GlassCard className="p-3">
+            <div className="flex items-center gap-2">
+              <Wifi className={`w-4 h-4 ${onlineDevices > 0 ? 'text-emerald-400' : 'text-amber-400'}`} />
+              <span className="text-[10px] uppercase tracking-[0.22em] text-white/40">Devices</span>
+            </div>
+            <p className="mt-1 text-sm font-semibold text-white">{onlineDevices}/{deviceCount} online</p>
+            <p className="text-[10px] text-white/35">{offlineOverHour > 0 ? `${offlineOverHour} offline over 1h` : 'Fresh within device window'}</p>
+          </GlassCard>
+
+          <GlassCard className="p-3">
+            <div className="flex items-center gap-2">
+              <Server className={`w-4 h-4 ${healthStatus === 'healthy' ? 'text-emerald-400' : healthStatus === 'unhealthy' ? 'text-red-400' : 'text-amber-400'}`} />
+              <span className="text-[10px] uppercase tracking-[0.22em] text-white/40">Inference</span>
+            </div>
+            <p className="mt-1 text-sm font-semibold text-white capitalize">{systemHealth?.services?.inference?.status || healthStatus}</p>
+            <p className="text-[10px] text-white/35">Models loaded {inferenceModels}</p>
+          </GlassCard>
+
+          <GlassCard className="p-3">
+            <div className="flex items-center gap-2">
+              <FileText className={`w-4 h-4 ${reportQueueCount > 0 ? 'text-amber-400' : 'text-hud-cyan'}`} />
+              <span className="text-[10px] uppercase tracking-[0.22em] text-white/40">Reports</span>
+            </div>
+            <p className="mt-1 text-sm font-semibold text-white">{reportQueueCount} queued</p>
+            <p className="text-[10px] text-white/35">LLM workflow queue</p>
+          </GlassCard>
+
+          <GlassCard className="p-3">
+            <div className="flex items-center gap-2">
+              <BrainCircuit className={`w-4 h-4 ${systemHealth?.inference?.demoMode ? 'text-amber-400' : 'text-hud-cyan'}`} />
+              <span className="text-[10px] uppercase tracking-[0.22em] text-white/40">Latest Session</span>
+            </div>
+            <p className="mt-1 text-sm font-semibold text-white capitalize">{latestSessionStatus}</p>
+            <p className="text-[10px] text-white/35">{systemHealth?.inference?.demoMode ? 'Demo mode active' : 'Real hardware mode'}</p>
+          </GlassCard>
+        </div>
+
         {/* HUD 3-Column Layout */}
         <div className="grid grid-cols-1 lg:grid-cols-[280px_1fr_280px] gap-4 items-stretch flex-1 min-h-0">
 
@@ -534,24 +628,14 @@ export default function Dashboard() {
             />
 
             <EcgGraphPanel
-              data={isEcgDemo ? defaultEcg : ecgData}
-              liveLabel={isEcgDemo ? 'Awaiting live data' : `Live · ${lastUpdatedLabel.replace('Updated ', '')}`}
+              data={ecgData}
+              liveLabel={hasEcgData ? `Live · ${lastUpdatedLabel.replace('Updated ', '')}` : 'Waiting for ESP32 signal'}
             />
-            {isEcgDemo && (
-              <div className="-mt-2 ml-1 mb-1">
-                <span className="inline-flex items-center gap-1 text-[9px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 font-mono">⚠ Demo Data</span>
-              </div>
-            )}
 
             <PcgGraphPanel
-              data={isPcgDemo ? defaultPcg : pcgData}
-              liveLabel={isPcgDemo ? 'Awaiting live data' : `Live · ${lastUpdatedLabel.replace('Updated ', '')}`}
+              data={pcgData}
+              liveLabel={hasPcgData ? `Live · ${lastUpdatedLabel.replace('Updated ', '')}` : 'Waiting for ESP32 signal'}
             />
-            {isPcgDemo && (
-              <div className="-mt-2 ml-1 mb-1">
-                <span className="inline-flex items-center gap-1 text-[9px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 font-mono">⚠ Demo Data</span>
-              </div>
-            )}
 
             {/* System Status panel */}
             <GlassCard className="p-4">

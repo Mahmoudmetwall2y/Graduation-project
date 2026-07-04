@@ -1,0 +1,70 @@
+name: Deploy Production
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: ["main"]
+  workflow_dispatch:
+
+concurrency:
+  group: asculticor-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    if: >-
+      vars.PRODUCTION_DEPLOY_ENABLED == 'true' &&
+      (github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success')
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Validate deployment secrets
+        env:
+          TS_CLIENT_ID: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          TS_CLIENT_SECRET: ${{ secrets.TS_OAUTH_SECRET }}
+          PROD_HOST: ${{ secrets.PRODUCTION_SSH_HOST }}
+          PROD_USER: ${{ secrets.PRODUCTION_SSH_USER }}
+          PROD_KEY: ${{ secrets.PRODUCTION_SSH_PRIVATE_KEY }}
+          PROD_HOST_KEY: ${{ secrets.PRODUCTION_SSH_HOST_KEY }}
+        run: |
+          test -n "$TS_CLIENT_ID"
+          test -n "$TS_CLIENT_SECRET"
+          test -n "$PROD_HOST"
+          test -n "$PROD_USER"
+          test -n "$PROD_KEY"
+          test -n "$PROD_HOST_KEY"
+
+      - name: Connect runner to Tailscale
+        uses: tailscale/github-action@780049a30b6ff5c378a9e7b389d15ece7a204888 # v4.1.3
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+          ping: 100.98.95.38
+
+      - name: Configure SSH
+        env:
+          PROD_KEY: ${{ secrets.PRODUCTION_SSH_PRIVATE_KEY }}
+          PROD_HOST_KEY: ${{ secrets.PRODUCTION_SSH_HOST_KEY }}
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$PROD_KEY" > ~/.ssh/asculticor_deploy
+          chmod 600 ~/.ssh/asculticor_deploy
+          printf '%s\n' "$PROD_HOST_KEY" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Deploy verified revision
+        env:
+          PROD_HOST: ${{ secrets.PRODUCTION_SSH_HOST }}
+          PROD_USER: ${{ secrets.PRODUCTION_SSH_USER }}
+        run: |
+          ssh -i ~/.ssh/asculticor_deploy \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            "$PROD_USER@$PROD_HOST" \
+            /usr/local/sbin/asculticor-deploy

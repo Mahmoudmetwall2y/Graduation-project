@@ -2,7 +2,8 @@ import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs'
 import { cookies } from 'next/headers'
 import { NextResponse } from 'next/server'
 
-const DEVICE_OFFLINE_THRESHOLD_MS = 90 * 1000
+const DEVICE_OFFLINE_THRESHOLD_MS = 25 * 1000
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 function normalizeDeviceRuntimeStatus<T extends { status?: string | null; last_seen_at?: string | null }>(
   device: T
@@ -30,6 +31,42 @@ function normalizeDeviceRuntimeStatus<T extends { status?: string | null; last_s
   }
 }
 
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value))
+}
+
+function validateDevicePatchBody(body: any) {
+  const updates: Record<string, unknown> = {}
+
+  if (body.device_name !== undefined) {
+    if (typeof body.device_name !== 'string') return { error: 'device_name must be a string.' }
+    const deviceName = body.device_name.trim()
+    if (!deviceName || deviceName.length > 120) return { error: 'device_name must be 120 characters or fewer.' }
+    updates.device_name = deviceName
+  }
+
+  if (body.device_group_id !== undefined) {
+    if (body.device_group_id !== null && typeof body.device_group_id !== 'string') {
+      return { error: 'device_group_id must be a string or null.' }
+    }
+    updates.device_group_id = body.device_group_id || null
+  }
+
+  if (body.notes !== undefined) {
+    if (body.notes !== null && typeof body.notes !== 'string') return { error: 'notes must be a string or null.' }
+    const notes = typeof body.notes === 'string' ? body.notes.trim() : ''
+    if (notes.length > 2000) return { error: 'notes must be 2000 characters or fewer.' }
+    updates.notes = notes || null
+  }
+
+  if (body.sensor_config !== undefined) {
+    if (!isPlainObject(body.sensor_config)) return { error: 'sensor_config must be an object.' }
+    updates.sensor_config = body.sensor_config
+  }
+
+  return { value: updates }
+}
+
 // GET /api/devices/[id] - Get device details
 export async function GET(
   request: Request,
@@ -38,6 +75,9 @@ export async function GET(
   try {
     const supabase = createRouteHandlerClient({ cookies })
     const deviceId = params.id
+    if (!UUID_RE.test(deviceId)) {
+      return NextResponse.json({ error: 'Invalid device id' }, { status: 400 })
+    }
 
     // Get current user
     const { data: { user } } = await supabase.auth.getUser()
@@ -139,6 +179,9 @@ export async function PATCH(
     const supabase = createRouteHandlerClient({ cookies })
     const deviceId = params.id
     const body = await request.json()
+    if (!UUID_RE.test(deviceId)) {
+      return NextResponse.json({ error: 'Invalid device id' }, { status: 400 })
+    }
 
     // Get current user
     const { data: { user } } = await supabase.auth.getUser()
@@ -174,15 +217,12 @@ export async function PATCH(
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
 
-    // Update allowed fields
-    const allowedUpdates = ['device_name', 'device_group_id', 'notes', 'sensor_config', 'status']
-    const updates: any = {}
+    const validation = validateDevicePatchBody(body)
+    if ('error' in validation) {
+      return NextResponse.json({ error: validation.error }, { status: 400 })
+    }
 
-    allowedUpdates.forEach(field => {
-      if (body[field] !== undefined) {
-        updates[field] = body[field]
-      }
-    })
+    const updates = validation.value
 
     updates.updated_at = new Date().toISOString()
 
@@ -226,6 +266,9 @@ export async function DELETE(
   try {
     const supabase = createRouteHandlerClient({ cookies })
     const deviceId = params.id
+    if (!UUID_RE.test(deviceId)) {
+      return NextResponse.json({ error: 'Invalid device id' }, { status: 400 })
+    }
 
     // Get current user
     const { data: { user } } = await supabase.auth.getUser()
@@ -258,9 +301,22 @@ export async function DELETE(
 
     // Allow deletion by admin or device owner
     if (profile.role !== 'admin' && device.owner_user_id !== user.id) {
-      return NextResponse.json({ error: 'Forbidden — you can only delete your own devices' }, { status: 403 })
+      return NextResponse.json({ error: 'Forbidden - you can only delete your own devices' }, { status: 403 })
     }
 
+    const { count: sessionCount, error: sessionCountError } = await supabase
+      .from('sessions')
+      .select('id', { count: 'exact', head: true })
+      .eq('device_id', deviceId)
+      .eq('org_id', profile.org_id)
+
+    if (sessionCountError) throw sessionCountError
+    if ((sessionCount || 0) > 0) {
+      return NextResponse.json(
+        { error: 'Device has existing sessions and cannot be deleted. Archive or rename it instead.' },
+        { status: 409 }
+      )
+    }
     // Delete device (cascade will handle related records)
     const { data: deleted, error, count } = await supabase
       .from('devices')
@@ -271,7 +327,7 @@ export async function DELETE(
 
     if (error) throw error
 
-    // Supabase RLS silently blocks deletes — check if anything was actually removed
+    // Supabase RLS silently blocks deletes; check if anything was actually removed.
     if (!deleted || deleted.length === 0) {
       return NextResponse.json(
         { error: 'Delete blocked by database policy. Please run migration 003_fix_device_delete_policy.sql in Supabase SQL Editor.' },

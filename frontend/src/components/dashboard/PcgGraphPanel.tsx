@@ -12,6 +12,8 @@ interface PcgGraphPanelProps {
 }
 
 export function PcgGraphPanel({ data, liveLabel = 'Waiting...' }: PcgGraphPanelProps) {
+    const hasData = data.length > 0
+
     return (
         <GlassCard className="p-4 w-full">
             <div className="flex items-center justify-between mb-3">
@@ -24,7 +26,7 @@ export function PcgGraphPanel({ data, liveLabel = 'Waiting...' }: PcgGraphPanelP
                     <span className="text-[9px] text-white/40">{liveLabel}</span>
                 </div>
             </div>
-            <div className="h-[120px] w-full mt-2">
+            <div className="relative h-[120px] w-full mt-2">
                 <ResponsiveContainer width="100%" height="100%">
                     <AreaChart data={data}>
                         <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
@@ -58,6 +60,18 @@ export function PcgGraphPanel({ data, liveLabel = 'Waiting...' }: PcgGraphPanelP
                         />
                     </AreaChart>
                 </ResponsiveContainer>
+                {!hasData && (
+                    <div className="pointer-events-none absolute inset-0 flex items-center justify-center px-4">
+                        <div className="rounded-lg border border-white/10 bg-black/45 px-3 py-2 text-center">
+                            <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-white/70">
+                                Waiting for ESP32 signal
+                            </p>
+                            <p className="mt-1 text-[9px] uppercase tracking-[0.16em] text-white/35">
+                                Real PCG stream only
+                            </p>
+                        </div>
+                    </div>
+                )}
             </div>
         </GlassCard>
     );

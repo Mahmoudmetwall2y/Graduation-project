@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
+import { createClientComponentClient } from '@supabase/auth-helpers-nextjs'
 import {
   Activity, Battery, Wifi, Clock, AlertCircle, ChevronLeft,
   FileText, Settings, Trash2, RefreshCw, Plus, Heart,
@@ -27,6 +28,10 @@ interface Telemetry {
   temperature_celsius: number
   battery_voltage: number
   wifi_rssi: number
+  uptime_seconds: number
+  free_heap_bytes: number
+  error_count: number
+  telemetry_json: any
   recorded_at: string
 }
 
@@ -35,6 +40,7 @@ interface Alert {
   alert_type: string
   severity: string
   message: string
+  metadata: any
   created_at: string
   is_resolved: boolean
 }
@@ -65,6 +71,8 @@ export default function DeviceDetailPage() {
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState('overview')
   const [generatingReport, setGeneratingReport] = useState<string | null>(null)
+  const [firmwareUpdateStatus, setFirmwareUpdateStatus] = useState<string>('')
+  const supabase = createClientComponentClient()
 
   useEffect(() => {
     if (deviceId) {
@@ -127,6 +135,52 @@ export default function DeviceDetailPage() {
     return `${Math.floor(diff / 86400)} days ago`
   }
 
+  const queueFirmwareUpdate = async () => {
+    setFirmwareUpdateStatus('Queuing verified firmware update...')
+    try {
+      const response = await fetch('/api/device/firmware/deployments?action=queue-latest', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ device_id: deviceId }),
+      })
+      const body = await response.json()
+      if (!response.ok) throw new Error(body.error || 'Could not queue firmware update')
+      setFirmwareUpdateStatus(
+        `Firmware ${body.release.version} queued. n8n will dispatch it when the device is online and idle.`
+      )
+    } catch (error) {
+      setFirmwareUpdateStatus(error instanceof Error ? error.message : 'Firmware update failed')
+    }
+  }
+
+  const formatUptime = (seconds?: number | null) => {
+    if (!seconds) return 'N/A'
+    const hours = Math.floor(seconds / 3600)
+    const minutes = Math.floor((seconds % 3600) / 60)
+    if (hours <= 0) return `${minutes}m`
+    return `${hours}h ${minutes}m`
+  }
+
+  const formatBytes = (bytes?: number | null) => {
+    if (!bytes) return 'N/A'
+    if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+    return `${Math.round(bytes / 1024)} KB`
+  }
+
+  const resolveAlert = async (alertId: string) => {
+    const { data: userResp } = await supabase.auth.getUser()
+    await supabase
+      .from('device_alerts')
+      .update({
+        is_resolved: true,
+        resolved_at: new Date().toISOString(),
+        resolved_by: userResp.user?.id || null,
+      })
+      .eq('id', alertId)
+
+    fetchDeviceData()
+  }
+
   if (loading) return <div className="page-wrapper"><PageSkeleton /></div>
 
   if (!device) {
@@ -144,13 +198,19 @@ export default function DeviceDetailPage() {
   }
 
   const tabs = ['overview', 'sessions', 'telemetry', 'alerts', 'settings']
+  const latestTelemetry = telemetry[0]
+  const latestRssi = latestTelemetry?.wifi_rssi ?? device.signal_strength
+  const latestFirmware = device.firmware_version || latestTelemetry?.telemetry_json?.firmware_version
+  const latestBatteryVoltage = latestTelemetry?.battery_voltage
+  const latestUptime = latestTelemetry?.uptime_seconds
+  const latestHeap = latestTelemetry?.free_heap_bytes
 
   // Convert telemetry for charts
   const telemetryChartData = telemetry.map(t => ({
     time: new Date(t.recorded_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     temperature: t.temperature_celsius,
     battery: t.battery_voltage,
-    wifi: Math.abs(t.wifi_rssi),
+    wifi: typeof t.wifi_rssi === 'number' ? Math.abs(t.wifi_rssi) : null,
   }))
 
   return (
@@ -197,11 +257,14 @@ export default function DeviceDetailPage() {
           </div>
 
           {/* Quick Stats */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-6 pt-6 border-t border-border">
+          <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-4 mt-6 pt-6 border-t border-border">
             {[
               { icon: Clock, label: 'Last Seen', value: formatLastSeen(device.last_seen_at) },
-              { icon: Battery, label: 'Battery', value: device.battery_level ? `${device.battery_level}%` : 'N/A' },
-              { icon: Wifi, label: 'Signal', value: device.signal_strength ? `${device.signal_strength} dBm` : 'N/A' },
+              { icon: Battery, label: 'Battery', value: device.battery_level ? `${device.battery_level}%` : latestBatteryVoltage ? `${Number(latestBatteryVoltage).toFixed(2)}V` : 'N/A' },
+              { icon: Wifi, label: 'Wi-Fi RSSI', value: typeof latestRssi === 'number' ? `${latestRssi} dBm` : 'N/A' },
+              { icon: Cpu, label: 'Firmware', value: latestFirmware || 'Unknown' },
+              { icon: Activity, label: 'Uptime', value: formatUptime(latestUptime) },
+              { icon: Zap, label: 'Free Heap', value: formatBytes(latestHeap) },
               { icon: Activity, label: 'Sessions', value: stats?.totalSessions || 0 },
             ].map(stat => (
               <div key={stat.label} className="flex items-center gap-3">
@@ -290,6 +353,9 @@ export default function DeviceDetailPage() {
                             <div>
                               <p className="text-sm font-medium capitalize">{alert.alert_type}</p>
                               <p className="text-xs mt-1 opacity-80">{alert.message}</p>
+                              {alert.metadata?.subtype && (
+                                <p className="text-xs mt-1 opacity-60">Subtype: {alert.metadata.subtype}</p>
+                              )}
                             </div>
                           </div>
                         </div>
@@ -440,11 +506,19 @@ export default function DeviceDetailPage() {
                             <div>
                               <p className="text-sm font-medium capitalize">{alert.alert_type}</p>
                               <p className="text-xs mt-1 opacity-80">{alert.message}</p>
+                              {alert.metadata?.subtype && (
+                                <p className="text-xs mt-1 opacity-60">Subtype: {alert.metadata.subtype}</p>
+                              )}
                               <p className="text-xs mt-2 opacity-50">{new Date(alert.created_at).toLocaleString()}</p>
                             </div>
                           </div>
                           {!alert.is_resolved && (
-                            <button className="text-xs font-medium text-primary hover:text-primary/80">Resolve</button>
+                            <button
+                              onClick={() => resolveAlert(alert.id)}
+                              className="text-xs font-medium text-primary hover:text-primary/80"
+                            >
+                              Resolve
+                            </button>
                           )}
                         </div>
                       </div>
@@ -482,6 +556,27 @@ export default function DeviceDetailPage() {
                     <p className="text-sm text-muted-foreground bg-muted p-4 rounded-lg">{device.notes}</p>
                   </div>
                 )}
+
+                <div className="pt-6 border-t border-border">
+                  <h3 className="font-semibold text-foreground mb-2">Firmware Update</h3>
+                  <p className="mb-4 text-sm text-muted-foreground">
+                    Queue the latest verified release. The ESP32 downloads it over Wi-Fi, verifies its SHA-256 digest,
+                    installs it into the inactive OTA slot, and reports its version after reboot.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={queueFirmwareUpdate}
+                    className="btn-primary gap-2"
+                  >
+                    <RefreshCw className="w-4 h-4" />
+                    Queue Latest Firmware
+                  </button>
+                  {firmwareUpdateStatus && (
+                    <p className="mt-3 rounded-lg border border-border bg-muted/40 p-3 text-xs text-muted-foreground">
+                      {firmwareUpdateStatus}
+                    </p>
+                  )}
+                </div>
 
                 <div className="pt-6 border-t border-border">
                   <h3 className="font-semibold text-red-600 dark:text-red-400 mb-4">Danger Zone</h3>

@@ -8,6 +8,10 @@ type EmailPayload = {
   emailTo: string
   emailSubject: string
   emailText: string
+  emailHtml?: string
+  alertId?: string
+  sessionId?: string
+  severity?: 'warning' | 'critical'
 }
 
 type WorkflowResult = {
@@ -61,7 +65,7 @@ function serviceClient() {
 }
 
 function publicAppUrl() {
-  return env('ASCULTICOR_PUBLIC_APP_URL', env('DEVICE_BOOTSTRAP_PUBLIC_BASE_URL', 'https://srv1621744.hstgr.cloud')).replace(/\/+$/, '')
+  return env('ASCULTICOR_PUBLIC_APP_URL', env('DEVICE_BOOTSTRAP_PUBLIC_BASE_URL')).replace(/\/+$/, '')
 }
 
 function fallbackEmail() {
@@ -72,14 +76,60 @@ function emailFrom() {
   return env('ASCULTICOR_ALERT_EMAIL_FROM', 'AscultiCor <alerts@localhost>')
 }
 
-function email(subject: string, text: string, to = fallbackEmail()): EmailPayload | null {
+function email(
+  subject: string,
+  text: string,
+  to = fallbackEmail(),
+  details: Partial<EmailPayload> = {},
+): EmailPayload | null {
   if (!to) return null
   return {
     emailFrom: emailFrom(),
     emailTo: to,
     emailSubject: subject,
     emailText: text,
+    ...details,
   }
+}
+
+function escapeHtml(value: unknown) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
+function clinicalAlertHtml(input: {
+  title: string
+  severity: 'warning' | 'critical'
+  patientName?: string | null
+  deviceName: string
+  sessionId: string
+  finding: string
+  confidence: number | null
+}) {
+  const critical = input.severity === 'critical'
+  const accent = critical ? '#a53f4b' : '#b7791f'
+  const pale = critical ? '#fff0f1' : '#fff8e7'
+  const confidence = input.confidence === null || input.confidence === undefined
+    ? 'Not available'
+    : `${Math.round(input.confidence * 100)}%`
+  const sessionUrl = `${publicAppUrl()}/session/${input.sessionId}`
+
+  return `<!doctype html><html><body style="margin:0;background:#f2f6f8;font-family:Arial,Helvetica,sans-serif;color:#172b40;">
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr><td align="center" style="padding:28px 12px;">
+  <table role="presentation" width="660" cellspacing="0" cellpadding="0" style="max-width:100%;background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 6px 22px rgba(11,31,58,.08);">
+    <tr><td style="padding:26px 30px;background:#0b1f3a;border-bottom:5px solid ${accent};"><div style="color:#7bd3c7;font-size:12px;font-weight:800;letter-spacing:1.4px;text-transform:uppercase;">AscultiCor Clinical Review Alert</div><div style="margin-top:8px;color:#fff;font-size:24px;font-weight:800;">${escapeHtml(input.title)}</div></td></tr>
+    <tr><td style="padding:24px 30px;"><div style="display:inline-block;padding:6px 11px;border-radius:999px;background:${pale};color:${accent};font-size:12px;font-weight:800;text-transform:uppercase;">${escapeHtml(input.severity)}</div>
+      <p style="margin:18px 0 4px;color:#607286;font-size:12px;text-transform:uppercase;">Automated model output</p><p style="margin:0;color:#0b1f3a;font-size:21px;font-weight:800;">${escapeHtml(input.finding)}</p>
+      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin-top:20px;background:#f7fafb;border:1px solid #dce4eb;border-radius:10px;"><tr><td style="padding:13px;color:#607286;font-size:12px;">Patient<strong style="display:block;color:#172b40;font-size:14px;">${escapeHtml(input.patientName || 'Not linked')}</strong></td><td style="padding:13px;color:#607286;font-size:12px;">Device<strong style="display:block;color:#172b40;font-size:14px;">${escapeHtml(input.deviceName)}</strong></td><td style="padding:13px;color:#607286;font-size:12px;">Confidence<strong style="display:block;color:#172b40;font-size:14px;">${escapeHtml(confidence)}</strong></td></tr></table>
+      <p style="margin:20px 0;color:#314459;font-size:14px;line-height:1.6;">This automated result requires qualified professional review and correlation with the original recording and available context.</p>
+      <div style="text-align:center;"><a href="${escapeHtml(sessionUrl)}" style="display:inline-block;padding:12px 20px;border-radius:9px;background:#0f766e;color:#fff;text-decoration:none;font-size:14px;font-weight:800;">Review session</a></div>
+    </td></tr>
+    <tr><td style="padding:16px 22px;background:${pale};border-top:1px solid ${accent};color:${accent};font-size:12px;line-height:1.55;"><strong>Educational use only:</strong> This alert is not a diagnosis or treatment recommendation. Review by a qualified healthcare professional is required.</td></tr>
+  </table></td></tr></table></body></html>`
 }
 
 function result(action: string, summary: Record<string, unknown>, emails: Array<EmailPayload | null> = []): WorkflowResult {
@@ -166,6 +216,7 @@ async function runClinicalAlerts(supabase: any) {
     title: string
     message: string
     confidence: number | null
+    finding: string
   }) {
     const existing = await findOpenAlert(supabase, input.session.device_id, input.subtype, input.session.id)
     if (existing) {
@@ -173,11 +224,12 @@ async function runClinicalAlerts(supabase: any) {
       return
     }
 
-    await insertAlert(supabase, {
+    const severity: 'warning' | 'critical' = input.subtype === 'session_error' ? 'critical' : 'warning'
+    const alert = await insertAlert(supabase, {
       device_id: input.session.device_id,
       org_id: input.session.org_id,
       alert_type: input.subtype === 'session_error' ? 'error' : 'anomaly_detected',
-      severity: input.subtype === 'session_error' ? 'critical' : 'warning',
+      severity,
       message: input.message,
       metadata: {
         session_id: input.session.id,
@@ -185,13 +237,14 @@ async function runClinicalAlerts(supabase: any) {
         subtype: input.subtype,
         modality: input.prediction?.modality || null,
         confidence: input.confidence,
+        finding: input.finding,
         source: 'n8n-clinical-alerts',
       },
     })
 
     created += 1
     const patient = input.session.patient
-    const recipient = patient?.email || fallbackEmail()
+    const recipient = fallbackEmail() || patient?.email
     const deviceName = input.session.device?.device_name || input.session.device_id
     emails.push(email(
       `[AscultiCor] ${input.title}`,
@@ -208,6 +261,20 @@ async function runClinicalAlerts(supabase: any) {
         'This notification is for workflow review and is not a medical diagnosis.',
       ].join('\n'),
       recipient,
+      {
+        emailHtml: clinicalAlertHtml({
+          title: input.title,
+          severity,
+          patientName: patient?.full_name,
+          deviceName,
+          sessionId: input.session.id,
+          finding: input.finding,
+          confidence: input.confidence,
+        }),
+        alertId: alert.id,
+        sessionId: input.session.id,
+        severity,
+      },
     ))
   }
 
@@ -237,17 +304,33 @@ async function runClinicalAlerts(supabase: any) {
         title: 'Warning: Murmur detected',
         message: `Murmur detected for session ${session.id}`,
         confidence: output.probabilities?.Murmur ?? output.probabilities?.[output.label] ?? null,
+        finding: 'PCG classified as Murmur',
       })
     }
 
-    if (prediction.modality === 'ecg' && output.prediction === 'Abnormal') {
+    const ecgClass = String(output.prediction || output.label || '').trim()
+    const normalizedEcgClass = ecgClass.toLowerCase()
+    if (prediction.modality === 'ecg' && ['abnormal', 'sveb', 'veb', 'fusion'].includes(normalizedEcgClass)) {
       await createClinicalAlert({
         session,
         prediction,
-        subtype: 'ecg_abnormal',
-        title: 'Warning: Abnormal ECG',
-        message: `Abnormal ECG detected for session ${session.id}`,
+        subtype: `ecg_${normalizedEcgClass}`,
+        title: `Warning: ECG ${ecgClass} requires review`,
+        message: `ECG ${ecgClass} output detected for session ${session.id}`,
         confidence: output.confidence ?? null,
+        finding: `ECG classified as ${ecgClass}`,
+      })
+    }
+
+    if (prediction.modality === 'ecg' && normalizedEcgClass === 'unknown') {
+      await createClinicalAlert({
+        session,
+        prediction,
+        subtype: 'ecg_uninterpretable',
+        title: 'Warning: ECG result requires repeat or review',
+        message: `ECG output was Unknown for session ${session.id}`,
+        confidence: output.confidence ?? null,
+        finding: 'ECG result was Unknown / uninterpretable',
       })
     }
   }
@@ -269,6 +352,7 @@ async function runClinicalAlerts(supabase: any) {
       title: 'Critical: Session error',
       message: `Session ${session.id} entered error state`,
       confidence: null,
+      finding: 'Session processing entered an error state',
     })
   }
 
@@ -351,7 +435,7 @@ async function callClaudeSummary(prompt: string) {
   const apiKey = process.env.CLAUDE_API_KEY
   if (!apiKey) return null
 
-  const response = await fetch(`${env('CLAUDE_BASE_URL', 'https://agentrouter.org').replace(/\/+$/, '')}/v1/messages`, {
+  const response = await fetch(`${env('CLAUDE_BASE_URL', 'https://api.anthropic.com').replace(/\/+$/, '')}/v1/messages`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -389,7 +473,10 @@ async function runDailyDigest(supabase: any) {
   const completedSessions = (sessions || []).filter((session: any) => ['done', 'completed'].includes(session.status)).length
   const errorSessions = (sessions || []).filter((session: any) => session.status === 'error').length
   const murmurCount = (predictions || []).filter((prediction: any) => prediction.modality === 'pcg' && prediction.output_json?.label === 'Murmur').length
-  const abnormalEcgCount = (predictions || []).filter((prediction: any) => prediction.modality === 'ecg' && prediction.output_json?.prediction === 'Abnormal').length
+  const abnormalEcgCount = (predictions || []).filter((prediction: any) =>
+    prediction.modality === 'ecg' &&
+    ['sveb', 'veb', 'fusion'].includes(String(prediction.output_json?.prediction || '').toLowerCase())
+  ).length
   const offlineDevices = (devices || []).filter((device: any) => {
     if (!device.last_seen_at) return true
     return Date.now() - Date.parse(device.last_seen_at) > 5 * 60 * 1000
@@ -505,7 +592,7 @@ function internalHostHeaders(extra: Record<string, string> = {}) {
     try {
       host = new URL(publicAppUrl()).host
     } catch {
-      host = 'srv1621744.hstgr.cloud'
+      host = 'frontend:3000'
     }
   }
   return {
@@ -630,6 +717,289 @@ async function runAlertEscalation(supabase: any) {
   return result('alert-escalation', { checked: (alerts || []).length, escalated }, emails)
 }
 
+async function runSessionRecovery(supabase: any) {
+  const policies = [
+    { status: 'created', minutes: 5, reason: 'start_not_acknowledged' },
+    { status: 'streaming', minutes: 5, reason: 'stream_stalled' },
+    { status: 'processing', minutes: 20, reason: 'processing_stalled' },
+  ]
+  const recovered: any[] = []
+
+  for (const policy of policies) {
+    const cutoff = isoMinutesAgo(policy.minutes)
+    const { data: sessions, error } = await supabase
+      .from('sessions')
+      .select('id,org_id,device_id,status,created_at,started_at')
+      .eq('status', policy.status)
+      .lt(policy.status === 'created' ? 'created_at' : 'started_at', cutoff)
+      .limit(100)
+    if (error) throw error
+
+    for (const session of sessions || []) {
+      const { data: updated, error: updateError } = await supabase
+        .from('sessions')
+        .update({ status: 'error', ended_at: new Date().toISOString() })
+        .eq('id', session.id)
+        .eq('status', policy.status)
+        .select('id')
+      if (updateError) throw updateError
+      if (!updated?.length) continue
+
+      const { error: auditError } = await supabase.from('audit_logs').insert({
+        org_id: session.org_id,
+        user_id: null,
+        action: 'session_recovered_to_error',
+        entity_type: 'session',
+        entity_id: session.id,
+        metadata: {
+          previous_status: policy.status,
+          reason: policy.reason,
+          source: 'n8n-session-recovery',
+        },
+      })
+      if (auditError) throw auditError
+      recovered.push({ ...session, reason: policy.reason })
+    }
+  }
+
+  const emails = recovered.length ? [email(
+    `[AscultiCor] Recovered ${recovered.length} stalled session${recovered.length === 1 ? '' : 's'}`,
+    [
+      'AscultiCor marked stalled sessions as error so they no longer remain indefinitely active.',
+      '',
+      ...recovered.map((item) => `${item.id}: ${item.status} -> error (${item.reason})`),
+    ].join('\n'),
+  )] : []
+  return result('session-recovery', { checked_policies: policies.length, recovered: recovered.length }, emails)
+}
+
+async function runReportDeadLetter(supabase: any) {
+  const { data: reports, error } = await supabase
+    .from('llm_reports')
+    .select('id,org_id,session_id,device_id,retry_count,max_retries,error_message,created_at')
+    .eq('status', 'error')
+    .order('created_at', { ascending: true })
+    .limit(100)
+  if (error) throw error
+
+  const deadLetters = (reports || []).filter((report: any) =>
+    Number(report.retry_count || 0) >= Number(report.max_retries || 3)
+  )
+  const newlyNotified: any[] = []
+
+  for (const report of deadLetters) {
+    const { data: existing, error: existingError } = await supabase
+      .from('audit_logs')
+      .select('id')
+      .eq('action', 'llm_report_dead_letter_notified')
+      .eq('entity_type', 'llm_report')
+      .eq('entity_id', report.id)
+      .limit(1)
+    if (existingError) throw existingError
+    if (existing?.length) continue
+
+    const { error: auditError } = await supabase.from('audit_logs').insert({
+      org_id: report.org_id,
+      user_id: null,
+      action: 'llm_report_dead_letter_notified',
+      entity_type: 'llm_report',
+      entity_id: report.id,
+      metadata: {
+        session_id: report.session_id,
+        retry_count: report.retry_count,
+        max_retries: report.max_retries,
+        error_message: report.error_message,
+        source: 'n8n-report-dlq',
+      },
+    })
+    if (auditError) throw auditError
+    newlyNotified.push(report)
+  }
+
+  const emails = newlyNotified.length ? [email(
+    `[AscultiCor] ${newlyNotified.length} report${newlyNotified.length === 1 ? '' : 's'} entered the dead-letter queue`,
+    [
+      'These reports exhausted automatic retries and require administrator review.',
+      '',
+      ...newlyNotified.map((item) =>
+        `Report ${item.id} | session ${item.session_id} | retries ${item.retry_count}/${item.max_retries} | ${item.error_message || 'No error detail'}`
+      ),
+    ].join('\n'),
+  )] : []
+  return result('report-dead-letter', {
+    dead_letters: deadLetters.length,
+    newly_notified: newlyNotified.length,
+  }, emails)
+}
+
+async function runClinicalAcknowledgement(supabase: any) {
+  const alerts = await runClinicalAlerts(supabase)
+  const escalations = await runAlertEscalation(supabase)
+  return result('clinical-acknowledgement', {
+    alerts: alerts.summary,
+    escalations: escalations.summary,
+  }, [...alerts.emails, ...escalations.emails])
+}
+
+async function runStorageIntegrity(supabase: any) {
+  const since = isoMinutesAgo(24 * 60)
+  const { data: recordings, error } = await supabase
+    .from('recordings')
+    .select('id,org_id,session_id,modality,storage_path,checksum,created_at')
+    .gte('created_at', since)
+    .order('created_at', { ascending: false })
+    .limit(20)
+  if (error) throw error
+
+  const missing: any[] = []
+  let verified = 0
+  for (const recording of recordings || []) {
+    const { data, error: downloadError } = await supabase.storage
+      .from('recordings')
+      .download(recording.storage_path)
+    if (downloadError || !data || data.size === 0) {
+      missing.push({ ...recording, error: downloadError?.message || 'empty object' })
+    } else {
+      verified += 1
+    }
+  }
+
+  const emails = missing.length ? [email(
+    `[AscultiCor] Storage integrity warning: ${missing.length} object${missing.length === 1 ? '' : 's'}`,
+    [
+      'Database recording rows were found without a readable, non-empty storage object.',
+      '',
+      ...missing.map((item) => `${item.storage_path} | session ${item.session_id} | ${item.error}`),
+    ].join('\n'),
+  )] : []
+  return result('storage-integrity', {
+    sampled: (recordings || []).length,
+    verified,
+    missing: missing.length,
+  }, emails)
+}
+
+async function runResearchQuality(supabase: any) {
+  const since = isoMinutesAgo(7 * 24 * 60)
+  const [{ data: sessions, error: sessionsError }, { data: predictions, error: predictionsError }] = await Promise.all([
+    supabase.from('sessions').select('id,status,device_id,created_at').gte('created_at', since).limit(5000),
+    supabase.from('predictions').select('session_id,modality,model_name,model_version,output_json').gte('created_at', since).limit(10000),
+  ])
+  if (sessionsError) throw sessionsError
+  if (predictionsError) throw predictionsError
+
+  const bySession = new Map<string, Set<string>>()
+  let unknownEcg = 0
+  const modelVersions = new Set<string>()
+  for (const prediction of predictions || []) {
+    if (!bySession.has(prediction.session_id)) bySession.set(prediction.session_id, new Set())
+    bySession.get(prediction.session_id)!.add(prediction.modality)
+    modelVersions.add(`${prediction.model_name}@${prediction.model_version}`)
+    if (prediction.modality === 'ecg' && prediction.output_json?.prediction === 'Unknown') unknownEcg += 1
+  }
+
+  const completed = (sessions || []).filter((item: any) => item.status === 'done')
+  const missingPredictions = completed.filter((item: any) => {
+    const modalities = bySession.get(item.id) || new Set()
+    return !modalities.has('pcg') || !modalities.has('ecg')
+  })
+  const errorSessions = (sessions || []).filter((item: any) => item.status === 'error').length
+  const summary = {
+    period_days: 7,
+    sessions: (sessions || []).length,
+    completed: completed.length,
+    errors: errorSessions,
+    completed_missing_prediction_pair: missingPredictions.length,
+    unknown_ecg_predictions: unknownEcg,
+    model_versions: Array.from(modelVersions).sort(),
+  }
+
+  return result('research-quality', summary, [email(
+    '[AscultiCor] Weekly Research & Data Quality Report',
+    [
+      'AscultiCor weekly research/data-quality summary (engineering use; not clinical evidence).',
+      '',
+      `Sessions: ${summary.sessions}`,
+      `Completed: ${summary.completed}`,
+      `Errors: ${summary.errors}`,
+      `Completed sessions missing ECG/PCG prediction pair: ${summary.completed_missing_prediction_pair}`,
+      `Unknown ECG outputs: ${summary.unknown_ecg_predictions}`,
+      `Model versions: ${summary.model_versions.join(', ') || 'No predictions'}`,
+    ].join('\n'),
+  )])
+}
+
+async function runWorkflowFailure(supabase: any, request: Request) {
+  const body = await request.json().catch(() => ({}))
+  const workflowName = String(body.workflow_name || body.workflowName || 'unknown').slice(0, 160)
+  const executionId = String(body.execution_id || body.executionId || '').slice(0, 160)
+  const errorMessage = String(body.error || body.error_message || 'Workflow execution failed').slice(0, 2000)
+  const { error } = await supabase.from('audit_logs').insert({
+    org_id: null,
+    user_id: null,
+    action: 'n8n_workflow_failed',
+    entity_type: 'n8n_execution',
+    entity_id: null,
+    metadata: {
+      workflow_name: workflowName,
+      execution_id: executionId,
+      error: errorMessage,
+      last_node: body.last_node || body.lastNode || null,
+      occurred_at: body.occurred_at || new Date().toISOString(),
+    },
+  })
+  if (error) throw error
+  return result('workflow-failure', { recorded: 1, workflow_name: workflowName }, [email(
+    `[AscultiCor] n8n workflow failed: ${workflowName}`,
+    `Execution: ${executionId || 'unknown'}\nLast node: ${body.last_node || body.lastNode || 'unknown'}\nError: ${errorMessage}`,
+  )])
+}
+
+async function runSecurityAudit(supabase: any) {
+  const since = isoMinutesAgo(30)
+  const watchedActions = [
+    'device_bootstrap_requested',
+    'session_start_no_ack',
+    'n8n_workflow_failed',
+    'firmware_deployment_failed',
+  ]
+  const { data: logs, error } = await supabase
+    .from('audit_logs')
+    .select('action,entity_type,entity_id,created_at,metadata')
+    .in('action', watchedActions)
+    .gte('created_at', since)
+    .order('created_at', { ascending: false })
+    .limit(500)
+  if (error) throw error
+
+  const counts = Object.fromEntries(watchedActions.map((action) => [
+    action,
+    (logs || []).filter((item: any) => item.action === action).length,
+  ]))
+  const issues: string[] = []
+  if (counts.device_bootstrap_requested > 20) issues.push(`High bootstrap volume: ${counts.device_bootstrap_requested} in 30 minutes`)
+  if (counts.session_start_no_ack > 3) issues.push(`Repeated unacknowledged session starts: ${counts.session_start_no_ack}`)
+  if (counts.n8n_workflow_failed > 3) issues.push(`Repeated n8n workflow failures: ${counts.n8n_workflow_failed}`)
+  if (counts.firmware_deployment_failed > 0) issues.push(`Firmware deployment failures: ${counts.firmware_deployment_failed}`)
+
+  return result('security-audit', { events: (logs || []).length, issues: issues.length, counts }, issues.length ? [email(
+    '[AscultiCor] Security & Audit Anomaly Warning',
+    ['Potential operational/security anomalies were detected:', '', ...issues].join('\n'),
+  )] : [])
+}
+
+async function runOpsSecurity(supabase: any) {
+  const ops = await runOpsMonitoring(supabase)
+  const security = await runSecurityAudit(supabase)
+  return result('ops-security', { ops: ops.summary, security: security.summary }, [...ops.emails, ...security.emails])
+}
+
+async function runDailyOperations(supabase: any) {
+  const enrichment = await runSummaryEnrichment(supabase)
+  const digest = await runDailyDigest(supabase)
+  return result('daily-operations', { enrichment: enrichment.summary, digest: digest.summary }, digest.emails)
+}
+
 export async function POST(request: Request) {
   const unauthorized = requireInternalToken(request)
   if (unauthorized) return unauthorized
@@ -638,6 +1008,15 @@ export async function POST(request: Request) {
   const supabase = serviceClient()
 
   try {
+    if (action === 'session-recovery') return jsonNoStore(await runSessionRecovery(supabase))
+    if (action === 'report-dead-letter') return jsonNoStore(await runReportDeadLetter(supabase))
+    if (action === 'clinical-acknowledgement') return jsonNoStore(await runClinicalAcknowledgement(supabase))
+    if (action === 'storage-integrity') return jsonNoStore(await runStorageIntegrity(supabase))
+    if (action === 'research-quality') return jsonNoStore(await runResearchQuality(supabase))
+    if (action === 'workflow-failure') return jsonNoStore(await runWorkflowFailure(supabase, request))
+    if (action === 'security-audit') return jsonNoStore(await runSecurityAudit(supabase))
+    if (action === 'ops-security') return jsonNoStore(await runOpsSecurity(supabase))
+    if (action === 'daily-operations') return jsonNoStore(await runDailyOperations(supabase))
     if (action === 'clinical-alerts') return jsonNoStore(await runClinicalAlerts(supabase))
     if (action === 'device-health') return jsonNoStore(await runDeviceHealth(supabase))
     if (action === 'daily-digest') return jsonNoStore(await runDailyDigest(supabase))

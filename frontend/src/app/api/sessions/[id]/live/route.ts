@@ -24,6 +24,11 @@ export async function GET(
   { params }: { params: { id: string } }
 ) {
   try {
+    const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+    if (!UUID_RE.test(params.id)) {
+      return jsonNoStore({ error: 'Invalid session id' }, 400)
+    }
+
     const supabase = createRouteHandlerClient({ cookies })
     const url = new URL(request.url)
     const seed = url.searchParams.get('seed') === '1'

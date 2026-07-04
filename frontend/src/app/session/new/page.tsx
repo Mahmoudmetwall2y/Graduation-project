@@ -4,9 +4,51 @@ import { useState, useEffect, useCallback } from 'react'
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { Heart, Cpu, FileText, ArrowRight, ChevronLeft, Activity } from 'lucide-react'
+import { Heart, Cpu, FileText, ArrowRight, ChevronLeft, Activity, RefreshCw } from 'lucide-react'
 
 const CAPTURE_DURATION_OPTIONS = [15, 20, 30, 45]
+const DEVICE_STATUS_PRIORITY: Record<string, number> = {
+  online: 0,
+  error: 1,
+  offline: 2,
+}
+
+function getDeviceTimestamp(device: any) {
+  if (!device?.last_seen_at) return 0
+  const timestamp = new Date(device.last_seen_at).getTime()
+  return Number.isFinite(timestamp) ? timestamp : 0
+}
+
+function sortSessionDevices(devices: any[]) {
+  return [...devices].sort((a, b) => {
+    const statusPriority =
+      (DEVICE_STATUS_PRIORITY[a.status || 'offline'] ?? 3) -
+      (DEVICE_STATUS_PRIORITY[b.status || 'offline'] ?? 3)
+
+    if (statusPriority !== 0) return statusPriority
+
+    return getDeviceTimestamp(b) - getDeviceTimestamp(a)
+  })
+}
+
+function formatLastSeen(lastSeenAt: string | null | undefined) {
+  if (!lastSeenAt) return 'never'
+
+  const elapsedSeconds = Math.round((Date.now() - new Date(lastSeenAt).getTime()) / 1000)
+  if (!Number.isFinite(elapsedSeconds) || elapsedSeconds < 0) return 'unknown'
+  if (elapsedSeconds < 60) return `${elapsedSeconds}s ago`
+
+  const elapsedMinutes = Math.round(elapsedSeconds / 60)
+  if (elapsedMinutes < 60) return `${elapsedMinutes}m ago`
+
+  return `${Math.round(elapsedMinutes / 60)}h ago`
+}
+
+function formatDeviceOption(device: any) {
+  const status = device.status || 'unknown'
+  const lastSeen = formatLastSeen(device.last_seen_at)
+  return `${device.device_name} (${status}, last seen ${lastSeen})`
+}
 
 export default function NewSessionPage() {
   const [deviceId, setDeviceId] = useState('')
@@ -25,20 +67,24 @@ export default function NewSessionPage() {
   const router = useRouter()
   const supabase = createClientComponentClient()
   const selectedDevice = devices.find((device) => device.id === deviceId)
-  const deviceReady = selectedDevice ? !selectedDevice.status || selectedDevice.status === 'online' : false
+  const deviceReady = selectedDevice ? selectedDevice.status === 'online' : false
 
   const fetchDevices = useCallback(async () => {
     try {
-      const { data, error } = await supabase
-        .from('devices')
-        .select('*')
-        .order('created_at', { ascending: false })
+      const response = await fetch('/api/devices', { cache: 'no-store' })
+      const payload = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(payload.error || 'Failed to load devices')
 
-      if (error) throw error
-      setDevices(data || [])
-      if (data && data.length > 0) {
-        setDeviceId(data[0].id)
-      }
+      const nextDevices = sortSessionDevices(payload.devices || [])
+      setDevices(nextDevices)
+      setDeviceId(currentDeviceId => {
+        if (nextDevices.some((device: any) => device.id === currentDeviceId)) {
+          return currentDeviceId
+        }
+
+        const preferredDevice = nextDevices.find((device: any) => device.status === 'online') || nextDevices[0]
+        return preferredDevice?.id || ''
+      })
       setFetchError(null)
     } catch (error) {
       console.error('Error fetching devices:', error)
@@ -46,7 +92,7 @@ export default function NewSessionPage() {
     } finally {
       setLoadingDevices(false)
     }
-  }, [supabase])
+  }, [])
 
   const fetchPatients = useCallback(async () => {
     try {
@@ -159,12 +205,25 @@ export default function NewSessionPage() {
 
           <form onSubmit={handleSubmit} className="bg-hud-surface-glass border border-hud-border/40 rounded-xl p-6 space-y-5 slide-up backdrop-blur-md">
             <div>
-              <label htmlFor="device" className="block text-sm font-medium text-foreground mb-1.5">
-                <span className="flex items-center gap-1.5">
-                  <Cpu className="w-3.5 h-3.5 text-muted-foreground" />
-                  Select Device
-                </span>
-              </label>
+              <div className="mb-1.5 flex items-center justify-between gap-3">
+                <label htmlFor="device" className="block text-sm font-medium text-foreground">
+                  <span className="flex items-center gap-1.5">
+                    <Cpu className="w-3.5 h-3.5 text-muted-foreground" />
+                    Select Device
+                  </span>
+                </label>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setLoadingDevices(true)
+                    fetchDevices()
+                  }}
+                  className="inline-flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-primary"
+                >
+                  <RefreshCw className={`h-3 w-3 ${loadingDevices ? 'animate-spin' : ''}`} />
+                  Refresh
+                </button>
+              </div>
               <select
                 id="device"
                 value={deviceId}
@@ -177,7 +236,7 @@ export default function NewSessionPage() {
                 ) : (
                   devices.map((device) => (
                     <option key={device.id} value={device.id}>
-                      {device.device_name} ({device.device_type})
+                      {formatDeviceOption(device)}
                     </option>
                   ))
                 )}
@@ -208,8 +267,9 @@ export default function NewSessionPage() {
                 </p>
               ) : selectedDevice ? (
                 <p className={`mt-2 text-xs ${deviceReady ? 'text-emerald-400' : 'text-amber-400'}`}>
-                  Device status: {selectedDevice.status || 'unknown'}
-                  {!deviceReady ? ' — keep the ESP32 powered on and connected before starting.' : ''}
+                  Device status: {selectedDevice.status || 'unknown'} · last seen {formatLastSeen(selectedDevice.last_seen_at)}
+                  {selectedDevice.ip_address ? ` · IP ${selectedDevice.ip_address}` : ''}
+                  {!deviceReady ? ' — choose an online ESP32 or refresh after it reconnects.' : ''}
                 </p>
               ) : null}
             </div>

@@ -56,13 +56,70 @@ def code_node(name: str, code: str, x: int = 300, y: int = 80) -> dict:
     }
 
 
-def gmail_node(name: str = "Send Gmail", x: int = 620, y: int = 80) -> dict:
+def if_positive_node(name: str, value_expression: str, x: int, y: int) -> dict:
+    return {
+        "parameters": {
+            "conditions": {
+                "options": {
+                    "caseSensitive": True,
+                    "leftValue": "",
+                    "typeValidation": "strict",
+                    "version": 2,
+                },
+                "conditions": [{
+                    "id": stable_id(f"{name}:condition"),
+                    "leftValue": value_expression,
+                    "rightValue": 0,
+                    "operator": {"type": "number", "operation": "gt"},
+                }],
+                "combinator": "and",
+            },
+            "options": {},
+        },
+        "id": stable_id(name),
+        "name": name,
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [x, y],
+    }
+
+
+def error_trigger_node(name: str = "Workflow Error Trigger", x: int = 0, y: int = 0) -> dict:
+    return {
+        "parameters": {},
+        "id": stable_id(name),
+        "name": name,
+        "type": "n8n-nodes-base.errorTrigger",
+        "typeVersion": 1,
+        "position": [x, y],
+    }
+
+
+def no_op_node(name: str, x: int, y: int) -> dict:
+    return {
+        "parameters": {},
+        "id": stable_id(name),
+        "name": name,
+        "type": "n8n-nodes-base.noOp",
+        "typeVersion": 1,
+        "position": [x, y],
+    }
+
+
+def with_retry(node: dict, tries: int = 3, wait_ms: int = 5000) -> dict:
+    node["retryOnFail"] = True
+    node["maxTries"] = tries
+    node["waitBetweenTries"] = wait_ms
+    return node
+
+
+def gmail_node(name: str = "Send Gmail", x: int = 620, y: int = 80, html: bool = False) -> dict:
     return {
         "parameters": {
             "sendTo": "={{$json.emailTo}}",
             "subject": "={{$json.emailSubject}}",
-            "message": "={{$json.emailText}}",
-            "emailType": "text",
+            "message": "={{$json.emailHtml}}" if html else "={{$json.emailText}}",
+            "emailType": "html" if html else "text",
             "options": {
                 "appendAttribution": False,
             },
@@ -117,9 +174,20 @@ def http_post_node(
     return node
 
 
+def http_post_json_node(name: str, url: str, body: str, x: int, y: int) -> dict:
+    node = http_post_node(name, url, headers=internal_api_headers(), x=x, y=y)
+    node["parameters"].update({
+        "sendBody": True,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": body,
+    })
+    return node
+
+
 INTERNAL_HOST_HEADER = (
     "={{$env.ASCULTICOR_INTERNAL_HOST_HEADER || "
-    "($env.ASCULTICOR_PUBLIC_APP_URL || 'https://srv1621744.hstgr.cloud')"
+    "($env.ASCULTICOR_PUBLIC_APP_URL || 'http://frontend:3000')"
     ".replace(/^https?:\\/\\//, '').replace(/\\/.*$/, '')}}"
 )
 
@@ -175,7 +243,7 @@ function requiredEnv(name) {
 
 const SUPABASE_URL = requiredEnv('SUPABASE_URL').replace(/\/+$/, '');
 const SERVICE_KEY = requiredEnv('SUPABASE_SERVICE_ROLE_KEY');
-const APP_URL = env('ASCULTICOR_PUBLIC_APP_URL', env('DEVICE_BOOTSTRAP_PUBLIC_BASE_URL', 'https://srv1621744.hstgr.cloud')).replace(/\/+$/, '');
+const APP_URL = env('ASCULTICOR_PUBLIC_APP_URL', env('DEVICE_BOOTSTRAP_PUBLIC_BASE_URL', 'http://localhost:3000')).replace(/\/+$/, '');
 const EMAIL_TO = env('ASCULTICOR_ALERT_EMAIL_TO');
 const EMAIL_FROM = env('ASCULTICOR_ALERT_EMAIL_FROM', 'AscultiCor <alerts@localhost>');
 
@@ -330,14 +398,724 @@ return emails
       emailTo: item.emailTo,
       emailSubject: item.emailSubject,
       emailText: item.emailText,
+const EMAIL_TO = env('ASCULTICOR_ALERT_EMAIL_TO');
+const EMAIL_FROM = env('ASCULTICOR_ALERT_EMAIL_FROM', 'AscultiCor <alerts@localhost>');
+
+async function supabase(path, options = {}) {
+  const method = options.method || 'GET';
+  const headers = {
+    apikey: SERVICE_KEY,
+    Authorization: `Bearer ${SERVICE_KEY}`,
+    'Content-Type': 'application/json',
+    ...(options.headers || {}),
+  };
+  if (options.prefer) headers.Prefer = options.prefer;
+  const response = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
+    method,
+    headers,
+    body: options.body === undefined ? undefined : JSON.stringify(options.body),
+  });
+  const text = await response.text();
+  if (!response.ok) {
+    throw new Error(`${method} ${path} failed: ${response.status} ${text}`);
+  }
+  if (!text) return null;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
+  }
+}
+
+function qs(params) {
+  const out = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined && value !== null) out.append(key, String(value));
+  }
+  return out.toString();
+}
+
+function get(obj, path, fallback = undefined) {
+  return path.split('.').reduce((acc, key) => (acc && acc[key] !== undefined ? acc[key] : undefined), obj) ?? fallback;
+}
+
+function isoMinutesAgo(minutes) {
+  return new Date(Date.now() - minutes * 60 * 1000).toISOString();
+}
+
+function emailItem(subject, text, to = EMAIL_TO) {
+  if (!to) throw new Error('A recipient email is required before sending email');
+  return { json: { emailFrom: EMAIL_FROM, emailTo: to, emailSubject: subject, emailText: text } };
+}
+
+async function findOpenAlert(deviceId, sessionId, subtype) {
+  const rows = await supabase(`device_alerts?${qs({
+    select: '*',
+    device_id: `eq.${deviceId}`,
+    is_resolved: 'eq.false',
+    order: 'created_at.desc',
+    limit: 100,
+  })}`);
+  return (rows || []).find((row) => {
+    const metadata = row.metadata || {};
+    return metadata.session_id === sessionId && metadata.subtype === subtype;
+  });
+}
+
+async function insertAlert({ deviceId, orgId, alertType, severity, message, metadata }) {
+  const inserted = await supabase('device_alerts?select=*', {
+    method: 'POST',
+    prefer: 'return=representation',
+    body: {
+      device_id: deviceId,
+      org_id: orgId,
+      alert_type: alertType,
+      severity,
+      message,
+      metadata,
+      is_resolved: false,
+    },
+  });
+  return inserted?.[0];
+}
+
+async function patientForSession(session) {
+  if (!session?.patient_id) return null;
+  const rows = await supabase(`patients?${qs({ select: 'id,full_name,email', id: `eq.${session.patient_id}`, limit: 1 })}`);
+  return rows?.[0] || null;
+}
+"""
+
+
+CONNECTIVITY_JS = r"""
+function env(name, fallback = '') {
+  const value = typeof $env !== 'undefined' ? $env[name] : undefined;
+  return value === undefined || value === null || value === '' ? fallback : value;
+}
+
+const EMAIL_TO = env('ASCULTICOR_ALERT_EMAIL_TO');
+const EMAIL_FROM = env('ASCULTICOR_ALERT_EMAIL_FROM', 'AscultiCor <alerts@localhost>');
+
+function emailItem(subject, text, html, to = EMAIL_TO) {
+  if (!to) throw new Error('A recipient email is required before sending email');
+  return { json: { emailFrom: EMAIL_FROM, emailTo: to, emailSubject: subject, emailText: text, emailHtml: html } };
+}
+
+function firstJson(nodeName) {
+  try {
+    return $(nodeName).first().json;
+  } catch (error) {
+    return { unavailable: true, error: error.message };
+  }
+}
+
+function allJson(nodeName) {
+  try {
+    return $(nodeName).all().map((item) => item.json);
+  } catch (error) {
+    return [{ unavailable: true, error: error.message }];
+  }
+}
+
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+function label(value) {
+  return String(value || 'unknown')
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, (character) => character.toUpperCase());
+}
+
+function statusTheme(state) {
+  if (['healthy', 'connected', 'loaded', 'operational', 'ok'].includes(state)) {
+    return { color: '#0f766e', background: '#e7f7f4', border: '#99d9cf' };
+  }
+  if (['degraded', 'warning', 'partial'].includes(state)) {
+    return { color: '#9a6700', background: '#fff7df', border: '#efd58a' };
+  }
+  return { color: '#a53f4b', background: '#fff0f1', border: '#e7a8af' };
+}
+
+function badge(state) {
+  const normalized = String(state || 'unknown').toLowerCase();
+  const theme = statusTheme(normalized);
+  return `<span style="display:inline-block;padding:5px 10px;border-radius:999px;border:1px solid ${theme.border};background:${theme.background};color:${theme.color};font-size:12px;font-weight:700;line-height:1;">${escapeHtml(label(normalized))}</span>`;
+}
+
+function serviceCard(title, state, detail, metric) {
+  const theme = statusTheme(String(state || '').toLowerCase());
+  return `<td class="status-column" width="33.33%" valign="top" style="padding:6px;">
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border:1px solid #dce4eb;border-top:4px solid ${theme.color};border-radius:10px;background:#ffffff;">
+      <tr><td style="padding:16px 16px 8px;color:#0b1f3a;font-size:15px;font-weight:700;">${escapeHtml(title)}</td></tr>
+      <tr><td style="padding:0 16px 12px;">${badge(state)}</td></tr>
+      <tr><td style="padding:0 16px 4px;color:#314459;font-size:13px;line-height:1.5;">${escapeHtml(detail)}</td></tr>
+      <tr><td style="padding:0 16px 16px;color:#0b1f3a;font-size:20px;font-weight:800;">${escapeHtml(metric)}</td></tr>
+    </table>
+  </td>`;
+}
+
+const inference = firstJson('Inference Health');
+const frontend = firstJson('Frontend Health');
+const reports = allJson('Supabase LLM Report Sample');
+const checkedAt = new Date();
+const checkedAtCairo = new Intl.DateTimeFormat('en-GB', {
+  dateStyle: 'medium',
+  timeStyle: 'short',
+  timeZone: 'Africa/Cairo',
+}).format(checkedAt);
+
+const frontendState = frontend.unavailable ? 'unavailable' : String(frontend.status || 'unknown').toLowerCase();
+const inferenceState = inference.unavailable ? 'unavailable' : String(inference.status || 'unknown').toLowerCase();
+const supabaseAvailable = !reports.some((report) => report?.unavailable);
+const supabaseState = supabaseAvailable ? 'connected' : 'unavailable';
+const modelEntries = Object.entries(inference.models || {});
+const modelsLoaded = Number(inference.models_loaded ?? modelEntries.filter(([, model]) => model?.loaded).length);
+const modelsTotal = Number(inference.models_total ?? modelEntries.length);
+const hasWarnings = inferenceState !== 'healthy' || frontendState !== 'healthy' || !supabaseAvailable || modelsLoaded < modelsTotal;
+const overallState = hasWarnings ? 'warning' : 'operational';
+const overallLabel = hasWarnings ? 'Operational with warnings' : 'All systems operational';
+
+const modelRows = modelEntries.length
+  ? modelEntries.map(([name, model]) => {
+      const state = model?.loaded ? 'loaded' : 'unavailable';
+      const detail = model?.loaded ? 'Ready for inference' : (model?.error ? String(model.error).slice(0, 120) : 'Model did not load');
+      return `<tr>
+        <td style="padding:11px 12px;border-top:1px solid #e7edf2;color:#172b40;font-size:13px;font-weight:700;">${escapeHtml(label(name))}</td>
+        <td style="padding:11px 12px;border-top:1px solid #e7edf2;">${badge(state)}</td>
+        <td style="padding:11px 12px;border-top:1px solid #e7edf2;color:#526579;font-size:12px;line-height:1.4;">${escapeHtml(detail)}</td>
+      </tr>`;
+    }).join('')
+  : `<tr><td colspan="3" style="padding:14px;color:#526579;font-size:13px;">No model details were returned.</td></tr>`;
+
+const text = [
+  `AscultiCor system check: ${overallLabel}`,
+  '',
+  `Frontend: ${label(frontendState)}`,
+  `Inference: ${label(inferenceState)}`,
+  `Supabase: ${label(supabaseState)}`,
+  `Models ready: ${modelsLoaded}/${modelsTotal}`,
+  `MQTT connected: ${inference.mqtt_connected ? 'Yes' : 'No'}`,
+  `Storage connected: ${inference.storage_connected ? 'Yes' : 'No'}`,
+  `Supabase sample rows: ${supabaseAvailable ? reports.length : 'Unavailable'}`,
+  `Checked at: ${checkedAtCairo} Africa/Cairo`,
+].join('\n');
+
+const html = `<!doctype html>
+<html>
+<head>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <style>@media only screen and (max-width:620px){.shell{width:100%!important}.status-column{display:block!important;width:100%!important}}</style>
+</head>
+<body style="margin:0;padding:0;background:#f2f6f8;font-family:Arial,Helvetica,sans-serif;color:#172b40;">
+  <div style="display:none;max-height:0;overflow:hidden;opacity:0;">Frontend, inference, Supabase, MQTT, storage, and model readiness summary.</div>
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f2f6f8;">
+    <tr><td align="center" style="padding:28px 12px;">
+      <table role="presentation" class="shell" width="680" cellspacing="0" cellpadding="0" style="width:680px;max-width:100%;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 6px 22px rgba(11,31,58,.08);">
+        <tr><td style="padding:26px 30px;background:#0b1f3a;border-bottom:5px solid #0f766e;">
+          <div style="color:#7bd3c7;font-size:12px;font-weight:800;letter-spacing:1.4px;text-transform:uppercase;">AscultiCor Operations</div>
+          <div style="margin-top:7px;color:#ffffff;font-size:25px;font-weight:800;line-height:1.25;">Connectivity &amp; Readiness Check</div>
+          <div style="margin-top:12px;">${badge(overallState)}</div>
+        </td></tr>
+        <tr><td style="padding:22px 24px 8px;">
+          <table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr>
+            ${serviceCard('Frontend', frontendState, 'Web application and API', frontendState === 'healthy' ? 'Online' : label(frontendState))}
+            ${serviceCard('Inference', inferenceState, 'AI inference service', `${modelsLoaded}/${modelsTotal} models`)}
+            ${serviceCard('Supabase', supabaseState, 'Database connectivity', supabaseAvailable ? `${reports.length} sample row${reports.length === 1 ? '' : 's'}` : 'Unavailable')}
+          </tr></table>
+        </td></tr>
+        <tr><td style="padding:14px 30px 8px;color:#0b1f3a;font-size:17px;font-weight:800;">Infrastructure signals</td></tr>
+        <tr><td style="padding:0 30px 18px;">
+          <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border:1px solid #dce4eb;border-radius:10px;background:#f9fbfc;">
+            <tr>
+              <td width="33.33%" align="center" style="padding:15px 8px;border-right:1px solid #e1e8ee;"><div style="font-size:12px;color:#607286;">MQTT</div><div style="margin-top:6px;">${badge(inference.mqtt_connected ? 'connected' : 'unavailable')}</div></td>
+              <td width="33.33%" align="center" style="padding:15px 8px;border-right:1px solid #e1e8ee;"><div style="font-size:12px;color:#607286;">Storage</div><div style="margin-top:6px;">${badge(inference.storage_connected ? 'connected' : 'unavailable')}</div></td>
+              <td width="33.33%" align="center" style="padding:15px 8px;"><div style="font-size:12px;color:#607286;">Active sessions</div><div style="margin-top:8px;color:#0b1f3a;font-size:18px;font-weight:800;">${escapeHtml(inference.active_sessions ?? 0)}</div></td>
+            </tr>
+          </table>
+        </td></tr>
+        <tr><td style="padding:8px 30px;color:#0b1f3a;font-size:17px;font-weight:800;">Model readiness</td></tr>
+        <tr><td style="padding:0 30px 24px;">
+          <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border:1px solid #dce4eb;border-radius:10px;overflow:hidden;">
+            <tr style="background:#eef3f6;"><th align="left" style="padding:10px 12px;color:#526579;font-size:11px;text-transform:uppercase;letter-spacing:.5px;">Model</th><th align="left" style="padding:10px 12px;color:#526579;font-size:11px;text-transform:uppercase;letter-spacing:.5px;">Status</th><th align="left" style="padding:10px 12px;color:#526579;font-size:11px;text-transform:uppercase;letter-spacing:.5px;">Details</th></tr>
+            ${modelRows}
+          </table>
+        </td></tr>
+        <tr><td style="padding:18px 30px;background:#f5f8fa;border-top:1px solid #e2e8ee;color:#607286;font-size:12px;line-height:1.6;">
+          Checked ${escapeHtml(checkedAtCairo)} (Africa/Cairo)<br>
+          Automated by n8n · This operational message contains no patient data.
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+
+return [
+  emailItem(
+    `AscultiCor system check — ${overallLabel}`,
+    text,
+    html
+  )
+];
+"""
+
+
+EMAILS_FROM_RESULT_JS = r"""
+const emails = Array.isArray($json.emails) ? $json.emails : [];
+
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+function emailTheme(subject, text) {
+  const content = `${subject} ${text}`.toLowerCase();
+  if (/critical|failed|failure|dead.?letter|offline|missing|error/.test(content)) {
+    return { state: 'Action required', color: '#a53f4b', background: '#fff0f1', border: '#e7a8af' };
+  }
+  if (/warning|degraded|stale|recovered|alert|review|issue/.test(content)) {
+    return { state: 'Review recommended', color: '#9a6700', background: '#fff7df', border: '#efd58a' };
+  }
+  return { state: 'Operational update', color: '#0f766e', background: '#e7f7f4', border: '#99d9cf' };
+}
+
+function cleanTitle(subject) {
+  return String(subject || 'AscultiCor operational notification')
+    .replace(/^\[AscultiCor\]\s*/i, '')
+    .trim();
+}
+
+function structuredBody(text) {
+  const lines = String(text || '').split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const rows = [];
+  const paragraphs = [];
+
+  for (const line of lines) {
+    const match = line.match(/^([^:]{2,42}):\s*(.+)$/);
+    if (match) {
+      rows.push(`<tr>
+        <td valign="top" style="width:38%;padding:10px 12px;border-top:1px solid #e7edf2;color:#607286;font-size:12px;font-weight:700;">${escapeHtml(match[1])}</td>
+        <td valign="top" style="padding:10px 12px;border-top:1px solid #e7edf2;color:#172b40;font-size:13px;line-height:1.5;word-break:break-word;">${escapeHtml(match[2])}</td>
+      </tr>`);
+    } else {
+      paragraphs.push(`<div style="margin:0 0 9px;color:#314459;font-size:14px;line-height:1.65;">${escapeHtml(line)}</div>`);
+    }
+  }
+
+  return {
+    paragraphs: paragraphs.join(''),
+    rows: rows.join(''),
+  };
+}
+
+function operationalEmail(subject, text) {
+  const theme = emailTheme(subject, text);
+  const title = cleanTitle(subject);
+  const body = structuredBody(text);
+  const checkedAt = new Intl.DateTimeFormat('en-GB', {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+    timeZone: 'Africa/Cairo',
+  }).format(new Date());
+
+  const details = body.rows
+    ? `<tr><td style="padding:8px 30px 24px;">
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border:1px solid #dce4eb;border-radius:10px;overflow:hidden;background:#ffffff;">
+          <tr><td colspan="2" style="padding:11px 12px;background:#eef3f6;color:#526579;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.6px;">Operational details</td></tr>
+          ${body.rows}
+        </table>
+      </td></tr>`
+    : '';
+
+  return `<!doctype html>
+<html>
+<head>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <style>@media only screen and (max-width:620px){.shell{width:100%!important}.content-pad{padding-left:20px!important;padding-right:20px!important}}</style>
+</head>
+<body style="margin:0;padding:0;background:#f2f6f8;font-family:Arial,Helvetica,sans-serif;color:#172b40;">
+  <div style="display:none;max-height:0;overflow:hidden;opacity:0;">${escapeHtml(title)} — AscultiCor automated operational notification.</div>
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f2f6f8;">
+    <tr><td align="center" style="padding:28px 12px;">
+      <table role="presentation" class="shell" width="680" cellspacing="0" cellpadding="0" style="width:680px;max-width:100%;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 6px 22px rgba(11,31,58,.08);">
+        <tr><td class="content-pad" style="padding:26px 30px;background:#0b1f3a;border-bottom:5px solid #0f766e;">
+          <div style="color:#7bd3c7;font-size:12px;font-weight:800;letter-spacing:1.4px;text-transform:uppercase;">AscultiCor Operations</div>
+          <div style="margin-top:7px;color:#ffffff;font-size:25px;font-weight:800;line-height:1.25;">${escapeHtml(title)}</div>
+          <div style="margin-top:12px;"><span style="display:inline-block;padding:5px 10px;border-radius:999px;border:1px solid ${theme.border};background:${theme.background};color:${theme.color};font-size:12px;font-weight:700;line-height:1;">${escapeHtml(theme.state)}</span></div>
+        </td></tr>
+        <tr><td class="content-pad" style="padding:24px 30px 10px;">
+          <div style="padding:16px 18px;border-left:4px solid ${theme.color};border-radius:8px;background:${theme.background};">
+            ${body.paragraphs || '<div style="color:#314459;font-size:14px;line-height:1.65;">An AscultiCor operational event was recorded.</div>'}
+          </div>
+        </td></tr>
+        ${details}
+        <tr><td class="content-pad" style="padding:18px 30px;background:#f5f8fa;border-top:1px solid #e2e8ee;color:#607286;font-size:12px;line-height:1.6;">
+          Generated ${escapeHtml(checkedAt)} (Africa/Cairo)<br>
+          Automated by n8n · Review operational and clinical alerts in AscultiCor.
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+}
+
+return emails
+  .filter((item) => item && item.emailTo && item.emailSubject && item.emailText)
+  .map((item) => ({
+    json: {
+      emailFrom: item.emailFrom || '',
+      emailTo: item.emailTo,
+      emailSubject: item.emailSubject,
+      emailText: item.emailText,
+      emailHtml: operationalEmail(item.emailSubject, item.emailText),
     },
   }));
+"""
+
+FIRMWARE_ROLLOUT_VALIDATE_JS = r"""
+if (!$json || $json.ok !== true || $json.action !== 'firmware-rollout') {
+  throw new Error('Firmware rollout dispatcher returned an invalid response');
+}
+const results = Array.isArray($json.results) ? $json.results : [];
+return [{
+  json: {
+    queued: Number($json.queued || 0),
+    dispatched: results.filter((item) => item.status === 'dispatched').length,
+    retryPending: results.filter((item) => item.status === 'retry_pending').length,
+    results,
+    checkedAt: new Date().toISOString(),
+  },
+}];
+"""
+
+
+VALIDATE_LLM_QUEUE_JS = r"""
+if (!$json || typeof $json !== 'object' || Array.isArray($json)) {
+  throw new Error('The AscultiCor report worker returned an invalid response payload');
+}
+
+for (const field of ['processed', 'failed', 'skipped']) {
+  if (!Number.isFinite(Number($json[field] ?? 0))) {
+    throw new Error(`The report worker returned an invalid ${field} count`);
+  }
+}
+
+const emails = Array.isArray($json.emails) ? $json.emails : [];
+return [{
+  json: {
+    emails,
+    emailCount: emails.length,
+    processed: Number($json.processed || 0),
+    failed: Number($json.failed || 0),
+    skipped: Number($json.skipped || 0),
+    automaticallyQueued: Number($json.automatically_queued || 0),
+    checkedAt: new Date().toISOString(),
+  },
+}];
+"""
+
+
+PREPARE_LLM_EMAILS_JS = r"""
+const emails = Array.isArray($json.emails) ? $json.emails : [];
+const seen = new Set();
+const prepared = [];
+
+for (const item of emails) {
+  if (!item || typeof item !== 'object') continue;
+  const recipient = String(item.emailTo || '').trim().toLowerCase();
+  const subject = String(item.emailSubject || '').trim();
+  const text = String(item.emailText || '').trim();
+  if (!recipient || !recipient.includes('@') || !subject || !text) continue;
+
+  const dedupeKey = `${item.reportId || item.sessionId || subject}:${recipient}`;
+  if (seen.has(dedupeKey)) continue;
+  seen.add(dedupeKey);
+
+  prepared.push({
+    json: {
+      emailFrom: item.emailFrom || '',
+      emailTo: recipient,
+      emailSubject: subject,
+      emailText: text,
+      emailHtml: item.emailHtml || `<pre style="white-space:pre-wrap;font-family:Arial,sans-serif">${text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</pre>`,
+      reportId: item.reportId || null,
+      sessionId: item.sessionId || null,
+      priority: item.priority === 'review' ? 'review' : 'routine',
+      preparedAt: new Date().toISOString(),
+    },
+  });
+}
+
+if (emails.length > 0 && prepared.length === 0) {
+  throw new Error('Report emails were returned, but none passed recipient and payload validation');
+}
+
+return prepared;
+"""
+
+
+VALIDATE_CLINICAL_ALERTS_JS = r"""
+if (!$json || typeof $json !== 'object' || $json.ok !== true || $json.action !== 'clinical-alerts') {
+  throw new Error('The clinical-alert worker returned an invalid response payload');
+}
+
+const summary = $json.summary && typeof $json.summary === 'object' ? $json.summary : {};
+const emails = Array.isArray($json.emails) ? $json.emails : [];
+for (const field of ['created', 'skipped', 'emails']) {
+  if (!Number.isFinite(Number(summary[field] ?? 0))) {
+    throw new Error(`The clinical-alert worker returned an invalid ${field} count`);
+  }
+}
+
+return [{
+  json: {
+    emails,
+    emailCount: emails.length,
+    created: Number(summary.created || 0),
+    skipped: Number(summary.skipped || 0),
+    checkedAt: new Date().toISOString(),
+  },
+}];
+"""
+
+
+WORKFLOW_FAILURE_PAYLOAD_JS = r"""
+const execution = $json.execution || {};
+const workflow = $json.workflow || {};
+const error = execution.error || $json.error || {};
+return [{
+  json: {
+    workflow_name: workflow.name || $json.workflowName || 'unknown',
+    execution_id: execution.id || $json.executionId || '',
+    last_node: execution.lastNodeExecuted || $json.lastNodeExecuted || '',
+    error: error.message || error.description || String(error || 'Workflow execution failed'),
+    occurred_at: new Date().toISOString(),
+  },
+}];
+"""
+
+
+def weekly_node(name: str, weekday: int = 1, hour: int = 9, x: int = 0, y: int = 160) -> dict:
+    return {
+        "parameters": {
+            "rule": {
+                "interval": [{
+                    "field": "weeks",
+                    "triggerAtDay": [weekday],
+                    "triggerAtHour": hour,
+                }],
+            },
+        },
+        "id": stable_id(name),
+        "name": name,
+        "type": "n8n-nodes-base.scheduleTrigger",
+        "typeVersion": 1.2,
+        "position": [x, y],
+    }
+
+
+def action_workflow(number: str, title: str, filename: str, action: str, trigger: dict) -> tuple:
+    run_name = f"Run {title}"
+    prepare_name = f"Prepare {title} Emails"
+    nodes = [
+        manual_node(),
+        trigger,
+        with_retry(
+            http_post_node(run_name, frontend_action_url(action), headers=internal_api_headers(), x=300, y=80),
+            tries=3,
+            wait_ms=5000,
+        ),
+        code_node(prepare_name, EMAILS_FROM_RESULT_JS, x=620, y=80),
+        with_retry(gmail_node(x=940, y=80, html=True), tries=3, wait_ms=5000),
+    ]
+    connections = {
+        "Manual Trigger": {"main": [[{"node": run_name, "type": "main", "index": 0}]]},
+        trigger["name"]: {"main": [[{"node": run_name, "type": "main", "index": 0}]]},
+        run_name: {"main": [[{"node": prepare_name, "type": "main", "index": 0}]]},
+        prepare_name: {"main": [[{"node": "Send Gmail", "type": "main", "index": 0}]]},
+    }
+    return (f"{number} - {title}", filename, nodes, connections)
+
+
+def multi_action_workflow(
+    number: str,
+    title: str,
+    filename: str,
+    branches: list[tuple[str, str, dict]],
+) -> tuple:
+    """Build one operational workflow with independently scheduled action branches."""
+    manual = manual_node()
+    nodes = [manual]
+    connections = {"Manual Trigger": {"main": [[]]}}
+
+    for index, (branch_title, action, trigger) in enumerate(branches):
+        y = index * 260
+        trigger["position"] = [0, y + 140]
+        run_name = f"Run {branch_title}"
+        prepare_name = f"Prepare {branch_title} Emails"
+        send_name = f"Send {branch_title} Gmail"
+        nodes.extend([
+            trigger,
+            with_retry(
+                http_post_node(run_name, frontend_action_url(action), headers=internal_api_headers(), x=300, y=y),
+                tries=3,
+                wait_ms=5000,
+            ),
+            code_node(prepare_name, EMAILS_FROM_RESULT_JS, x=620, y=y),
+            with_retry(gmail_node(name=send_name, x=940, y=y, html=True), tries=3, wait_ms=5000),
+        ])
+        target = {"node": run_name, "type": "main", "index": 0}
+        connections["Manual Trigger"]["main"][0].append(target)
+        connections[trigger["name"]] = {"main": [[target]]}
+        connections[run_name] = {"main": [[{"node": prepare_name, "type": "main", "index": 0}]]}
+        connections[prepare_name] = {"main": [[{"node": send_name, "type": "main", "index": 0}]]}
+
+    return (f"{number} - {title}", filename, nodes, connections)
+
+
+def replacement_workflows() -> list[tuple]:
+    device_nodes = [
+        manual_node(),
+        schedule_node("Every Two Minutes", minutes=2),
+        with_retry(http_post_node(
+            "Dispatch Firmware Rollouts",
+            frontend_action_url("dispatch", route="/api/device/firmware/deployments"),
+            headers=internal_api_headers(),
+            x=280,
+            y=20,
+        )),
+        code_node("Validate Firmware Dispatch", FIRMWARE_ROLLOUT_VALIDATE_JS, x=540, y=20),
+        with_retry(http_post_node(
+            "Run Device Health",
+            frontend_action_url("device-health"),
+            headers=internal_api_headers(),
+            x=800,
+            y=20,
+        )),
+        code_node("Prepare Device Lifecycle Emails", EMAILS_FROM_RESULT_JS, x=1060, y=20),
+        with_retry(gmail_node(x=1320, y=20, html=True)),
+    ]
+    device_connections = {
+        "Manual Trigger": {"main": [[{"node": "Dispatch Firmware Rollouts", "type": "main", "index": 0}]]},
+        "Every Two Minutes": {"main": [[{"node": "Dispatch Firmware Rollouts", "type": "main", "index": 0}]]},
+        "Dispatch Firmware Rollouts": {"main": [[{"node": "Validate Firmware Dispatch", "type": "main", "index": 0}]]},
+        "Validate Firmware Dispatch": {"main": [[{"node": "Run Device Health", "type": "main", "index": 0}]]},
+        "Run Device Health": {"main": [[{"node": "Prepare Device Lifecycle Emails", "type": "main", "index": 0}]]},
+        "Prepare Device Lifecycle Emails": {"main": [[{"node": "Send Gmail", "type": "main", "index": 0}]]},
+    }
+
+    error_nodes = [
+        error_trigger_node(),
+        code_node("Build Failure Payload", WORKFLOW_FAILURE_PAYLOAD_JS, x=280, y=0),
+        with_retry(http_post_json_node(
+            "Record Workflow Failure",
+            frontend_action_url("workflow-failure"),
+            "={{JSON.stringify($json)}}",
+            x=560,
+            y=0,
+        )),
+        code_node("Prepare Failure Email", EMAILS_FROM_RESULT_JS, x=840, y=0),
+        with_retry(gmail_node(x=1120, y=0, html=True)),
+    ]
+    error_connections = {
+        "Workflow Error Trigger": {"main": [[{"node": "Build Failure Payload", "type": "main", "index": 0}]]},
+        "Build Failure Payload": {"main": [[{"node": "Record Workflow Failure", "type": "main", "index": 0}]]},
+        "Record Workflow Failure": {"main": [[{"node": "Prepare Failure Email", "type": "main", "index": 0}]]},
+        "Prepare Failure Email": {"main": [[{"node": "Send Gmail", "type": "main", "index": 0}]]},
+    }
+
+    return [
+        multi_action_workflow(
+            "02",
+            "Processing Reliability",
+            "02-processing-reliability.json",
+            [
+                ("Session Recovery", "session-recovery", schedule_node("Session Recovery Every Two Minutes", minutes=2)),
+                ("Report Dead Letter", "report-dead-letter", schedule_node("Report DLQ Every Five Minutes", minutes=5)),
+            ],
+        ),
+        action_workflow(
+            "03",
+            "Clinical Alert Management",
+            "03-clinical-alert-management.json",
+            "clinical-acknowledgement",
+            schedule_node("Clinical Review Every Two Minutes", minutes=2),
+        ),
+        ("04 - Device and OTA Management", "04-device-ota-management.json", device_nodes, device_connections),
+        multi_action_workflow(
+            "05",
+            "Data Integrity and Research Quality",
+            "05-data-integrity-research-quality.json",
+            [
+                ("Storage Integrity", "storage-integrity", schedule_node("Storage Check Every Six Hours", hours=6)),
+                ("Research Quality", "research-quality", weekly_node("Research Quality Monday 09 Cairo", weekday=1, hour=9)),
+            ],
+        ),
+        multi_action_workflow(
+            "06",
+            "Operations Intelligence",
+            "06-operations-intelligence.json",
+            [
+                ("Security Correlation", "ops-security", schedule_node("Security Correlation Every Five Minutes", minutes=5)),
+                ("Daily Operations", "daily-operations", schedule_node("Daily Operations 09 Cairo", daily_hour=9)),
+            ],
+        ),
+        ("07 - Shared Workflow Failure Handler", "07-shared-workflow-failure-handler.json", error_nodes, error_connections),
+    ]
+
+
+PREPARE_CLINICAL_ALERT_EMAILS_JS = r"""
+const emails = Array.isArray($json.emails) ? $json.emails : [];
+const seen = new Set();
+const prepared = [];
+
+for (const item of emails) {
+  if (!item || typeof item !== 'object') continue;
+  const recipient = String(item.emailTo || '').trim().toLowerCase();
+  const subject = String(item.emailSubject || '').trim();
+  const text = String(item.emailText || '').trim();
+  if (!recipient || !recipient.includes('@') || !subject || !text) continue;
+
+  const dedupeKey = `${item.alertId || item.sessionId || subject}:${recipient}`;
+  if (seen.has(dedupeKey)) continue;
+  seen.add(dedupeKey);
+  prepared.push({
+    json: {
+      emailFrom: item.emailFrom || '',
+      emailTo: recipient,
+      emailSubject: subject,
+      emailText: text,
+      emailHtml: item.emailHtml || `<pre style="white-space:pre-wrap;font-family:Arial,sans-serif">${text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</pre>`,
+      alertId: item.alertId || null,
+      sessionId: item.sessionId || null,
+      severity: item.severity === 'critical' ? 'critical' : 'warning',
+      preparedAt: new Date().toISOString(),
+    },
+  });
+}
+
+if (emails.length > 0 && prepared.length === 0) {
+  throw new Error('Clinical-alert emails were returned, but none passed validation');
+}
+
+return prepared;
 """
 
 
 LLM_JS = COMMON_JS + r"""
 const CLAUDE_API_KEY = requiredEnv('CLAUDE_API_KEY');
-const CLAUDE_BASE_URL = env('CLAUDE_BASE_URL', 'https://agentrouter.org').replace(/\/+$/, '');
+const CLAUDE_BASE_URL = env('CLAUDE_BASE_URL', 'https://api.anthropic.com').replace(/\/+$/, '');
 const CLAUDE_MODEL = env('CLAUDE_MODEL', 'claude-sonnet-4-5-20250514');
 
 function confidenceFromPredictions(predictions) {
@@ -604,13 +1382,15 @@ for (const prediction of predictions || []) {
       confidence: output.probabilities?.Murmur ?? output.probabilities?.[output.label] ?? null,
     });
   }
-  if (prediction.modality === 'ecg' && output.prediction === 'Abnormal') {
+  const ecgClass = String(output.prediction || output.label || '').trim();
+  const normalizedEcgClass = ecgClass.toLowerCase();
+  if (prediction.modality === 'ecg' && ['abnormal', 'sveb', 'veb', 'fusion'].includes(normalizedEcgClass)) {
     await createClinicalAlert({
       session,
       prediction,
-      subtype: 'ecg_abnormal',
-      title: 'Warning: Abnormal ECG',
-      message: `Abnormal ECG detected for session ${session.id}`,
+      subtype: `ecg_${normalizedEcgClass}`,
+      title: `Warning: ECG ${ecgClass} requires review`,
+      message: `ECG ${ecgClass} output detected for session ${session.id}`,
       confidence: output.confidence ?? null,
     });
   }
@@ -713,7 +1493,7 @@ return emails;
 
 DAILY_DIGEST_JS = COMMON_JS + r"""
 const CLAUDE_API_KEY = env('CLAUDE_API_KEY');
-const CLAUDE_BASE_URL = env('CLAUDE_BASE_URL', 'https://agentrouter.org').replace(/\/+$/, '');
+const CLAUDE_BASE_URL = env('CLAUDE_BASE_URL', 'https://api.anthropic.com').replace(/\/+$/, '');
 const CLAUDE_MODEL = env('CLAUDE_MODEL', 'claude-sonnet-4-5-20250514');
 const since = isoMinutesAgo(24 * 60);
 
@@ -953,7 +1733,7 @@ def write_workflows() -> None:
                     always_output=True,
                 ),
                 code_node("Build Connectivity Email", CONNECTIVITY_JS, x=1040, y=0),
-                gmail_node(x=1300, y=0),
+                gmail_node(x=1300, y=0, html=True),
             ],
             {
                 "Manual Trigger": {"main": [[{"node": "Inference Health", "type": "main", "index": 0}]]},
@@ -969,14 +1749,32 @@ def write_workflows() -> None:
             [
                 manual_node(),
                 schedule_node("Every Minute", minutes=1),
-                http_post_node("Process Pending Reports", frontend_action_url("process-pending", "/api/llm"), headers=internal_api_headers(), x=300, y=80),
-                code_node("Prepare LLM Report Emails", EMAILS_FROM_RESULT_JS, x=600, y=80),
-                gmail_node(x=900, y=80),
+                with_retry(
+                    http_post_node(
+                        "Process Pending Reports",
+                        frontend_action_url("process-pending&include_email_payloads=1", "/api/llm"),
+                        headers=internal_api_headers(),
+                        x=260,
+                        y=80,
+                    ),
+                    tries=3,
+                    wait_ms=5000,
+                ),
+                code_node("Validate Queue Result", VALIDATE_LLM_QUEUE_JS, x=500, y=80),
+                if_positive_node("Emails Ready?", "={{$json.emailCount}}", x=740, y=80),
+                code_node("Prepare LLM Report Emails", PREPARE_LLM_EMAILS_JS, x=980, y=0),
+                with_retry(gmail_node(x=1230, y=0, html=True), tries=3, wait_ms=5000),
+                no_op_node("No Emails Needed", x=980, y=180),
             ],
             {
                 "Manual Trigger": {"main": [[{"node": "Process Pending Reports", "type": "main", "index": 0}]]},
                 "Every Minute": {"main": [[{"node": "Process Pending Reports", "type": "main", "index": 0}]]},
-                "Process Pending Reports": {"main": [[{"node": "Prepare LLM Report Emails", "type": "main", "index": 0}]]},
+                "Process Pending Reports": {"main": [[{"node": "Validate Queue Result", "type": "main", "index": 0}]]},
+                "Validate Queue Result": {"main": [[{"node": "Emails Ready?", "type": "main", "index": 0}]]},
+                "Emails Ready?": {"main": [
+                    [{"node": "Prepare LLM Report Emails", "type": "main", "index": 0}],
+                    [{"node": "No Emails Needed", "type": "main", "index": 0}],
+                ]},
                 "Prepare LLM Report Emails": {"main": [[{"node": "Send Gmail", "type": "main", "index": 0}]]},
             },
         ),
@@ -986,30 +1784,52 @@ def write_workflows() -> None:
             [
                 manual_node(),
                 schedule_node("Every Minute", minutes=1),
-                http_post_node("Run Clinical Alerts", frontend_action_url("clinical-alerts"), headers=internal_api_headers(), x=300, y=80),
-                code_node("Prepare Clinical Alert Emails", EMAILS_FROM_RESULT_JS, x=600, y=80),
-                gmail_node(x=900, y=80),
+                with_retry(
+                    http_post_node("Run Clinical Alerts", frontend_action_url("clinical-alerts"), headers=internal_api_headers(), x=260, y=80),
+                    tries=3,
+                    wait_ms=5000,
+                ),
+                code_node("Validate Clinical Alerts", VALIDATE_CLINICAL_ALERTS_JS, x=500, y=80),
+                if_positive_node("Alerts Ready?", "={{$json.emailCount}}", x=740, y=80),
+                code_node("Prepare Clinical Alert Emails", PREPARE_CLINICAL_ALERT_EMAILS_JS, x=980, y=0),
+                with_retry(gmail_node(x=1230, y=0, html=True), tries=3, wait_ms=5000),
+                no_op_node("No Alerts Needed", x=980, y=180),
             ],
             {
                 "Manual Trigger": {"main": [[{"node": "Run Clinical Alerts", "type": "main", "index": 0}]]},
                 "Every Minute": {"main": [[{"node": "Run Clinical Alerts", "type": "main", "index": 0}]]},
-                "Run Clinical Alerts": {"main": [[{"node": "Prepare Clinical Alert Emails", "type": "main", "index": 0}]]},
+                "Run Clinical Alerts": {"main": [[{"node": "Validate Clinical Alerts", "type": "main", "index": 0}]]},
+                "Validate Clinical Alerts": {"main": [[{"node": "Alerts Ready?", "type": "main", "index": 0}]]},
+                "Alerts Ready?": {"main": [
+                    [{"node": "Prepare Clinical Alert Emails", "type": "main", "index": 0}],
+                    [{"node": "No Alerts Needed", "type": "main", "index": 0}],
+                ]},
                 "Prepare Clinical Alert Emails": {"main": [[{"node": "Send Gmail", "type": "main", "index": 0}]]},
             },
         ),
         (
-            "03 - Device Health Monitoring",
+            "03 - Device Lifecycle Management",
             "03-device-health-monitoring.json",
             [
                 manual_node(),
                 schedule_node("Every Two Minutes", minutes=2),
-                http_post_node("Run Device Health", frontend_action_url("device-health"), headers=internal_api_headers(), x=300, y=80),
-                code_node("Prepare Device Health Emails", EMAILS_FROM_RESULT_JS, x=600, y=80),
-                gmail_node(x=900, y=80),
+                http_post_node(
+                    "Dispatch Firmware Rollouts",
+                    frontend_action_url("dispatch", route="/api/device/firmware/deployments"),
+                    headers=internal_api_headers(),
+                    x=280,
+                    y=20,
+                ),
+                code_node("Validate Firmware Dispatch", FIRMWARE_ROLLOUT_VALIDATE_JS, x=540, y=20),
+                http_post_node("Run Device Health", frontend_action_url("device-health"), headers=internal_api_headers(), x=800, y=20),
+                code_node("Prepare Device Health Emails", EMAILS_FROM_RESULT_JS, x=1060, y=20),
+                gmail_node(x=1320, y=-40),
             ],
             {
-                "Manual Trigger": {"main": [[{"node": "Run Device Health", "type": "main", "index": 0}]]},
-                "Every Two Minutes": {"main": [[{"node": "Run Device Health", "type": "main", "index": 0}]]},
+                "Manual Trigger": {"main": [[{"node": "Dispatch Firmware Rollouts", "type": "main", "index": 0}]]},
+                "Every Two Minutes": {"main": [[{"node": "Dispatch Firmware Rollouts", "type": "main", "index": 0}]]},
+                "Dispatch Firmware Rollouts": {"main": [[{"node": "Validate Firmware Dispatch", "type": "main", "index": 0}]]},
+                "Validate Firmware Dispatch": {"main": [[{"node": "Run Device Health", "type": "main", "index": 0}]]},
                 "Run Device Health": {"main": [[{"node": "Prepare Device Health Emails", "type": "main", "index": 0}]]},
                 "Prepare Device Health Emails": {"main": [[{"node": "Send Gmail", "type": "main", "index": 0}]]},
             },
@@ -1080,9 +1900,19 @@ def write_workflows() -> None:
         ),
     ]
 
+    workflows = workflows[:2] + replacement_workflows()
+    expected_files = {filename for _, filename, _, _ in workflows}
+    for existing in OUT_DIR.glob("*.json"):
+        if existing.name not in expected_files:
+            existing.unlink()
+
     for name, filename, nodes, connections in workflows:
         path = OUT_DIR / filename
-        path.write_text(json.dumps(workflow(name, nodes, connections), indent=2) + "\n", encoding="utf-8")
+        path.write_text(
+            json.dumps(workflow(name, nodes, connections), indent=2) + "\n",
+            encoding="utf-8",
+            newline="\n",
+        )
 
 
 if __name__ == "__main__":

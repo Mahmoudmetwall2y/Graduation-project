@@ -20,7 +20,7 @@ jobs:
             exit 1
           fi
 
-          curl -sS -X POST "$APP_URL/api/llm?action=process-pending" \
+          curl --fail-with-body -sS -X POST "$APP_URL/api/llm?action=process-pending" \
             -H "x-internal-token: $INTERNAL_TOKEN" \
             -H "Content-Type: application/json" \
             --data "{}"

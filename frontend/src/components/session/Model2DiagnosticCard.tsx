@@ -5,6 +5,7 @@ import { DataGrid } from './DataGrid'
 interface Model2DiagnosticCardProps extends ReportPrintProps {
   data: Model2Data | undefined
   murmurDetected: boolean
+  sessionStatus: string
 }
 
 // Known severity CNN output heads and their display labels
@@ -27,31 +28,38 @@ const SEVERITY_HEAD_LABELS: Record<string, string> = {
   campaign: 'Campaign Origin',
 }
 
-const RESERVED_KEYS = new Set(['model_name', 'model_version', 'latency_ms', 'demo_mode', 'preprocessing_version', 'created_at'])
+const RESERVED_KEYS = new Set([
+  'model_name', 'model_version', 'latency_ms', 'demo_mode',
+  'preprocessing_version', 'created_at', 'valve_position', 'input_strategy',
+  'synthetic', 'validation_only', 'test_description',
+])
 
 /**
  * Model 2 — Murmur Severity CNN: Functional Analysis
  * Displays detailed murmur characteristics from the multi-output CNN model.
  * Only meaningful if Model 1 detected a murmur.
  */
-export function Model2DiagnosticCard({ data, murmurDetected, isPrintMode }: Model2DiagnosticCardProps) {
+export function Model2DiagnosticCard({ data, murmurDetected, sessionStatus, isPrintMode }: Model2DiagnosticCardProps) {
   if (!murmurDetected && !data) {
     return (
       <div className="rounded-xl border border-dashed border-border p-6 text-center space-y-2 opacity-60">
         <Stethoscope className="w-8 h-8 text-muted-foreground/30 mx-auto" />
         <p className="text-sm text-muted-foreground">
-          Functional analysis is performed when a murmur is detected by Model 1.
+          Not triggered: Model 1 did not classify this PCG recording as a murmur.
         </p>
       </div>
     )
   }
 
   if (!data) {
+    const stillProcessing = sessionStatus === 'streaming' || sessionStatus === 'processing'
     return (
       <div className="rounded-xl border border-dashed border-border p-6 text-center space-y-2">
         <Stethoscope className="w-8 h-8 text-muted-foreground/30 mx-auto" />
         <p className="text-sm text-muted-foreground">
-          Murmur severity analysis not yet available. Processing...
+          {stillProcessing
+            ? 'Processing: Model 1 detected a murmur and functional characterization is pending.'
+            : 'Unavailable: the session completed without a functional characterization result. Review inference logs or repeat the recording.'}
         </p>
       </div>
     )
@@ -128,7 +136,13 @@ export function Model2DiagnosticCard({ data, murmurDetected, isPrintMode }: Mode
 
       {data.demo_mode && (
         <p className="text-xs text-amber-600 dark:text-amber-400 italic">
-          ⚠ Demo Mode — Using simulated severity predictions.
+          Warning: fallback prediction mode is active for severity output.
+        </p>
+      )}
+
+      {data.synthetic && (
+        <p className="text-xs text-amber-600 dark:text-amber-400 italic">
+          Controlled synthetic validation input — this output is for pipeline testing only.
         </p>
       )}
     </div>

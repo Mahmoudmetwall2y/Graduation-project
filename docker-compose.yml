@@ -7,6 +7,7 @@ services:
     container_name: asculticor-mosquitto
     ports:
       - "${MQTT_BIND_ADDRESS:-127.0.0.1}:${MQTT_TCP_PORT:-1883}:1883"
+      - "${MQTT_TLS_BIND_ADDRESS:-0.0.0.0}:${MQTT_TLS_PORT:-8883}:8883"
       - "${MQTT_WS_BIND_ADDRESS:-127.0.0.1}:${MQTT_WS_PORT:-9001}:9001"
     environment:
       - MQTT_USERNAME=${MQTT_USERNAME}
@@ -17,6 +18,7 @@ services:
     volumes:
       - mosquitto_data:/mosquitto/data
       - mosquitto_logs:/mosquitto/log
+      - ./nginx/certs:/mosquitto/certs:ro
     networks:
       - asculticor-network
     restart: unless-stopped
@@ -45,7 +47,8 @@ services:
       - asculticor-network
     depends_on:
       mosquitto:
-        condition: service_healthy
+        # service_started (not service_healthy) — Nginx should start even if MQTT is temporarily down.
+        condition: service_started
       frontend:
         condition: service_started
       inference:
@@ -66,20 +69,39 @@ services:
       - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY:?SUPABASE_SERVICE_ROLE_KEY is required}
 
       # MQTT
-      - MQTT_BROKER=mosquitto
-      - MQTT_PORT=1883
+      - MQTT_BROKER=${MQTT_BROKER:-mosquitto}
+      - MQTT_PORT=${MQTT_PORT:-1883}
       - MQTT_USERNAME=${MQTT_USERNAME:?MQTT_USERNAME is required}
       - MQTT_PASSWORD=${MQTT_PASSWORD:?MQTT_PASSWORD is required}
       - MQTT_KEEPALIVE=60
 
-      # ML Settings
+      # ML Settings — ECG values MUST match FINAL_UNIFIED_MODEL training config (MIT-BIH 125Hz/500-sample)
       - PCG_SAMPLE_RATE=${PCG_SAMPLE_RATE:-22050}
       - PCG_TARGET_DURATION=${PCG_TARGET_DURATION:-10}
       - PCG_MAX_DURATION=${PCG_MAX_DURATION:-20}
-      - ECG_SAMPLE_RATE=${ECG_SAMPLE_RATE:-500}
+      - ECG_SAMPLE_RATE=${ECG_SAMPLE_RATE:-125}
       - ECG_WINDOW_SIZE=${ECG_WINDOW_SIZE:-500}
       - ECG_MAX_WINDOWS=${ECG_MAX_WINDOWS:-12}
       - ECG_MAX_DURATION=${ECG_MAX_DURATION:-60}
+
+      # Model registry paths
+      - NEW_MODELS_DIR=/new-models
+      - MODELS_DIR=/app/models
+      # ─ Model 1: XGBoost PCG [ACTIVE] ──────────────────────────────────────
+      - MODEL_1_PATH=${MODEL_1_PATH:-/new-models/Xgboost/heart_sound_xgboost_model.pkl}
+      - MODEL_1_SCALER_PATH=${MODEL_1_SCALER_PATH:-/new-models/Xgboost/final_scaler.pkl}
+      - MODEL_1_ENCODER_PATH=${MODEL_1_ENCODER_PATH:-}
+      - MODEL_1_ENABLED=${MODEL_1_ENABLED:-true}
+      - MODEL_1_VERSION=${MODEL_1_VERSION:-v2.0.0}
+      # Tier 3: ECG Prognosis (legacy MODEL_2_* names retained for compatibility)
+      - MODEL_2_PATH=${MODEL_2_PATH:-/new-models/ecg_mitbih_single_lead/single_lead_updated.keras}
+      - MODEL_2_META_PATH=${MODEL_2_META_PATH:-/new-models/ecg_mitbih_single_lead/label_encoder_SL.pkl}
+      - MODEL_2_ENABLED=${MODEL_2_ENABLED:-true}
+      - MODEL_2_VERSION=${MODEL_2_VERSION:-v26.1.0}
+      # Tier 2: Functional Murmur Characterization (legacy MODEL_3_* names)
+      - MODEL_3_PATH=${MODEL_3_PATH:-/new-models/CNN/best_model.pkl}
+      - MODEL_3_ENABLED=${MODEL_3_ENABLED:-true}
+      - MODEL_3_VERSION=${MODEL_3_VERSION:-v1.0.0}
 
       # Processing
       - STREAM_TIMEOUT_SEC=${STREAM_TIMEOUT_SEC:-20}
@@ -93,11 +115,11 @@ services:
       - LOG_LEVEL=INFO
       - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:3001}
       - SECURITY_HEADERS_ENABLED=${SECURITY_HEADERS_ENABLED:-true}
-      - TRUSTED_HOSTS=${TRUSTED_HOSTS:-*.asculticor.com,localhost,127.0.0.1}
+      - TRUSTED_HOSTS=${TRUSTED_HOSTS:-*.asculticor.com,localhost,127.0.0.1},inference,asculticor-inference
       - INFERENCE_INTERNAL_TOKEN=${INFERENCE_INTERNAL_TOKEN:?INFERENCE_INTERNAL_TOKEN is required}
-      - MODELS_DIR=/app/models
     volumes:
-      - ./models:/app/models:ro
+      - ./models:/app/models:ro        # legacy models (kept for reference)
+      - ./new-models:/new-models:ro    # new trained model artifacts
       - inference_cache:/app/cache
     networks:
       - asculticor-network
@@ -112,6 +134,35 @@ services:
       retries: 3
       start_period: 15s
 
+  # ─────────────────────────────────────────────────────────────
+  # Firmware Builder (one-shot)
+  # Compiles AscultiCor_esp32.ino with arduino-cli inside Docker.
+  # No Arduino IDE, drivers, or local toolchain required.
+  #
+  # First run:  downloads ESP32 core (~350 MB) and compiles (~2-3 min)
+  # After that: Docker image layers are cached; the entrypoint script
+  #             detects existing binaries and exits in <1 s.
+  #
+  # To force a full recompile:
+  #   docker volume rm asculticor_firmware_public
+  #   docker compose up firmware-builder
+  # ─────────────────────────────────────────────────────────────
+  firmware-builder:
+    build:
+      context: ./firmware
+      dockerfile: Dockerfile.builder
+    container_name: asculticor-firmware-builder
+    volumes:
+      # Source sketch — read-only; never baked into the image.
+      # Arduino sketches require the folder name to match the main .ino file.
+      - ./firmware/asculticor_esp32/AscultiCor_esp32:/AscultiCor_esp32:ro
+      # Output volume shared with the frontend (read-write here)
+      - firmware_public:/out
+    environment:
+      - VERSION=${ASCULTICOR_FIRMWARE_VERSION:-3.1.0}
+    restart: "no"   # one-shot: exits after compilation
+
+  # ─────────────────────────────────────────────────────────────
   # Frontend (Next.js)
   frontend:
     build:
@@ -124,7 +175,12 @@ services:
     ports:
       - "${FRONTEND_BIND_ADDRESS:-0.0.0.0}:${FRONTEND_PORT:-3000}:3000"
     environment:
-      - MQTT_BROKER_URL=mqtt://mosquitto:1883
+      # MQTT_BROKER_URL is used by server-side Next.js API routes (internal Docker DNS)
+      - MQTT_BROKER_URL=${MQTT_BROKER_URL:-mqtt://mosquitto:1883}
+      # NEXT_PUBLIC_MQTT_WS_URL is used by the browser (must be a WebSocket URL reachable from the client)
+      # Set this to ws://your-server-ip:9001 or wss://your-domain.com/mqtt in production
+      - NEXT_PUBLIC_MQTT_WS_URL=${NEXT_PUBLIC_MQTT_WS_URL:-ws://localhost:9001}
+      - MQTT_COMMAND_BROKER_URL=${MQTT_COMMAND_BROKER_URL:-}
       - NEXT_PUBLIC_SUPABASE_URL=${SUPABASE_URL:?SUPABASE_URL is required}
       - NEXT_PUBLIC_SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY:?SUPABASE_ANON_KEY is required}
       - SUPABASE_URL=${SUPABASE_URL:?SUPABASE_URL is required}
@@ -135,6 +191,12 @@ services:
       - CLAUDE_API_KEY=${CLAUDE_API_KEY:-}
       - CLAUDE_BASE_URL=${CLAUDE_BASE_URL:-https://agentrouter.org}
       - CLAUDE_MODEL=${CLAUDE_MODEL:-claude-sonnet-4-5-20250514}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-5.4-mini}
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-https://api.openai.com}
+      - N8N_EMAIL_PAYLOAD_EXPORT_ENABLED=${N8N_EMAIL_PAYLOAD_EXPORT_ENABLED:-false}
+      - LLM_AUTO_QUEUE_ENABLED=${LLM_AUTO_QUEUE_ENABLED:-false}
+      - LLM_AUTO_QUEUE_SINCE=${LLM_AUTO_QUEUE_SINCE:-}
       - ASCULTICOR_ALERT_EMAIL_TO=${ASCULTICOR_ALERT_EMAIL_TO:-}
       - ASCULTICOR_ALERT_EMAIL_FROM=${ASCULTICOR_ALERT_EMAIL_FROM:-AscultiCor <alerts@localhost>}
       - ASCULTICOR_INFERENCE_URL=${ASCULTICOR_INFERENCE_URL:-http://inference:8000}
@@ -145,15 +207,24 @@ services:
       - MQTT_BIND_ADDRESS=${MQTT_BIND_ADDRESS:-127.0.0.1}
       - DEVICE_BOOTSTRAP_PUBLIC_BASE_URL=${DEVICE_BOOTSTRAP_PUBLIC_BASE_URL:-}
       - DEVICE_BOOTSTRAP_MQTT_HOST=${DEVICE_BOOTSTRAP_MQTT_HOST:-}
-      - DEVICE_BOOTSTRAP_MQTT_PORT=${DEVICE_BOOTSTRAP_MQTT_PORT:-1883}
-      - DEVICE_BOOTSTRAP_MQTT_TLS=${DEVICE_BOOTSTRAP_MQTT_TLS:-false}
+      - DEVICE_BOOTSTRAP_MQTT_PORT=${DEVICE_BOOTSTRAP_MQTT_PORT:-8883}
+      - DEVICE_BOOTSTRAP_MQTT_TLS=${DEVICE_BOOTSTRAP_MQTT_TLS:-true}
       - DEVICE_DEFAULT_SESSION_DURATION_SEC=${DEVICE_DEFAULT_SESSION_DURATION_SEC:-15}
       - NODE_ENV=production
     networks:
       - asculticor-network
+    volumes:
+      # Firmware binaries compiled by firmware-builder and served as
+      # static files at /firmware/*.bin for the ESP Web Tools flash button.
+      - firmware_public:/app/public/firmware:ro
     depends_on:
       mosquitto:
-        condition: service_healthy
+        # service_started (not service_healthy) — the UI should start even if MQTT is down.
+        # MQTT failure affects data streaming only, not the application being accessible.
+        condition: service_started
+      firmware-builder:
+        # Wait for the firmware binaries to be compiled before starting.
+        condition: service_completed_successfully
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/api/health"]
@@ -169,3 +240,6 @@ volumes:
   mosquitto_data:
   mosquitto_logs:
   inference_cache:
+  # Compiled firmware binaries shared between firmware-builder and frontend.
+  # Delete this volume to force a firmware recompile on next docker compose up.
+  firmware_public:

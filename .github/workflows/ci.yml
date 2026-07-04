@@ -6,6 +6,17 @@ on:
   pull_request:
 
 jobs:
+  security-smoke:
+    name: Security regression smoke checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run security smoke checks
+        shell: pwsh
+        run: ./scripts/security-smoke.ps1
+
   frontend:
     name: Frontend lint/build
     runs-on: ubuntu-latest
@@ -62,6 +73,29 @@ jobs:
       - name: Python compile smoke check
         run: python -m compileall inference/app
 
+      - name: Validate ECG model artifact
+        run: python inference/scripts/validate_ecg_model.py
+
+  firmware:
+    name: ESP32 firmware build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build firmware toolchain image
+        run: docker build -t asculticor-firmware-builder -f firmware/Dockerfile.builder firmware
+
+      - name: Compile OTA firmware
+        run: |
+          mkdir -p "$PWD/.firmware-out"
+          docker run --rm \
+            -e VERSION=ci \
+            -v "$PWD/firmware/asculticor_esp32/AscultiCor_esp32:/AscultiCor_esp32:ro" \
+            -v "$PWD/.firmware-out:/out" \
+            asculticor-firmware-builder
+          test -s "$PWD/.firmware-out/asculticor_esp32_vci.bin"
+
   schema:
     name: Supabase migration sanity
     runs-on: ubuntu-latest
@@ -80,6 +114,12 @@ jobs:
           test -f supabase/migrations/021_llm_reports_requested_by_rate_limit.sql
           test -f supabase/migrations/022_admin_only_device_insert.sql
           test -f supabase/migrations/023_delete_policies_for_sessions_and_patients.sql
+          test -f supabase/migrations/024_add_patient_email.sql
+          test -f supabase/migrations/025_auto_generate_patient_mrn.sql
+          test -f supabase/migrations/026_device_mqtt_credentials.sql
+          test -f supabase/migrations/027_live_metrics_cleanup.sql
+          test -f supabase/migrations/028_device_name_unique_per_org.sql
+          test -f supabase/migrations/029_visitor_role.sql
           test -f supabase/migrations/apply_this_in_supabase.sql
 
       - name: SQL script non-empty check
@@ -88,4 +128,13 @@ jobs:
           test -s supabase/migrations/021_llm_reports_requested_by_rate_limit.sql
           test -s supabase/migrations/022_admin_only_device_insert.sql
           test -s supabase/migrations/023_delete_policies_for_sessions_and_patients.sql
+          test -s supabase/migrations/024_add_patient_email.sql
+          test -s supabase/migrations/025_auto_generate_patient_mrn.sql
+          test -s supabase/migrations/026_device_mqtt_credentials.sql
+          test -s supabase/migrations/027_live_metrics_cleanup.sql
+          test -s supabase/migrations/028_device_name_unique_per_org.sql
+          test -s supabase/migrations/029_visitor_role.sql
           test -s supabase/migrations/apply_this_in_supabase.sql
+
+      - name: Validate generated n8n workflows
+        run: python n8n/validate_workflows.py
