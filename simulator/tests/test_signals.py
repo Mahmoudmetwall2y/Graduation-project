@@ -27,7 +27,18 @@ class SignalGenerationTests(unittest.TestCase):
         self.assertEqual(normal.size, 10 * simulator.PCG_SAMPLE_RATE)
         self.assertEqual(murmur.dtype, np.dtype("int16"))
         self.assertGreater(float(np.mean(murmur.astype(np.float64) ** 2)),
-                           float(np.mean(normal.astype(np.float64) ** 2)) * 1.15)
+                           float(np.mean(normal.astype(np.float64) ** 2)) * 1.05)
+        self.assertLess(int(np.max(np.abs(normal.astype(np.int32)))), 22_000)
+        self.assertLess(int(np.max(np.abs(murmur.astype(np.int32)))), 22_000)
+
+    def test_normal_pcg_is_heart_sound_dominant_not_noise_dominant(self):
+        signal = simulator.generate_pcg(simulator.SCENARIOS["normal"], 10, seed=3).astype(np.float64)
+        signal /= max(float(np.max(np.abs(signal))), 1.0)
+        spectrum = np.fft.rfft(signal)
+        freqs = np.fft.rfftfreq(signal.size, d=1 / simulator.PCG_SAMPLE_RATE)
+        heart_band = np.mean(np.abs(spectrum[(freqs >= 35) & (freqs <= 190)]) ** 2)
+        high_band = np.mean(np.abs(spectrum[(freqs >= 450) & (freqs <= 2_000)]) ** 2)
+        self.assertGreater(float(heart_band), float(high_band) * 10)
 
     def test_generation_is_reproducible(self):
         first = simulator.generate_ecg(simulator.SCENARIOS["irregular_rhythm"], 3, seed=44)

@@ -120,6 +120,22 @@ def gaussian(phase: np.ndarray, center: float, width: float) -> np.ndarray:
     return np.exp(-0.5 * (distance / width) ** 2)
 
 
+def raised_cosine_window(phase: np.ndarray, start: float, end: float) -> np.ndarray:
+    """Smooth cardiac-phase window, avoiding hard murmur edges."""
+    if end <= start:
+        return np.zeros_like(phase)
+    x = np.clip((phase - start) / (end - start), 0.0, 1.0)
+    inside = (phase >= start) & (phase <= end)
+    return np.where(inside, np.sin(np.pi * x) ** 2, 0.0)
+
+
+def normalize_peak(signal: np.ndarray, peak: float = 1.0) -> np.ndarray:
+    max_abs = float(np.max(np.abs(signal))) if signal.size else 0.0
+    if max_abs <= 1e-12:
+        return signal
+    return signal * (peak / max_abs)
+
+
 def cardiac_phase(times: np.ndarray, scenario: Scenario, seed: int) -> np.ndarray:
     base_hz = scenario.bpm / 60.0
     if scenario.irregularity <= 0:
@@ -159,12 +175,42 @@ def generate_ecg(
     return samples.astype("<i2")
 
 
-def heart_sound_pulse(phase: np.ndarray, center: float, amplitude: float) -> np.ndarray:
+def pcg_sound_burst(
+    times: np.ndarray,
+    phase: np.ndarray,
+    center: float,
+    amplitude: float,
+    width: float,
+    frequencies: tuple[float, ...],
+) -> np.ndarray:
+    """Model-aligned S1/S2 burst: damped 40-180 Hz cardiac energy.
+
+    The XGBoost/YAMNet PCG pipeline is trained on 22.05 kHz heart audio that is
+    bandpassed at 20-400 Hz and peak-normalized. Very narrow synthetic impulses
+    or broadband differentiated noise can look like artifacts/murmurs. These
+    bursts deliberately stay in the same physiological band as real S1/S2.
+    """
     distance = circular_distance(phase, center)
-    active = (distance >= 0) & (distance < 0.12)
-    envelope = np.where(active, np.exp(-distance / 0.026), 0.0)
-    carrier = np.sin(2 * np.pi * 6.5 * distance) + 0.35 * np.sin(2 * np.pi * 11.0 * distance)
+    after_sound = (distance >= 0) & (distance < width * 3.4)
+    envelope = np.where(after_sound, np.exp(-distance / width), 0.0)
+    carrier = np.zeros_like(times)
+    for index, frequency in enumerate(frequencies):
+        carrier += (0.65 ** index) * np.sin(2 * np.pi * frequency * times)
+    carrier /= max(len(frequencies), 1)
     return amplitude * envelope * carrier
+
+
+def murmur_band(times: np.ndarray, seed: int) -> np.ndarray:
+    """Deterministic 90-320 Hz murmur texture without out-of-band spikes."""
+    rng = np.random.default_rng(seed)
+    frequencies = np.array([92.0, 128.0, 164.0, 211.0, 265.0, 318.0])
+    phases = rng.uniform(0.0, 2 * np.pi, frequencies.size)
+    band = np.zeros_like(times)
+    for frequency, phase_offset in zip(frequencies, phases):
+        band += np.sin(2 * np.pi * frequency * times + phase_offset)
+    band /= frequencies.size
+    band += 0.18 * rng.normal(0.0, 1.0, times.size)
+    return normalize_peak(band, 1.0)
 
 
 def generate_pcg(
@@ -173,31 +219,44 @@ def generate_pcg(
     sample_rate: int = PCG_SAMPLE_RATE,
     seed: int = 11,
 ) -> np.ndarray:
-    """Generate S1/S2 sounds and optional timing-specific murmur energy."""
+    """Generate model-aligned S1/S2 sounds and optional murmur energy.
+
+    Output intentionally follows the same contract as the ESP32 firmware:
+    signed int16 PCM at 22 050 Hz. The inference service converts this to
+    float audio and then applies the model training path: 20-400 Hz bandpass,
+    10 s crop/pad, librosa/YAMNet normalization. So the simulator should look
+    like plausible phonocardiogram audio before that preprocessing, not like a
+    visualization-only waveform.
+    """
     times = np.arange(round(duration_sec * sample_rate), dtype=np.float64) / sample_rate
     phase = cardiac_phase(times, scenario, seed)
-    waveform = heart_sound_pulse(phase, 0.0, 0.58) + heart_sound_pulse(phase, 0.36, 0.44)
 
     rng = np.random.default_rng(seed)
-    white = rng.normal(0.0, 1.0, times.size)
-    # A cheap, dependency-free band emphasis appropriate for a synthetic PCG.
-    colored = white - np.concatenate(([0.0], white[:-1]))
-    colored /= max(float(np.std(colored)), 1e-9)
+    waveform = (
+        pcg_sound_burst(times, phase, 0.000, 0.86, 0.028, (42.0, 74.0, 112.0, 155.0))
+        + pcg_sound_burst(times, phase, 0.365, 0.62, 0.024, (56.0, 92.0, 138.0, 176.0))
+    )
 
-    systolic = ((phase >= 0.055) & (phase <= 0.34)).astype(np.float64)
-    diastolic = ((phase >= 0.42) & (phase <= 0.92)).astype(np.float64)
     if scenario.murmur_timing == "systolic":
-        murmur_window = systolic * np.sin(np.pi * np.clip((phase - 0.055) / 0.285, 0, 1))
+        murmur_window = raised_cosine_window(phase, 0.075, 0.335)
     elif scenario.murmur_timing == "diastolic":
-        murmur_window = diastolic * np.exp(-3.2 * np.clip(phase - 0.42, 0, None))
+        murmur_window = raised_cosine_window(phase, 0.440, 0.900) * np.exp(-2.3 * np.clip(phase - 0.440, 0, None))
     elif scenario.murmur_timing == "combined":
-        murmur_window = np.maximum(systolic * 0.9, diastolic * 0.65)
+        murmur_window = np.maximum(
+            raised_cosine_window(phase, 0.075, 0.335) * 0.95,
+            raised_cosine_window(phase, 0.440, 0.900) * 0.55,
+        )
     else:
         murmur_window = np.zeros_like(phase)
 
-    waveform += scenario.murmur_strength * 0.50 * colored * murmur_window
-    waveform += rng.normal(0.0, 0.010 if scenario.murmur_timing == "none" else 0.016, times.size)
-    samples = np.clip(waveform * 12_000, -24_000, 24_000)
+    if scenario.murmur_strength > 0:
+        waveform += scenario.murmur_strength * 0.34 * murmur_band(times, seed + 91) * murmur_window
+
+    # Low-amplitude acquisition floor: enough for realistic feature extraction,
+    # not enough to dominate YAMNet/traditional features for normal cases.
+    waveform += rng.normal(0.0, 0.0045 if scenario.murmur_timing == "none" else 0.0065, times.size)
+    waveform = normalize_peak(waveform, 0.92)
+    samples = np.clip(waveform * 18_000, -21_500, 21_500)
     return samples.astype("<i2")
 
 
