@@ -153,7 +153,7 @@ export default function SessionDetailPage() {
   const pcgMonitorRef = useRef<LiveWaveformMonitorHandle | null>(null)
   const liveMetricsCursorRef = useRef<string | null>(null)
   const waveformStreamRef = useRef<EventSource | null>(null)
-  const wasSessionActiveRef = useRef(false)
+  const wasWaveformStreamingRef = useRef(false)
   const supabase = createClientComponentClient()
   const { showToast } = useToast()
 
@@ -240,8 +240,7 @@ export default function SessionDetailPage() {
       setLastLiveAt(payload.lastLiveAt)
     }
 
-    const payloadSessionIsActive =
-      payload.sessionStatus === 'streaming' || payload.sessionStatus === 'processing'
+    const payloadIsStreaming = payload.sessionStatus === 'streaming'
 
     if (payload.sessionStatus) {
       setSession((previous) => {
@@ -265,14 +264,14 @@ export default function SessionDetailPage() {
       if (!waveform?.samples?.length || !waveform.sample_rate) continue
 
       if (waveform.modality === 'ecg') {
-        if (payloadSessionIsActive) {
+        if (payloadIsStreaming) {
           ecgFrames.push(waveform)
         } else {
           latestEcgFrame = waveform
         }
       }
       if (waveform.modality === 'pcg') {
-        if (payloadSessionIsActive) {
+        if (payloadIsStreaming) {
           pcgFrames.push(waveform)
         } else {
           latestPcgFrame = waveform
@@ -280,15 +279,15 @@ export default function SessionDetailPage() {
       }
     }
 
-    if (payloadSessionIsActive && ecgFrames.length) {
+    if (payloadIsStreaming && ecgFrames.length) {
       ecgMonitorRef.current?.appendFrames(ecgFrames)
     }
 
-    if (payloadSessionIsActive && pcgFrames.length) {
+    if (payloadIsStreaming && pcgFrames.length) {
       pcgMonitorRef.current?.appendFrames(pcgFrames)
     }
 
-    if (!payloadSessionIsActive) {
+    if (!payloadIsStreaming) {
       if (latestEcgFrame) {
         ecgMonitorRef.current?.showSnapshot({
           samples: latestEcgFrame.samples,
@@ -354,10 +353,11 @@ export default function SessionDetailPage() {
   const isSessionActive = Boolean(
     session && (session.status === 'streaming' || session.status === 'processing')
   )
-  const ecgVisibleDuration = isSessionActive ? 3.4 : 5.5
-  const pcgVisibleDuration = isSessionActive ? 1.8 : 2.8
-  const ecgPlaybackLatency = isSessionActive ? 95 : 180
-  const pcgPlaybackLatency = isSessionActive ? 80 : 150
+  const isWaveformStreaming = session?.status === 'streaming'
+  const ecgVisibleDuration = isWaveformStreaming ? 3.4 : 5.5
+  const pcgVisibleDuration = isWaveformStreaming ? 1.8 : 2.8
+  const ecgPlaybackLatency = isWaveformStreaming ? 140 : 180
+  const pcgPlaybackLatency = isWaveformStreaming ? 220 : 150
 
   useEffect(() => {
     if (!sessionId) return
@@ -375,18 +375,18 @@ export default function SessionDetailPage() {
   }, [fetchLlmReport, session?.status, sessionId])
 
   useEffect(() => {
-    if (!sessionId || !isSessionActive) return
+    if (!sessionId || !isWaveformStreaming) return
 
     const backupInterval = window.setInterval(() => {
       fetchLiveWaveforms(false)
-    }, 1000)
+    }, 1500)
 
     return () => window.clearInterval(backupInterval)
-  }, [fetchLiveWaveforms, isSessionActive, sessionId])
+  }, [fetchLiveWaveforms, isWaveformStreaming, sessionId])
 
   useEffect(() => {
     if (!sessionId) return
-    if (!isSessionActive) {
+    if (!isWaveformStreaming) {
       waveformStreamRef.current?.close()
       waveformStreamRef.current = null
       return
@@ -423,7 +423,10 @@ export default function SessionDetailPage() {
     }
 
     const handleError = () => {
+      if (waveformStreamRef.current !== stream) return
       console.error('Waveform SSE stream interrupted, falling back to one-shot refresh')
+      stream.close()
+      waveformStreamRef.current = null
       fetchLiveWaveforms(false)
     }
 
@@ -440,17 +443,17 @@ export default function SessionDetailPage() {
         waveformStreamRef.current = null
       }
     }
-  }, [applyLiveWaveformPayload, fetchLiveWaveforms, isSessionActive, sessionId])
+  }, [applyLiveWaveformPayload, fetchLiveWaveforms, isWaveformStreaming, sessionId])
 
   useEffect(() => {
     if (!sessionId) return
 
-    if (wasSessionActiveRef.current && !isSessionActive) {
+    if (wasWaveformStreamingRef.current && !isWaveformStreaming) {
       fetchLiveWaveforms(true)
     }
 
-    wasSessionActiveRef.current = isSessionActive
-  }, [fetchLiveWaveforms, isSessionActive, sessionId])
+    wasWaveformStreamingRef.current = isWaveformStreaming
+  }, [fetchLiveWaveforms, isWaveformStreaming, sessionId])
 
   useEffect(() => {
     if (!showDeleteConfirm) return
@@ -639,14 +642,14 @@ export default function SessionDetailPage() {
     : null
 
   const isLiveFresh = Boolean(
-    isSessionActive &&
+    isWaveformStreaming &&
     liveAgeMs !== null &&
-    liveAgeMs <= 1000
+    liveAgeMs <= 4000
   )
 
   const liveLabel = isLiveFresh
     ? 'Live sweep'
-    : isSessionActive
+    : isWaveformStreaming
       ? lastLiveAt
         ? 'Signal stale'
         : 'Waiting for ESP32 signal'
@@ -654,13 +657,13 @@ export default function SessionDetailPage() {
         ? 'Captured'
         : 'No capture yet'
   const ecgLabel = waveformAvailability.ecg
-    ? (isSessionActive && isLiveFresh ? 'Live sweep' : 'Final trace')
-    : isSessionActive
+    ? (isWaveformStreaming && isLiveFresh ? 'Live sweep' : 'Final trace')
+    : isWaveformStreaming
       ? 'Waiting for ESP32 signal'
       : 'Captured trace unavailable'
   const pcgLabel = waveformAvailability.pcg
-    ? (isSessionActive && isLiveFresh ? 'Live sweep' : 'Final trace')
-    : isSessionActive
+    ? (isWaveformStreaming && isLiveFresh ? 'Live sweep' : 'Final trace')
+    : isWaveformStreaming
       ? 'Waiting for ESP32 signal'
       : 'Captured trace unavailable'
 
@@ -1232,7 +1235,7 @@ export default function SessionDetailPage() {
           ))}
         </div>
 
-        {isSessionActive && !isLiveFresh && (
+        {isWaveformStreaming && !isLiveFresh && (
           <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200 slide-up">
             {lastLiveAt
               ? 'Live data is stale. Keep the ESP32 powered on, confirm Wi-Fi/MQTT connection, and check the Serial Monitor for stream warnings.'
@@ -1260,10 +1263,10 @@ export default function SessionDetailPage() {
               accentGlow="rgba(20, 184, 166, 0.55)"
               amplitudeRange={[-0.35, 1.15]}
               fallbackSampleRate={300}
-              isSessionActive={isSessionActive}
+              isSessionActive={isWaveformStreaming}
               playbackLatencyMs={ecgPlaybackLatency}
               sampleLabel="ECG"
-              staleAfterMs={900}
+              staleAfterMs={4000}
               sweepGlowFraction={0.14}
               visibleDurationSec={ecgVisibleDuration}
             />
@@ -1287,10 +1290,10 @@ export default function SessionDetailPage() {
               accentGlow="rgba(244, 63, 94, 0.55)"
               amplitudeRange={[-1.0, 1.0]}
               fallbackSampleRate={900}
-              isSessionActive={isSessionActive}
+              isSessionActive={isWaveformStreaming}
               playbackLatencyMs={pcgPlaybackLatency}
               sampleLabel="PCG"
-              staleAfterMs={900}
+              staleAfterMs={4000}
               sweepGlowFraction={0.1}
               visibleDurationSec={pcgVisibleDuration}
             />

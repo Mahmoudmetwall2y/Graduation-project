@@ -10,7 +10,7 @@ import {
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
 
-const STREAM_POLL_MS = 80
+const STREAM_POLL_MS = 250
 const KEEPALIVE_MS = 15000
 
 function sleep(ms: number) {
