@@ -669,6 +669,107 @@ return [
 EMAILS_FROM_RESULT_JS = r"""
 const emails = Array.isArray($json.emails) ? $json.emails : [];
 
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+function emailTheme(subject, text) {
+  const content = `${subject} ${text}`.toLowerCase();
+  if (/critical|failed|failure|dead.?letter|offline|missing|error/.test(content)) {
+    return { state: 'Action required', color: '#a53f4b', background: '#fff0f1', border: '#e7a8af' };
+  }
+  if (/warning|degraded|stale|recovered|alert|review|issue/.test(content)) {
+    return { state: 'Review recommended', color: '#9a6700', background: '#fff7df', border: '#efd58a' };
+  }
+  return { state: 'Operational update', color: '#0f766e', background: '#e7f7f4', border: '#99d9cf' };
+}
+
+function cleanTitle(subject) {
+  return String(subject || 'AscultiCor operational notification')
+    .replace(/^\[AscultiCor\]\s*/i, '')
+    .trim();
+}
+
+function structuredBody(text) {
+  const lines = String(text || '').split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const rows = [];
+  const paragraphs = [];
+
+  for (const line of lines) {
+    const match = line.match(/^([^:]{2,42}):\s*(.+)$/);
+    if (match) {
+      rows.push(`<tr>
+        <td valign="top" style="width:38%;padding:10px 12px;border-top:1px solid #e7edf2;color:#607286;font-size:12px;font-weight:700;">${escapeHtml(match[1])}</td>
+        <td valign="top" style="padding:10px 12px;border-top:1px solid #e7edf2;color:#172b40;font-size:13px;line-height:1.5;word-break:break-word;">${escapeHtml(match[2])}</td>
+      </tr>`);
+    } else {
+      paragraphs.push(`<div style="margin:0 0 9px;color:#314459;font-size:14px;line-height:1.65;">${escapeHtml(line)}</div>`);
+    }
+  }
+
+  return {
+    paragraphs: paragraphs.join(''),
+    rows: rows.join(''),
+  };
+}
+
+function operationalEmail(subject, text) {
+  const theme = emailTheme(subject, text);
+  const title = cleanTitle(subject);
+  const body = structuredBody(text);
+  const checkedAt = new Intl.DateTimeFormat('en-GB', {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+    timeZone: 'Africa/Cairo',
+  }).format(new Date());
+
+  const details = body.rows
+    ? `<tr><td style="padding:8px 30px 24px;">
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border:1px solid #dce4eb;border-radius:10px;overflow:hidden;background:#ffffff;">
+          <tr><td colspan="2" style="padding:11px 12px;background:#eef3f6;color:#526579;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.6px;">Operational details</td></tr>
+          ${body.rows}
+        </table>
+      </td></tr>`
+    : '';
+
+  return `<!doctype html>
+<html>
+<head>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <style>@media only screen and (max-width:620px){.shell{width:100%!important}.content-pad{padding-left:20px!important;padding-right:20px!important}}</style>
+</head>
+<body style="margin:0;padding:0;background:#f2f6f8;font-family:Arial,Helvetica,sans-serif;color:#172b40;">
+  <div style="display:none;max-height:0;overflow:hidden;opacity:0;">${escapeHtml(title)} — AscultiCor automated operational notification.</div>
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f2f6f8;">
+    <tr><td align="center" style="padding:28px 12px;">
+      <table role="presentation" class="shell" width="680" cellspacing="0" cellpadding="0" style="width:680px;max-width:100%;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 6px 22px rgba(11,31,58,.08);">
+        <tr><td class="content-pad" style="padding:26px 30px;background:#0b1f3a;border-bottom:5px solid #0f766e;">
+          <div style="color:#7bd3c7;font-size:12px;font-weight:800;letter-spacing:1.4px;text-transform:uppercase;">AscultiCor Operations</div>
+          <div style="margin-top:7px;color:#ffffff;font-size:25px;font-weight:800;line-height:1.25;">${escapeHtml(title)}</div>
+          <div style="margin-top:12px;"><span style="display:inline-block;padding:5px 10px;border-radius:999px;border:1px solid ${theme.border};background:${theme.background};color:${theme.color};font-size:12px;font-weight:700;line-height:1;">${escapeHtml(theme.state)}</span></div>
+        </td></tr>
+        <tr><td class="content-pad" style="padding:24px 30px 10px;">
+          <div style="padding:16px 18px;border-left:4px solid ${theme.color};border-radius:8px;background:${theme.background};">
+            ${body.paragraphs || '<div style="color:#314459;font-size:14px;line-height:1.65;">An AscultiCor operational event was recorded.</div>'}
+          </div>
+        </td></tr>
+        ${details}
+        <tr><td class="content-pad" style="padding:18px 30px;background:#f5f8fa;border-top:1px solid #e2e8ee;color:#607286;font-size:12px;line-height:1.6;">
+          Generated ${escapeHtml(checkedAt)} (Africa/Cairo)<br>
+          Automated by n8n · Review operational and clinical alerts in AscultiCor.
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+}
+
 return emails
   .filter((item) => item && item.emailTo && item.emailSubject && item.emailText)
   .map((item) => ({
@@ -677,7 +778,7 @@ return emails
       emailTo: item.emailTo,
       emailSubject: item.emailSubject,
       emailText: item.emailText,
-      emailHtml: item.emailHtml || `<pre style="white-space:pre-wrap;font-family:Arial,sans-serif">${String(item.emailText).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</pre>`,
+      emailHtml: operationalEmail(item.emailSubject, item.emailText),
     },
   }));
 """
@@ -1807,7 +1908,11 @@ def write_workflows() -> None:
 
     for name, filename, nodes, connections in workflows:
         path = OUT_DIR / filename
-        path.write_text(json.dumps(workflow(name, nodes, connections), indent=2) + "\n", encoding="utf-8")
+        path.write_text(
+            json.dumps(workflow(name, nodes, connections), indent=2) + "\n",
+            encoding="utf-8",
+            newline="\n",
+        )
 
 
 if __name__ == "__main__":
