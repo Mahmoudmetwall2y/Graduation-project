@@ -323,37 +323,16 @@ export const LiveWaveformMonitor = forwardRef<
       ctx.restore()
     }
 
-    const collectVisibleSamples = (
-      windowStartIndex: number,
-      windowEndIndex: number,
-      ringSamples: Float32Array,
-      ringIndices: Int32Array,
-      validWindowSize: number
+    const renderSweepCursor = (
+      ctx: CanvasRenderingContext2D,
+      width: number,
+      height: number,
+      cursorX: number
     ) => {
-      const sampleSpan = Math.max(1, windowEndIndex - windowStartIndex + 1)
-      const probeBudget = signalProfile === 'ecg' ? 600 : 900
-      const step = Math.max(1, Math.floor(sampleSpan / probeBudget))
-      const values: number[] = []
-
-      for (let sampleIndex = windowStartIndex; sampleIndex <= windowEndIndex; sampleIndex += step) {
-        const slot = positiveModulo(sampleIndex, validWindowSize)
-        if (ringIndices[slot] !== sampleIndex) continue
-        values.push(ringSamples[slot])
-      }
-
-      if (values.length === 0 || values[values.length - 1] !== ringSamples[positiveModulo(windowEndIndex, validWindowSize)]) {
-        const slot = positiveModulo(windowEndIndex, validWindowSize)
-        if (ringIndices[slot] === windowEndIndex) {
-          values.push(ringSamples[slot])
-        }
-      }
-
-      return values
-    }
-
-    const renderSweepCursor = (ctx: CanvasRenderingContext2D, width: number, height: number) => {
       const glowWidth = Math.max(28, Math.round(width * sweepGlowFraction))
-      const glowGradient = ctx.createLinearGradient(width - glowWidth, 0, width, 0)
+      const left = clamp(cursorX - glowWidth * 0.35, 0, width)
+      const right = clamp(cursorX + glowWidth * 0.65, 0, width)
+      const glowGradient = ctx.createLinearGradient(left, 0, right, 0)
       glowGradient.addColorStop(0, 'rgba(255,255,255,0)')
       glowGradient.addColorStop(0.7, accentGlow)
       glowGradient.addColorStop(1, accentColor)
@@ -361,15 +340,15 @@ export const LiveWaveformMonitor = forwardRef<
       ctx.save()
       ctx.globalCompositeOperation = 'screen'
       ctx.fillStyle = glowGradient
-      ctx.fillRect(width - glowWidth, 0, glowWidth, height)
+      ctx.fillRect(left, 0, Math.max(1, right - left), height)
 
       ctx.strokeStyle = accentColor
       ctx.shadowBlur = 18
       ctx.shadowColor = accentGlow
       ctx.lineWidth = sampleLabel === 'PCG' ? 1.2 : 1.8
       ctx.beginPath()
-      ctx.moveTo(width - 1.5, 0)
-      ctx.lineTo(width - 1.5, height)
+      ctx.moveTo(cursorX, 0)
+      ctx.lineTo(cursorX, height)
       ctx.stroke()
       ctx.restore()
     }
@@ -381,74 +360,79 @@ export const LiveWaveformMonitor = forwardRef<
       return PLOT_PADDING_Y + (1 - clamped) * drawableHeight
     }
 
-    const resolveRepresentativeSample = (
-      bucketStartIndex: number,
-      bucketEndIndex: number,
+    const collectSweepSamples = (
+      headIndex: number,
+      ringSamples: Float32Array,
+      ringIndices: Int32Array,
+      validWindowSize: number
+    ) => {
+      const values: number[] = []
+      const stride = Math.max(1, Math.floor(validWindowSize / (signalProfile === 'ecg' ? 700 : 1000)))
+
+      for (let slot = 0; slot < validWindowSize; slot += stride) {
+        const sampleIndex = ringIndices[slot]
+        if (sampleIndex < 0 || sampleIndex > headIndex) continue
+        if (headIndex - sampleIndex >= validWindowSize) continue
+        values.push(ringSamples[slot])
+      }
+
+      return values
+    }
+
+    const resolveSweepRepresentative = (
+      bucketStartSlot: number,
+      bucketEndSlot: number,
+      headIndex: number,
       ringSamples: Float32Array,
       ringIndices: Int32Array,
       validWindowSize: number
     ) => {
       let foundAny = false
-      let bestIndex = -1
       let bestValue = 0
       let bestMagnitude = -1
-      let fallbackIndex = -1
       let fallbackValue = 0
 
-      for (let sampleIndex = bucketStartIndex; sampleIndex <= bucketEndIndex; sampleIndex += 1) {
-        const slot = positiveModulo(sampleIndex, validWindowSize)
-        if (ringIndices[slot] !== sampleIndex) continue
+      for (let slot = bucketStartSlot; slot <= bucketEndSlot; slot += 1) {
+        const wrappedSlot = positiveModulo(slot, validWindowSize)
+        const sampleIndex = ringIndices[wrappedSlot]
+        if (sampleIndex < 0 || sampleIndex > headIndex) continue
+        if (headIndex - sampleIndex >= validWindowSize) continue
 
-        const value = ringSamples[slot]
+        const value = ringSamples[wrappedSlot]
         const magnitude = Math.abs(value)
         foundAny = true
-        fallbackIndex = sampleIndex
         fallbackValue = value
-
         if (magnitude > bestMagnitude) {
           bestMagnitude = magnitude
-          bestIndex = sampleIndex
           bestValue = value
         }
       }
 
       if (!foundAny) return null
-      return {
-        index: bestIndex >= 0 ? bestIndex : fallbackIndex,
-        value: bestIndex >= 0 ? bestValue : fallbackValue,
-      }
+      return bestMagnitude >= 0 ? bestValue : fallbackValue
     }
 
-    const renderLine = (
+    const renderSweepLine = (
       ctx: CanvasRenderingContext2D,
       width: number,
       height: number,
-      windowStartIndex: number,
-      windowEndIndex: number,
+      headIndex: number,
       ringSamples: Float32Array,
       ringIndices: Int32Array,
       validWindowSize: number
     ) => {
-      if (windowEndIndex <= windowStartIndex) return
+      if (validWindowSize <= 1) return
 
       const [minAmplitude, maxAmplitude] = amplitudeRange
       const amplitudeSpan = Math.max(0.0001, maxAmplitude - minAmplitude)
-      const sampleSpan = Math.max(1, windowEndIndex - windowStartIndex + 1)
       const pixels = Math.max(1, Math.floor(width))
-      const samplesPerPixel = sampleSpan / pixels
       const transform = buildTraceTransform(
-        collectVisibleSamples(
-          windowStartIndex,
-          windowEndIndex,
-          ringSamples,
-          ringIndices,
-          validWindowSize
-        ),
+        collectSweepSamples(headIndex, ringSamples, ringIndices, validWindowSize),
         signalProfile
       )
       const lineGradient = ctx.createLinearGradient(0, 0, width, 0)
-      lineGradient.addColorStop(0, 'rgba(255,255,255,0.12)')
-      lineGradient.addColorStop(0.12, accentColor)
+      lineGradient.addColorStop(0, 'rgba(255,255,255,0.10)')
+      lineGradient.addColorStop(0.16, accentColor)
       lineGradient.addColorStop(1, accentColor)
 
       ctx.save()
@@ -461,65 +445,41 @@ export const LiveWaveformMonitor = forwardRef<
       ctx.beginPath()
 
       let started = false
+      let bucketStartSlot = 0
+      for (let x = 0; x < pixels; x += 1) {
+        const nextBucketStart = x === pixels - 1
+          ? validWindowSize
+          : Math.floor(((x + 1) / pixels) * validWindowSize)
+        const bucketEndSlot = Math.max(bucketStartSlot, nextBucketStart - 1)
+        const value = resolveSweepRepresentative(
+          bucketStartSlot,
+          bucketEndSlot,
+          headIndex,
+          ringSamples,
+          ringIndices,
+          validWindowSize
+        )
 
-      if (samplesPerPixel <= 1.5) {
-        for (let x = 0; x < pixels; x += 1) {
-          const relative = pixels <= 1 ? 0 : x / (pixels - 1)
-          const sampleIndex = Math.round(windowStartIndex + (relative * (sampleSpan - 1)))
-          const slot = positiveModulo(sampleIndex, validWindowSize)
-          if (ringIndices[slot] !== sampleIndex) {
-            started = false
-            continue
-          }
-
-          const y = clampY(
-            transformSampleValue(ringSamples[slot], transform),
-            minAmplitude,
-            amplitudeSpan,
-            height
-          )
-          if (!started) {
-            ctx.moveTo(x, y)
-            started = true
-          } else {
-            ctx.lineTo(x, y)
-          }
+        if (value === null) {
+          started = false
+          bucketStartSlot = nextBucketStart
+          continue
         }
-      } else {
-        let bucketStartIndex = windowStartIndex
-        for (let x = 0; x < pixels; x += 1) {
-          const nextBucketStart = x === pixels - 1
-            ? windowEndIndex + 1
-            : Math.floor(windowStartIndex + (((x + 1) / pixels) * sampleSpan))
-          const bucketEndIndex = Math.max(bucketStartIndex, nextBucketStart - 1)
-          const representative = resolveRepresentativeSample(
-            bucketStartIndex,
-            bucketEndIndex,
-            ringSamples,
-            ringIndices,
-            validWindowSize
-          )
 
-          if (!representative) {
-            started = false
-            bucketStartIndex = nextBucketStart
-            continue
-          }
+        const y = clampY(
+          transformSampleValue(value, transform),
+          minAmplitude,
+          amplitudeSpan,
+          height
+        )
 
-          const y = clampY(
-            transformSampleValue(representative.value, transform),
-            minAmplitude,
-            amplitudeSpan,
-            height
-          )
-          if (!started) {
-            ctx.moveTo(x, y)
-            started = true
-          } else {
-            ctx.lineTo(x, y)
-          }
-          bucketStartIndex = nextBucketStart
+        if (!started) {
+          ctx.moveTo(x, y)
+          started = true
+        } else {
+          ctx.lineTo(x, y)
         }
+        bucketStartSlot = nextBucketStart
       }
 
       ctx.stroke()
@@ -633,12 +593,10 @@ export const LiveWaveformMonitor = forwardRef<
           }
 
           const windowEnd = Math.floor(displayHeadSampleIndexRef.current ?? latestSampleIndex)
-          const windowStart = windowEnd - windowSamplesRef.current + 1
-          renderLine(
+          renderSweepLine(
             ctx,
             width,
             height,
-            windowStart,
             windowEnd,
             ringSamplesRef.current,
             ringIndicesRef.current,
@@ -646,7 +604,11 @@ export const LiveWaveformMonitor = forwardRef<
           )
 
           if (isSessionActive && !stale) {
-            renderSweepCursor(ctx, width, height)
+            const cursorX = (
+              positiveModulo(windowEnd, windowSamplesRef.current) /
+              Math.max(1, windowSamplesRef.current - 1)
+            ) * width
+            renderSweepCursor(ctx, width, height, cursorX)
           }
         }
       }
