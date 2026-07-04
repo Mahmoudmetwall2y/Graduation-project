@@ -19,7 +19,7 @@ class SignalGenerationTests(unittest.TestCase):
         signal = simulator.generate_ecg(simulator.SCENARIOS["normal"], 10, seed=1)
         self.assertEqual(signal.dtype, np.dtype("int16"))
         self.assertEqual(signal.size, 10 * simulator.ECG_SAMPLE_RATE)
-        self.assertGreater(int(np.ptp(signal.astype(np.int32))), 8_000)
+        self.assertGreater(int(np.ptp(signal.astype(np.int32))), 800)
 
     def test_pcg_has_expected_shape_and_murmur_has_more_between_sound_energy(self):
         normal = simulator.generate_pcg(simulator.SCENARIOS["normal"], 10, seed=2)

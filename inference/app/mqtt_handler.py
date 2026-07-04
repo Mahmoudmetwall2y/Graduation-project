@@ -65,6 +65,7 @@ class SessionBuffer:
         # Timing
         self.started_at = datetime.now(timezone.utc)
         self.last_chunk_at = datetime.now(timezone.utc)
+        self.last_live_flush_requested_at: Optional[datetime] = None
         self.ended = False
         self.finalization_started = False
         self._finalization_lock = threading.Lock()
@@ -89,6 +90,30 @@ class SessionBuffer:
             self.finalization_started = True
             self.ended = True
             return True
+
+    def should_request_live_flush(self, unpublished_samples: int) -> bool:
+        """Throttle eager live-waveform writes while keeping graphs smooth."""
+        if unpublished_samples <= 0:
+            return False
+        if self.waveform_sequence == 0:
+            self.last_live_flush_requested_at = datetime.now(timezone.utc)
+            return True
+
+        threshold_seconds = 0.25 if self.modality == 'ecg' else 0.35
+        threshold_samples = max(1, int(self.sample_rate * threshold_seconds))
+        if unpublished_samples < threshold_samples:
+            return False
+
+        now = datetime.now(timezone.utc)
+        min_request_gap = 0.20 if self.modality == 'ecg' else 0.30
+        if (
+            self.last_live_flush_requested_at is not None and
+            (now - self.last_live_flush_requested_at).total_seconds() < min_request_gap
+        ):
+            return False
+
+        self.last_live_flush_requested_at = now
+        return True
 
     # Maximum buffer size: 50 MB (prevents unbounded memory growth)
     MAX_BUFFER_BYTES = 50 * 1024 * 1024
@@ -865,14 +890,7 @@ class MQTTHandler:
                 0,
                 buffer.total_samples - max(buffer.published_sample_index, buffer.buffer_start_sample_index)
             )
-            should_eager_publish = (
-                buffer.waveform_sequence == 0
-                or (
-                    modality == 'ecg'
-                    and unpublished_samples >= max(1, int(buffer.sample_rate * 0.25))
-                )
-            )
-            if should_eager_publish:
+            if buffer.should_request_live_flush(unpublished_samples):
                 self._schedule_async(self._flush_buffer_live_metrics(buffer_key, reason='chunk'))
 
             # Check limits

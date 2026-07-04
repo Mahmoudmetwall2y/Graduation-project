@@ -26,7 +26,7 @@ import paho.mqtt.client as mqtt
 
 ECG_SAMPLE_RATE = 500
 PCG_SAMPLE_RATE = 22_050
-ECG_CHUNK_SAMPLES = 250
+ECG_CHUNK_SAMPLES = 125
 PCG_CHUNK_SAMPLES = 512
 
 
@@ -153,7 +153,9 @@ def generate_ecg(
     rng = np.random.default_rng(seed)
     baseline = 0.025 * np.sin(2 * np.pi * 0.24 * times)
     noise = rng.normal(0.0, 0.012, times.size)
-    samples = np.clip((waveform + baseline + noise) * 12_000, -30_000, 30_000)
+    # Match the ESP32 firmware contract: signed int16 values represent
+    # millivolts centered around zero, not full-scale audio samples.
+    samples = np.clip((waveform + baseline + noise) * 950, -1_650, 1_650)
     return samples.astype("<i2")
 
 
@@ -161,7 +163,7 @@ def heart_sound_pulse(phase: np.ndarray, center: float, amplitude: float) -> np.
     distance = circular_distance(phase, center)
     active = (distance >= 0) & (distance < 0.12)
     envelope = np.where(active, np.exp(-distance / 0.026), 0.0)
-    carrier = np.sin(2 * np.pi * 7.5 * distance) + 0.45 * np.sin(2 * np.pi * 12.5 * distance)
+    carrier = np.sin(2 * np.pi * 6.5 * distance) + 0.35 * np.sin(2 * np.pi * 11.0 * distance)
     return amplitude * envelope * carrier
 
 
@@ -174,7 +176,7 @@ def generate_pcg(
     """Generate S1/S2 sounds and optional timing-specific murmur energy."""
     times = np.arange(round(duration_sec * sample_rate), dtype=np.float64) / sample_rate
     phase = cardiac_phase(times, scenario, seed)
-    waveform = heart_sound_pulse(phase, 0.0, 0.82) + heart_sound_pulse(phase, 0.36, 0.62)
+    waveform = heart_sound_pulse(phase, 0.0, 0.58) + heart_sound_pulse(phase, 0.36, 0.44)
 
     rng = np.random.default_rng(seed)
     white = rng.normal(0.0, 1.0, times.size)
@@ -193,9 +195,9 @@ def generate_pcg(
     else:
         murmur_window = np.zeros_like(phase)
 
-    waveform += scenario.murmur_strength * 0.43 * colored * murmur_window
-    waveform += rng.normal(0.0, 0.018, times.size)
-    samples = np.clip(waveform * 18_000, -30_000, 30_000)
+    waveform += scenario.murmur_strength * 0.50 * colored * murmur_window
+    waveform += rng.normal(0.0, 0.010 if scenario.murmur_timing == "none" else 0.016, times.size)
+    samples = np.clip(waveform * 12_000, -24_000, 24_000)
     return samples.astype("<i2")
 
 
@@ -318,7 +320,7 @@ class AscultiCorSimulator:
             })
             self._publish_meta(session_id, {
                 "type": "start_ecg", "sample_rate_hz": ECG_SAMPLE_RATE,
-                "format": "pcm_s16le", "lead": "MLII", "n_leads": 1,
+                "format": "int16_mv", "lead": "MLII", "n_leads": 1,
                 "chunk_samples": ECG_CHUNK_SAMPLES, "target_duration_sec": duration,
                 "ecg_model": "AuscultICor_v26_SL",
             })
@@ -328,23 +330,27 @@ class AscultiCorSimulator:
             pcg = generate_pcg(self.scenario, duration, seed=self.seed + 1)
             ecg_index = pcg_index = 0
             started = time.monotonic()
+            next_ecg_at = started
+            next_pcg_at = started
             next_heartbeat = started + 5.0
 
             while not self.stop_event.is_set() and (ecg_index < ecg.size or pcg_index < pcg.size):
-                elapsed = time.monotonic() - started
-                ecg_due = min(ecg.size, int(elapsed * ECG_SAMPLE_RATE))
-                pcg_due = min(pcg.size, int(elapsed * PCG_SAMPLE_RATE))
+                now = time.monotonic()
 
-                while ecg_index < ecg_due:
-                    end = min(ecg_index + ECG_CHUNK_SAMPLES, ecg.size, ecg_due)
+                if ecg_index < ecg.size and now >= next_ecg_at:
+                    start_index = ecg_index
+                    end = min(ecg_index + ECG_CHUNK_SAMPLES, ecg.size)
                     self.client.publish(f"{prefix}/ecg", ecg[ecg_index:end].tobytes(), qos=0)
                     ecg_index = end
-                while pcg_index < pcg_due:
-                    end = min(pcg_index + PCG_CHUNK_SAMPLES, pcg.size, pcg_due)
+                    next_ecg_at += (end - start_index) / ECG_SAMPLE_RATE
+
+                if pcg_index < pcg.size and now >= next_pcg_at:
+                    start_index = pcg_index
+                    end = min(pcg_index + PCG_CHUNK_SAMPLES, pcg.size)
                     self.client.publish(f"{prefix}/pcg", pcg[pcg_index:end].tobytes(), qos=0)
                     pcg_index = end
+                    next_pcg_at += (end - start_index) / PCG_SAMPLE_RATE
 
-                now = time.monotonic()
                 if now >= next_heartbeat:
                     self.publish_json(f"{prefix}/heartbeat", {
                         "timestamp_ms": int((now - self.started_at) * 1000),
@@ -353,7 +359,12 @@ class AscultiCorSimulator:
                         "rssi": -35, "synthetic": True, "scenario": self.scenario.key,
                     }, qos=0)
                     next_heartbeat += 5.0
-                time.sleep(0.005)
+                next_due = min(
+                    next_ecg_at if ecg_index < ecg.size else next_heartbeat,
+                    next_pcg_at if pcg_index < pcg.size else next_heartbeat,
+                    next_heartbeat,
+                )
+                time.sleep(max(0.001, min(0.02, next_due - time.monotonic())))
 
             self._publish_meta(session_id, {"type": "end_pcg"})
             time.sleep(0.12)
