@@ -90,7 +90,7 @@ export function TopBar() {
   return (
     <header className="topbar-shell">
       <div className="topbar-row">
-        <Link href={isAdmin ? '/dashboard' : '/sessions'} className="topbar-brand">
+        <Link href={isAdmin ? '/' : '/sessions'} className="topbar-brand">
           <Image
             src="/asculticor-logo-wordmark.png"
             alt="AscultiCor"
