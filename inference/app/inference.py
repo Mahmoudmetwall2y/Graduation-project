@@ -561,6 +561,10 @@ class InferenceEngine:
                 # class_head → (batch, 5) softmax
                 class_preds = np.array(raw_preds["class_head"])
 
+                # risk_head → (batch, 1) sigmoid (PTB-trained research output)
+                risk_preds = np.array(raw_preds["risk_head"])
+                mean_risk = float(np.mean(risk_preds))
+
                 # Apply hybrid expert rules to correct the degenerate model classifications
                 rr_scale = float(self.ecg_meta.get("scale", 1.0))
                 for w in range(class_preds.shape[0]):
@@ -584,10 +588,6 @@ class InferenceEngine:
                                 class_preds[w] = [0.03, 0.95, 0.01, 0.01, 0.0]
 
                 mean_class = np.mean(class_preds, axis=0)
-
-                # risk_head → (batch, 1) sigmoid (PTB-trained research output)
-                risk_preds = np.array(raw_preds["risk_head"])
-                mean_risk = float(np.mean(risk_preds))
 
                 pred_idx = int(np.argmax(mean_class))
                 classes = self.ecg_classes or ["Normal", "SVEB", "VEB", "Fusion", "Unknown"]
