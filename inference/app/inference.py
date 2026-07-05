@@ -224,7 +224,7 @@ class InferenceEngine:
 
         Input signature (v26):
             ecg_input : (batch, 500, 1)  — single-lead ECG @ 125 Hz
-            rr_input  : (batch, 9)       — 9 HRV features (computed server-side)
+            rr_input  : (batch, 9)       — 9 consecutive RR intervals in seconds (computed server-side)
             fc_input  : (batch, 500, 1)  — forecast context (zeros at inference)
 
         Output heads:
@@ -504,7 +504,7 @@ class InferenceEngine:
 
         The model has 3 input tensors:
           - ecg_input : (batch, 500, 1)  — single-lead ECG @ 125 Hz
-          - rr_input  : (batch, 9)       — 9 HRV statistics computed from signal
+          - rr_input  : (batch, 9)       — 9 consecutive RR intervals in seconds
           - fc_input  : (batch, 500, 1)  — forecast context (zeros at inference)
 
         Returns
@@ -733,11 +733,12 @@ class InferenceEngine:
         Build the three input tensors required by AuscultICor v26 SL.
 
         ecg_input : (batch, 500, 1)   single-lead ECG (no duplication needed)
-        rr_input  : (batch, 9)        HRV statistics estimated from the signal
+        rr_input  : (batch, 9)        9 consecutive RR intervals in seconds
         fc_input  : (batch, 500, 1)   forecast context — zeros at inference
 
         The v26 model is single-lead by design — no shim required.
-        RR features are computed server-side from peak detection.
+        RR intervals are extracted from R-peak detection, padded with the
+        median interval when fewer than 9 peaks are found in a window.
         """
         batch_size = ecg_windows.shape[0]
         window_size = self.ecg_preprocessor.window_size  # 500
@@ -772,21 +773,23 @@ class InferenceEngine:
         self, windows: np.ndarray, sample_rate: int
     ) -> np.ndarray:
         """
-        Compute 9 summary RR-interval features per window.
+        Extract 9 consecutive RR intervals (in seconds) per window.
 
-        Features (in order):
-          0: mean RR (s)
-          1: std RR (s)
-          2: rmssd (s)
-          3: estimated BPM
-          4: NN50 count
-          5: pNN50 (%)
-          6: min RR (s)
-          7: max RR (s)
-          8: range RR (s)
+        The v26 model was trained on raw RR intervals, not HRV summary
+        statistics.  Feeding summary values (e.g. BPM ≈ 72, NN50 counts,
+        pNN50 percentages) saturates the mixed-float16 classifier and
+        causes it to output Unknown = 1.0 for every window.
 
-        TODO(model2-pipeline): For best accuracy, compute these from the full
-        continuous recording rather than per-window segments.
+        Algorithm
+        ---------
+        1. Detect R-peaks in the absolute-value envelope of the window.
+        2. Convert peak distances to RR intervals in seconds.
+        3. Keep only physiologically plausible intervals (0.25 – 2.0 s).
+        4. If fewer than 9 valid intervals are found, pad with the median
+           of the detected intervals (or 0.8 s when no peaks are found).
+        5. Return exactly 9 values as a float32 vector.
+
+        Output shape: (batch, 9)  — values in seconds, range ≈ 0.25–2.0
         """
         batch_size = windows.shape[0]
         features = np.zeros((batch_size, 9), dtype=np.float32)
@@ -806,20 +809,21 @@ class InferenceEngine:
                 rr = np.diff(peaks) / float(sample_rate)
                 rr = rr[(rr >= 0.25) & (rr <= 2.0)]
             else:
-                rr = np.array([0.8])  # 75 BPM default
+                rr = np.array([], dtype=np.float32)
 
-            mean_rr = float(np.mean(rr))
-            std_rr = float(np.std(rr)) if len(rr) > 1 else 0.0
-            diffs = np.diff(rr) if len(rr) > 1 else np.array([0.0])
-            rmssd = float(np.sqrt(np.mean(diffs ** 2)))
-            bpm = 60.0 / mean_rr if mean_rr > 0 else 75.0
-            nn50 = int(np.sum(np.abs(diffs) > 0.05))
-            pnn50 = float(nn50 / len(diffs) * 100) if len(diffs) > 0 else 0.0
-            min_rr = float(np.min(rr))
-            max_rr = float(np.max(rr))
-            range_rr = max_rr - min_rr
+            # Determine the fill value for padding
+            fill = float(np.median(rr)) if rr.size > 0 else 0.8  # 0.8 s ≈ 75 BPM
 
-            features[i] = [mean_rr, std_rr, rmssd, bpm, nn50, pnn50, min_rr, max_rr, range_rr]
+            # Build exactly-9-element vector: real intervals + padding
+            if rr.size >= 9:
+                rr_9 = rr[:9].astype(np.float32)
+            else:
+                pad_count = 9 - rr.size
+                rr_9 = np.concatenate(
+                    [rr, np.full(pad_count, fill, dtype=np.float32)]
+                )
+
+            features[i] = rr_9
 
         return features
 
