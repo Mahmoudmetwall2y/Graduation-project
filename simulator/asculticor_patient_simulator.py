@@ -99,6 +99,26 @@ ALIASES = {"murmur": "systolic_murmur", "afib": "irregular_rhythm"}
 
 ECG_CLASSES = ("normal", "sveb", "veb", "fusion", "unknown")
 PCG_CLASSES = ("normal", "murmur", "artifact")
+
+# ─── Reference lists: what each model considers Normal vs Abnormal ─────────────
+#
+# PCG model (XGBoost, 3 classes: normal / murmur / artifact)
+# ----------------------------------------------------------
+PCG_NORMAL_SCENARIOS: list[str] = [
+    k for k, s in SCENARIOS.items() if s.pcg_class == "normal"
+]
+PCG_ABNORMAL_SCENARIOS: list[str] = [
+    k for k, s in SCENARIOS.items() if s.pcg_class != "normal"
+]
+
+# ECG model (BiLSTM v26 SL, 5 classes: Normal / SVEB / VEB / Fusion / Unknown)
+# -----------------------------------------------------------------------------
+ECG_NORMAL_SCENARIOS: list[str] = [
+    k for k, s in SCENARIOS.items() if s.ecg_class == "normal"
+]
+ECG_ABNORMAL_SCENARIOS: list[str] = [
+    k for k, s in SCENARIOS.items() if s.ecg_class != "normal"
+]
 MURMUR_TIMINGS = (
     "none", "early-systolic", "mid-systolic", "late-systolic",
     "holosystolic", "systolic", "diastolic", "combined",

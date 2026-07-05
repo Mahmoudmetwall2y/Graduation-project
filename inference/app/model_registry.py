@@ -156,7 +156,7 @@ def _build_registry() -> Dict[str, ModelConfig]:
     # Architecture: "AuscultICor_Final" — Functional multi-input, multi-output model
     # Inputs (ALL three required):
     #   ecg_input  — shape (batch, 500, 1)  Single-lead ECG @ 125 Hz
-    #   rr_input   — shape (batch, 9)       9 HRV/RR-interval statistics
+    #   rr_input   — shape (batch, 9)       9 consecutive RR intervals, scaled by meta['scale']
     #   fc_input   — shape (batch, 500, 1)  Forecast context (zeros at inference)
     #
     # Output heads:
@@ -164,8 +164,9 @@ def _build_registry() -> Dict[str, ModelConfig]:
     #   risk_head  — binary cardiac risk sigmoid (PTB-trained research output)
     #   fc_out     — next-beat waveform (auxiliary — unused at inference)
     #
-    # RR features (9-vector, computed server-side from single lead):
-    #   [mean_rr, std_rr, rmssd, bpm, nn50, pnn50, min_rr, max_rr, range_rr]
+    # rr_input preprocessing (MUST match training):
+    #   raw RR intervals (seconds) / meta['scale']  → e.g. 0.833 s / 3.0 = 0.278
+    #   meta['scale'] = 3.0  (stored in label_encoder_SL.pkl)
     #
     # ✅ HARDWARE COMPATIBLE: Requires only single-lead ECG — matches the
     #    AD8232 3-electrode setup on the printed PCB. No hardware changes needed.

@@ -753,10 +753,20 @@ class InferenceEngine:
         # v26 is trained on single-lead ECG; add channel dim only.
         ecg_single = normalized[:, :, np.newaxis]  # (batch, 500, 1)
 
-        # ── rr_input: 9 HRV features estimated from peak detection ───────────
+        # ── rr_input: 9 raw RR intervals, then scaled to match training ──────
         rr_features = self._estimate_rr_features(
             normalized, self.ecg_preprocessor.sample_rate
-        )  # (batch, 9)
+        )  # (batch, 9) — values in seconds
+
+        # Apply the scale factor stored in label_encoder_SL.pkl (meta['scale']).
+        # Training fed (rr_seconds / scale) into the model; scale = 3.0 means
+        # a normal 0.833 s interval becomes 0.278 at model input.
+        # Without this division the classifier sees values ~3× too large
+        # and collapses all predictions to Normal.
+        rr_scale = float(self.ecg_meta.get("scale", 1.0))
+        if rr_scale > 0 and rr_scale != 1.0:
+            rr_features = (rr_features / rr_scale).astype(np.float32)
+            logger.debug(f"rr_input scaled by 1/{rr_scale}: sample={rr_features[0]}")
 
         # ── fc_input: forecast context — zeros at inference time ─────────────
         # During training, fc_input was the next-beat waveform target.
