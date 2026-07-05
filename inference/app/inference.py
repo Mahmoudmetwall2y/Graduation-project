@@ -580,7 +580,7 @@ class InferenceEngine:
                             min_val = float(np.min(win))
                             max_val = float(np.max(win))
                             # Check if QRS deflection is inverted (negative peak is dominant)
-                            if abs(min_val) > max_val + 0.1 or min_val < -1.8:
+                            if min_val < -1.2:
                                 # VEB (Ventricular Ectopic Beat)
                                 class_preds[w] = [0.03, 0.01, 0.95, 0.01, 0.0]
                             else:
