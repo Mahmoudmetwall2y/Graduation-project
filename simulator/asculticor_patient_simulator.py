@@ -196,15 +196,33 @@ def normalize_peak(signal: np.ndarray, peak: float = 1.0) -> np.ndarray:
 
 def cardiac_phase(times: np.ndarray, scenario: Scenario, seed: int) -> np.ndarray:
     base_hz = scenario.bpm / 60.0
+    theta = times * base_hz
+
+    # Apply premature timing warping for ectopic beat classes (SVEB/VEB/Fusion)
+    if scenario.ecg_class in {"veb", "sveb", "fusion"}:
+        theta_mod = theta % 2.0
+        cycle_idx = np.floor(theta / 2.0)
+        warped_mod = np.zeros_like(theta_mod)
+
+        # Beat 0: normal timing (ends early at 0.8)
+        m1 = (theta_mod >= 0.0) & (theta_mod < 0.8)
+        warped_mod[m1] = theta_mod[m1] * 1.25
+
+        # Beat 1: premature beat timing + compensatory pause (starts early at 0.8, ends at 2.0)
+        m2 = (theta_mod >= 0.8) & (theta_mod <= 2.0)
+        warped_mod[m2] = 1.0 + (theta_mod[m2] - 0.8) * (1.0 / 1.2)
+
+        theta = cycle_idx * 2.0 + warped_mod
+
     if scenario.irregularity <= 0:
-        return (times * base_hz) % 1.0
+        return theta % 1.0
 
     # Smooth deterministic rate modulation: useful for repeatable integration tests.
     modulation = (
         0.60 * np.sin(2 * np.pi * 0.31 * times + seed * 0.01)
         + 0.40 * np.sin(2 * np.pi * 0.17 * times + 1.2)
     )
-    integrated_phase = base_hz * times + scenario.irregularity * modulation
+    integrated_phase = theta + scenario.irregularity * modulation
     return integrated_phase % 1.0
 
 
@@ -241,7 +259,7 @@ def generate_ecg(
     # publishing at the real device rate lets inference perform the same
     # 500 -> 125 Hz conversion used for hardware sessions.
     beat_number = np.floor(times * (scenario.bpm / 60.0)).astype(np.int64)
-    ectopic_mask = (beat_number % 4) == 3
+    ectopic_mask = (beat_number % 2) == 1
     if scenario.ecg_class == "sveb":
         premature_phase = (phase + 0.14) % 1.0
         sveb = (
