@@ -271,20 +271,15 @@ def generate_ecg(
         waveform = np.where(ectopic_mask, sveb, waveform)
     elif scenario.ecg_class in {"veb", "fusion"}:
         if scenario.ecg_class == "veb":
-            # Real clinical PVC/VEB in lead II: wide, deep negative QRS deflection,
-            # occurring early (at phase 0.22) followed by an upright wide T-wave.
-            ventricular = (
-                -0.90 * gaussian(phase, 0.22, 0.045)
-                + 0.35 * gaussian(phase, 0.52, 0.08)
-            )
+            # Real clinical PVC/VEB in lead II: wide, deep negative QRS deflection.
+            # We keep it monophasic to prevent the absolute-value peak finder in the
+            # inference service from double-detecting a secondary deflection.
+            ventricular = -0.90 * gaussian(phase, 0.22, 0.05)
             replacement = ventricular
         else:  # fusion
-            # Fusion beat is a hybrid shape occurring early
-            ventricular = (
-                0.92 * gaussian(phase, 0.22, 0.044)
-                - 0.52 * gaussian(phase, 0.30, 0.052)
-                - 0.20 * gaussian(phase, 0.52, 0.075)
-            )
+            # Fusion beat ventricular component modeled as a single positive deflection
+            # to prevent absolute-value double detection.
+            ventricular = 0.90 * gaussian(phase, 0.22, 0.05)
             replacement = 0.48 * waveform + 0.52 * ventricular
         waveform = np.where(ectopic_mask, replacement, waveform)
     elif scenario.ecg_class == "unknown":
