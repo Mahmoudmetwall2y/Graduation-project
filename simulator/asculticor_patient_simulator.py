@@ -969,10 +969,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--sessions",
         type=int,
-        default=1,
+        default=0,
         metavar="N",
         help=(
-            "Number of sessions to run automatically then exit (default: 1). "
+            "Number of sessions to run automatically then exit (default: 0). "
             "Use 0 to stay online and wait for UI-triggered sessions."
         ),
     )
