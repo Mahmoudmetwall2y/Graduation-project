@@ -560,6 +560,29 @@ class InferenceEngine:
 
                 # class_head → (batch, 5) softmax
                 class_preds = np.array(raw_preds["class_head"])
+
+                # Apply hybrid expert rules to correct the degenerate model classifications
+                rr_scale = float(self.ecg_meta.get("scale", 1.0))
+                for w in range(class_preds.shape[0]):
+                    r_score = float(risk_preds[w][0])
+                    if r_score > 0.85:
+                        win = windows[w]
+                        rr_sec = batch_inputs["rr_input"][w] * rr_scale
+                        med = float(np.median(rr_sec))
+                        mn = float(np.min(rr_sec))
+                        
+                        # Check for premature timing
+                        if mn >= 0.25 and mn < 0.82 * med:
+                            min_val = float(np.min(win))
+                            max_val = float(np.max(win))
+                            # Check if QRS deflection is inverted (negative peak is dominant)
+                            if abs(min_val) > max_val + 0.1 or min_val < -1.8:
+                                # VEB (Ventricular Ectopic Beat)
+                                class_preds[w] = [0.03, 0.01, 0.95, 0.01, 0.0]
+                            else:
+                                # SVEB (Supraventricular Ectopic Beat)
+                                class_preds[w] = [0.03, 0.95, 0.01, 0.01, 0.0]
+
                 mean_class = np.mean(class_preds, axis=0)
 
                 # risk_head → (batch, 1) sigmoid (PTB-trained research output)
