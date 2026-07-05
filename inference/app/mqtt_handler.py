@@ -872,13 +872,16 @@ class MQTTHandler:
 
         # Check if payload is JSON (fallback format)
         try:
+            data = payload
             if payload.startswith(b'{'):
-                # JSON format with base64
-                chunk_data = json.loads(payload.decode('utf-8'))
-                data = base64.b64decode(chunk_data.get('data', ''))
-            else:
-                # Raw binary
-                data = payload
+                try:
+                    # JSON format with base64
+                    chunk_data = json.loads(payload.decode('utf-8'))
+                    if isinstance(chunk_data, dict) and 'data' in chunk_data:
+                        data = base64.b64decode(chunk_data['data'])
+                except Exception:
+                    # Fall back to raw binary
+                    data = payload
 
             buffer.add_chunk(data)
 
