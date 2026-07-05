@@ -435,6 +435,9 @@ class InferenceEngine:
                     "error": "PCG model not loaded",
                     "detail": self.model_status["pcg_xgboost"].get("error", "Unknown"),
                     "model_name": "pcg_xgboost_classifier",
+                    "model_version": "unknown",
+                    "preprocessing_version": get_preprocessing_version(),
+                    "latency_ms": 0,
                     "demo_mode": False,
                 }
 
@@ -529,6 +532,9 @@ class InferenceEngine:
                     "error": "ECG model not loaded",
                     "detail": self.model_status["ecg_bilstm"].get("error", "Unknown"),
                     "model_name": "ecg_auscultIcor_v26_sl",
+                    "model_version": "unknown",
+                    "preprocessing_version": get_preprocessing_version(),
+                    "latency_ms": 0,
                     "demo_mode": False,
                 }
 
