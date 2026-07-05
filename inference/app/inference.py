@@ -570,7 +570,7 @@ class InferenceEngine:
                 for w in range(class_preds.shape[0]):
                     r_score = float(risk_preds[w][0])
                     if r_score > 0.85:
-                        win = windows[w]
+                        win = batch_inputs["ecg_input"][w, :, 0]
                         rr_sec = batch_inputs["rr_input"][w] * rr_scale
                         med = float(np.median(rr_sec))
                         mn = float(np.min(rr_sec))
