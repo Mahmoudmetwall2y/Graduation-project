@@ -356,8 +356,11 @@ export default function SessionDetailPage() {
   const isWaveformStreaming = session?.status === 'streaming'
   const ecgVisibleDuration = isWaveformStreaming ? 3.4 : 5.5
   const pcgVisibleDuration = isWaveformStreaming ? 1.8 : 2.8
-  const ecgPlaybackLatency = isWaveformStreaming ? 140 : 180
-  const pcgPlaybackLatency = isWaveformStreaming ? 220 : 150
+  // Live metrics arrive in ~250 ms ECG and ~350 ms PCG batches. Keep more
+  // than one batch buffered so the canvas can animate continuously between
+  // database/SSE deliveries instead of visibly stopping at every boundary.
+  const ecgPlaybackLatency = isWaveformStreaming ? 420 : 180
+  const pcgPlaybackLatency = isWaveformStreaming ? 520 : 150
 
   useEffect(() => {
     if (!sessionId) return
@@ -1262,7 +1265,7 @@ export default function SessionDetailPage() {
               accentColor="#14b8a6"
               accentGlow="rgba(20, 184, 166, 0.55)"
               amplitudeRange={[-0.35, 1.15]}
-              fallbackSampleRate={300}
+              fallbackSampleRate={500}
               isSessionActive={isWaveformStreaming}
               playbackLatencyMs={ecgPlaybackLatency}
               sampleLabel="ECG"
@@ -1289,7 +1292,7 @@ export default function SessionDetailPage() {
               accentColor="#f43f5e"
               accentGlow="rgba(244, 63, 94, 0.55)"
               amplitudeRange={[-1.0, 1.0]}
-              fallbackSampleRate={900}
+              fallbackSampleRate={22222}
               isSessionActive={isWaveformStreaming}
               playbackLatencyMs={pcgPlaybackLatency}
               sampleLabel="PCG"

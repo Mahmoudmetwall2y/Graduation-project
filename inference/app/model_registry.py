@@ -161,7 +161,7 @@ def _build_registry() -> Dict[str, ModelConfig]:
     #
     # Output heads:
     #   class_head — 5-class arrhythmia softmax  (N / SVEB / VEB / Fusion / Unknown)
-    #   risk_head  — binary cardiac risk sigmoid  (PTB-trained, clinically validated)
+    #   risk_head  — binary cardiac risk sigmoid (PTB-trained research output)
     #   fc_out     — next-beat waveform (auxiliary — unused at inference)
     #
     # RR features (9-vector, computed server-side from single lead):
@@ -214,7 +214,7 @@ def _build_registry() -> Dict[str, ModelConfig]:
         notes=(
             "Active. AuscultICor_v26_SL — single-lead model. "
             "Inputs: ecg (500,1), rr (9,) HRV stats, fc (500,1) zeros. "
-            "risk_head trained on PhysioNet PTB — clinically validated. "
+            "risk_head trained on PhysioNet PTB; prospective clinical validation is not established. "
             "RR features estimated server-side; no firmware changes required."
         ),
     )

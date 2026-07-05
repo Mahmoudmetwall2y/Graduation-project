@@ -38,3 +38,12 @@ def test_session_buffer_finalization_is_thread_safe():
 
     assert results.count(True) == 1
     assert results.count(False) == 7
+
+
+def test_first_live_flush_waits_for_a_renderable_batch():
+    buffer = make_buffer()
+    threshold = int(buffer.sample_rate * 0.35)
+
+    assert buffer.should_request_live_flush(512) is False
+    assert buffer.should_request_live_flush(threshold - 1) is False
+    assert buffer.should_request_live_flush(threshold) is True

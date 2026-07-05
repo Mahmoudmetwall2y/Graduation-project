@@ -556,7 +556,7 @@ class InferenceEngine:
                 class_preds = np.array(raw_preds["class_head"])
                 mean_class = np.mean(class_preds, axis=0)
 
-                # risk_head → (batch, 1) sigmoid (PTB-trained, clinically validated)
+                # risk_head → (batch, 1) sigmoid (PTB-trained research output)
                 risk_preds = np.array(raw_preds["risk_head"])
                 mean_risk = float(np.mean(risk_preds))
 

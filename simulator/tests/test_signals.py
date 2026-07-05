@@ -2,6 +2,7 @@ import importlib.util
 from pathlib import Path
 import sys
 import unittest
+from types import SimpleNamespace
 
 import numpy as np
 
@@ -223,6 +224,25 @@ class SignalGenerationTests(unittest.TestCase):
         second = simulator.generate_pcg(simulator.SCENARIOS["combined_murmur"], 5, seed=99)
         np.testing.assert_array_equal(first, second)
 
+    def test_transport_contract_matches_current_esp32_firmware(self):
+        self.assertEqual(simulator.ECG_SAMPLE_RATE, 500)
+        self.assertEqual(simulator.ECG_CHUNK_SAMPLES, 500)
+        self.assertEqual(simulator.PCG_SAMPLE_RATE, 1_000_000 // 45)
+        self.assertEqual(simulator.PCG_CHUNK_SAMPLES, 512)
+
+    def test_ecg_model_class_profiles_produce_distinct_morphology(self):
+        normal = simulator.generate_ecg(simulator.SCENARIOS["normal"], 8, seed=21)
+        for key in ("irregular_rhythm", "ventricular_ectopy", "fusion_beats", "signal_artifact"):
+            candidate = simulator.generate_ecg(simulator.SCENARIOS[key], 8, seed=21)
+            self.assertFalse(np.array_equal(normal, candidate), key)
+            self.assertEqual(candidate.dtype, np.dtype("int16"))
+
+    def test_pcg_artifact_profile_is_distinct_and_bounded(self):
+        normal = simulator.generate_pcg(simulator.SCENARIOS["normal"], 5, seed=23)
+        artifact = simulator.generate_pcg(simulator.SCENARIOS["signal_artifact"], 5, seed=23)
+        self.assertFalse(np.array_equal(normal, artifact))
+        self.assertLessEqual(int(np.max(np.abs(artifact.astype(np.int32)))), 31_500)
+
     # ── Configuration ────────────────────────────────────────────────────────
 
     def test_credentials_response_can_be_loaded_directly(self):
@@ -233,6 +253,45 @@ class SignalGenerationTests(unittest.TestCase):
         }})
         self.assertEqual(config.mqtt_host, "example.com")
         self.assertTrue(config.mqtt_tls)
+
+    def test_full_device_session_uses_production_topics_and_binary_contract(self):
+        config = simulator.SimulatorConfig(
+            mqtt_host="example.com", mqtt_port=8883, mqtt_tls=True,
+            mqtt_user="device_user", mqtt_pass="secret",
+            org_id="org-id", device_id="device-id",
+        )
+        device = simulator.AscultiCorSimulator(
+            config,
+            simulator.SCENARIOS["ventricular_ectopy"],
+            seed=31,
+        )
+
+        published = []
+
+        class FakeClient:
+            def publish(self, topic, payload, qos=0, retain=False):
+                published.append((topic, payload, qos, retain))
+                return SimpleNamespace(rc=simulator.mqtt.MQTT_ERR_SUCCESS)
+
+        device.client = FakeClient()
+        device._stream_session("session-id", 1)
+
+        prefix = "org/org-id/device/device-id/session/session-id"
+        topics = [item[0] for item in published]
+        self.assertIn(f"{prefix}/meta", topics)
+        self.assertIn(f"{prefix}/ecg", topics)
+        self.assertIn(f"{prefix}/pcg", topics)
+
+        ecg_bytes = sum(
+            len(payload) for topic, payload, _, _ in published
+            if topic == f"{prefix}/ecg"
+        )
+        pcg_bytes = sum(
+            len(payload) for topic, payload, _, _ in published
+            if topic == f"{prefix}/pcg"
+        )
+        self.assertEqual(ecg_bytes, simulator.ECG_SAMPLE_RATE * 2)
+        self.assertEqual(pcg_bytes, simulator.PCG_SAMPLE_RATE * 2)
 
 
 if __name__ == "__main__":

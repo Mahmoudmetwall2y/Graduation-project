@@ -16,7 +16,7 @@ import ssl
 import sys
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -25,8 +25,11 @@ import paho.mqtt.client as mqtt
 
 
 ECG_SAMPLE_RATE = 500
-PCG_SAMPLE_RATE = 22_050
-ECG_CHUNK_SAMPLES = 125
+# The ESP32 timer uses 45 microsecond ticks (1_000_000 / 45 = 22_222 Hz).
+# The inference service receives this transport rate and resamples to the
+# models' 22_050 Hz training rate.
+PCG_SAMPLE_RATE = 1_000_000 // 45
+ECG_CHUNK_SAMPLES = 500
 PCG_CHUNK_SAMPLES = 512
 
 
@@ -39,6 +42,14 @@ class Scenario:
     murmur_timing: str = "none"
     murmur_strength: float = 0.0
     irregularity: float = 0.0
+    ecg_class: str = "normal"
+    pcg_class: str = "normal"
+    murmur_shape: str = "diamond"
+    murmur_grade: str = "II/VI"
+    murmur_pitch: str = "medium"
+    murmur_quality: str = "blowing"
+    valve_position: str = "AV"
+    artifact_level: float = 0.0
 
 
 SCENARIOS: dict[str, Scenario] = {
@@ -47,15 +58,15 @@ SCENARIOS: dict[str, Scenario] = {
     ),
     "systolic_murmur": Scenario(
         "systolic_murmur", "Systolic murmur", "Noise-like murmur between S1 and S2.",
-        82, "systolic", 0.70,
+        82, "systolic", 0.70, pcg_class="murmur",
     ),
     "diastolic_murmur": Scenario(
         "diastolic_murmur", "Diastolic murmur", "Noise-like murmur after S2.",
-        76, "diastolic", 0.62,
+        76, "diastolic", 0.62, pcg_class="murmur",
     ),
     "combined_murmur": Scenario(
         "combined_murmur", "Combined murmur", "Murmur energy in systole and diastole.",
-        88, "combined", 0.76,
+        88, "combined", 0.76, pcg_class="murmur",
     ),
     "tachycardia": Scenario(
         "tachycardia", "Tachycardia", "Fast regular ECG with otherwise normal heart sounds.", 118,
@@ -65,11 +76,38 @@ SCENARIOS: dict[str, Scenario] = {
     ),
     "irregular_rhythm": Scenario(
         "irregular_rhythm", "Irregular rhythm", "Beat-to-beat timing variability for ECG pipeline tests.",
-        92, "none", 0.0, 0.18,
+        92, "none", 0.0, 0.18, "sveb",
+    ),
+    "ventricular_ectopy": Scenario(
+        "ventricular_ectopy", "Ventricular ectopy",
+        "Wide ventricular ectopic morphology inserted every fourth beat.",
+        84, ecg_class="veb",
+    ),
+    "fusion_beats": Scenario(
+        "fusion_beats", "Fusion beats",
+        "Blended normal and ventricular morphology inserted every fourth beat.",
+        78, ecg_class="fusion",
+    ),
+    "signal_artifact": Scenario(
+        "signal_artifact", "Signal artifact",
+        "Motion/contact artifact in both ECG and PCG for quality-path testing.",
+        80, ecg_class="unknown", pcg_class="artifact", artifact_level=0.72,
     ),
 }
 
 ALIASES = {"murmur": "systolic_murmur", "afib": "irregular_rhythm"}
+
+ECG_CLASSES = ("normal", "sveb", "veb", "fusion", "unknown")
+PCG_CLASSES = ("normal", "murmur", "artifact")
+MURMUR_TIMINGS = (
+    "none", "early-systolic", "mid-systolic", "late-systolic",
+    "holosystolic", "systolic", "diastolic", "combined",
+)
+MURMUR_SHAPES = ("crescendo", "decrescendo", "diamond", "plateau")
+MURMUR_GRADES = ("I/VI", "II/VI", "III/VI")
+MURMUR_PITCHES = ("low", "medium", "high")
+MURMUR_QUALITIES = ("blowing", "harsh", "musical")
+VALVE_POSITIONS = ("AV", "MV", "PV", "TV")
 
 
 @dataclass
@@ -177,10 +215,48 @@ def generate_ecg(
         + 0.18 * gaussian(phase, 0.670, 0.048)   # T wave  (≤18% of R-peak, mirrors MIT-BIH stats)
     )
     rng = np.random.default_rng(seed)
+
+    # Inject AAMI-style morphology into a repeatable subset of beats. The
+    # production model consumes four-second, single-lead windows at 125 Hz;
+    # publishing at the real device rate lets inference perform the same
+    # 500 -> 125 Hz conversion used for hardware sessions.
+    beat_number = np.floor(times * (scenario.bpm / 60.0)).astype(np.int64)
+    ectopic_mask = (beat_number % 4) == 3
+    if scenario.ecg_class == "sveb":
+        premature_phase = (phase + 0.14) % 1.0
+        sveb = (
+            -0.04 * gaussian(premature_phase, 0.35, 0.008)
+            + 0.88 * gaussian(premature_phase, 0.40, 0.010)
+            - 0.10 * gaussian(premature_phase, 0.43, 0.010)
+            + 0.13 * gaussian(premature_phase, 0.64, 0.040)
+        )
+        waveform = np.where(ectopic_mask, sveb, waveform)
+    elif scenario.ecg_class in {"veb", "fusion"}:
+        ventricular = (
+            0.92 * gaussian(phase, 0.39, 0.044)
+            - 0.52 * gaussian(phase, 0.47, 0.052)
+            - 0.20 * gaussian(phase, 0.69, 0.075)
+        )
+        replacement = (
+            ventricular
+            if scenario.ecg_class == "veb"
+            else (0.48 * waveform + 0.52 * ventricular)
+        )
+        waveform = np.where(ectopic_mask, replacement, waveform)
+    elif scenario.ecg_class == "unknown":
+        artifact_envelope = (
+            raised_cosine_window(phase, 0.12, 0.34)
+            + raised_cosine_window(phase, 0.62, 0.82)
+        )
+        artifact = (
+            0.34 * np.sin(2 * np.pi * 37.0 * times)
+            + rng.normal(0.0, 0.20, times.size)
+        ) * artifact_envelope
+        waveform += max(0.35, scenario.artifact_level) * artifact
     # Baseline wander (0.3 Hz respiratory artefact — same as real Holter)
     baseline = 0.025 * np.sin(2 * np.pi * 0.24 * times)
     # Gaussian noise at ~1% of R-peak amplitude
-    noise = rng.normal(0.0, 0.012, times.size)
+    noise = rng.normal(0.0, 0.012 + scenario.artifact_level * 0.025, times.size)
     # Scale so that after /32768.0 the R-peak sits at ~0.65 float.
     # 0.65 * 32768 ≈ 21 299  →  use 21 000 as the int16 scale factor.
     # Clip at ±25 000 to leave headroom and avoid wrap-around.
@@ -235,24 +311,54 @@ def pink_noise(times: np.ndarray, rng: np.random.Generator, amplitude: float = 1
     return normalize_peak(result, amplitude)
 
 
-def murmur_band(times: np.ndarray, seed: int) -> np.ndarray:
-    """Deterministic 90-420 Hz murmur texture with stochastic broadband energy.
+def murmur_band(
+    times: np.ndarray,
+    seed: int,
+    pitch: str = "medium",
+    quality: str = "blowing",
+) -> np.ndarray:
+    """Deterministic 55-390 Hz murmur texture with stochastic broadband energy.
 
-    Extended from 318 Hz to 420 Hz to match the upper range of real murmur
+    Extended from 318 Hz to 390 Hz to cover the model's 20-400 Hz
     spectral content (CirCor / PhysioNet training data).  The stochastic pink
     noise component ensures the YAMNet embedding path sees broadband content
     instead of perfectly periodic tones.
     """
     rng = np.random.default_rng(seed)
-    frequencies = np.array([92.0, 128.0, 164.0, 211.0, 245.0, 265.0, 318.0, 370.0, 420.0])
+    frequency_sets = {
+        "low": np.array([55.0, 72.0, 92.0, 118.0, 145.0, 180.0]),
+        "medium": np.array([92.0, 128.0, 164.0, 211.0, 245.0, 318.0]),
+        "high": np.array([180.0, 225.0, 270.0, 318.0, 355.0, 390.0]),
+    }
+    frequencies = frequency_sets.get(pitch, frequency_sets["medium"])
     phases = rng.uniform(0.0, 2 * np.pi, frequencies.size)
     band = np.zeros_like(times)
     for frequency, phase_offset in zip(frequencies, phases):
         band += np.sin(2 * np.pi * frequency * times + phase_offset)
     band /= frequencies.size
-    # Stochastic broadband component (realistic murmur texture)
-    band += 0.22 * rng.normal(0.0, 1.0, times.size)
+    # Quality controls remain inside the 20-400 Hz model domain. "Musical"
+    # favors tones, "blowing" favors broadband energy, and "harsh" mixes both.
+    noise_mix = {"musical": 0.06, "blowing": 0.34, "harsh": 0.20}.get(quality, 0.22)
+    band += noise_mix * rng.normal(0.0, 1.0, times.size)
     return normalize_peak(band, 1.0)
+
+
+def apply_murmur_shape(window: np.ndarray, phase: np.ndarray, shape: str) -> np.ndarray:
+    """Apply one of the functional model's supported systolic envelopes."""
+    active = window > 0
+    if not np.any(active) or shape == "plateau":
+        return window
+    active_phase = phase[active]
+    lo = float(np.min(active_phase))
+    hi = float(np.max(active_phase))
+    progress = np.clip((phase - lo) / max(hi - lo, 1e-6), 0.0, 1.0)
+    if shape == "crescendo":
+        envelope = 0.2 + 0.8 * progress
+    elif shape == "decrescendo":
+        envelope = 1.0 - 0.8 * progress
+    else:  # diamond
+        envelope = 0.2 + 0.8 * np.sin(np.pi * progress)
+    return window * envelope
 
 
 def generate_pcg(
@@ -264,7 +370,8 @@ def generate_pcg(
     """Generate model-aligned S1/S2 sounds and optional murmur energy.
 
     Output follows the same contract as the ESP32 firmware: signed int16 PCM
-    at 22 050 Hz.  The inference service then applies the full training-path
+    at the timer's 22 222 Hz transport rate. The inference service then
+    resamples to 22 050 Hz and applies the full training-path
     preprocessing:
       - Traditional track : /32768 → 20-400 Hz bandpass → pad/crop to 10 s
                             → librosa.normalize → 200 traditional features
@@ -306,7 +413,15 @@ def generate_pcg(
     )
 
     # ── Murmur window ─────────────────────────────────────────────────────────
-    if scenario.murmur_timing == "systolic":
+    if scenario.murmur_timing == "early-systolic":
+        murmur_window = raised_cosine_window(phase, 0.055, 0.185)
+    elif scenario.murmur_timing == "mid-systolic":
+        murmur_window = raised_cosine_window(phase, 0.135, 0.285)
+    elif scenario.murmur_timing == "late-systolic":
+        murmur_window = raised_cosine_window(phase, 0.225, 0.350)
+    elif scenario.murmur_timing == "holosystolic":
+        murmur_window = raised_cosine_window(phase, 0.045, 0.355)
+    elif scenario.murmur_timing == "systolic":
         murmur_window = raised_cosine_window(phase, 0.075, 0.335)
     elif scenario.murmur_timing == "diastolic":
         # Faster decay (3.8 vs 2.3) and earlier end (0.870 vs 0.900) so the
@@ -324,8 +439,34 @@ def generate_pcg(
     else:
         murmur_window = np.zeros_like(phase)
 
-    if scenario.murmur_strength > 0:
-        waveform += scenario.murmur_strength * 0.34 * murmur_band(times, seed + 91) * murmur_window
+    murmur_window = apply_murmur_shape(murmur_window, phase, scenario.murmur_shape)
+    grade_scale = {"I/VI": 0.48, "II/VI": 0.72, "III/VI": 1.0}.get(
+        scenario.murmur_grade,
+        0.72,
+    )
+    if scenario.murmur_strength > 0 or scenario.pcg_class == "murmur":
+        strength = max(scenario.murmur_strength, grade_scale)
+        waveform += (
+            strength
+            * 0.34
+            * murmur_band(
+                times,
+                seed + 91,
+                pitch=scenario.murmur_pitch,
+                quality=scenario.murmur_quality,
+            )
+            * murmur_window
+        )
+
+    if scenario.pcg_class == "artifact":
+        # Contact/motion artifact remains bounded so the signal passes through
+        # the pipeline while exercising Model 1's artifact class.
+        contact = rng.normal(0.0, 1.0, times.size)
+        slow_motion = np.sin(2 * np.pi * 6.5 * times) + 0.45 * np.sin(2 * np.pi * 17.0 * times)
+        dropout = np.where((phase > 0.50) & (phase < 0.66), 0.12, 1.0)
+        waveform = waveform * dropout + max(0.45, scenario.artifact_level) * (
+            0.17 * contact + 0.20 * slow_motion
+        )
 
     # ── Realistic stethoscope background (pink noise) ─────────────────────────
     # Real recordings have a 1/f noise floor from body sounds, breathing, and
@@ -333,7 +474,8 @@ def generate_pcg(
     # noise here pulls the embedding much closer to real PCG data.
     # Amplitude: 0.010 for normal (safe below 0.254 threshold), 0.015 for
     # pathological (slightly more contact noise from patient movement).
-    noise_amp = 0.010 if scenario.murmur_timing == "none" else 0.015
+    noise_amp = 0.010 if scenario.pcg_class == "normal" else 0.015
+    noise_amp += scenario.artifact_level * 0.018
     waveform += pink_noise(times, rng, amplitude=noise_amp)
 
     # Very small additive white noise for dithering (avoids perfect periodicity)
@@ -395,6 +537,8 @@ class AscultiCorSimulator:
             "streaming": streaming,
             "synthetic": True,
             "scenario": self.scenario.key,
+            "ecg_class": self.scenario.ecg_class,
+            "pcg_class": self.scenario.pcg_class,
         }
 
     def _on_connect(self, client: mqtt.Client, _userdata: Any, _flags: Any, rc: int) -> None:
@@ -448,6 +592,7 @@ class AscultiCorSimulator:
             "timestamp_ms": int((time.monotonic() - self.started_at) * 1000),
             "synthetic": True,
             "scenario": self.scenario.key,
+            "synthetic_profile": asdict(self.scenario),
         }
         self.publish_json(f"{self.topic_base}/session/{session_id}/meta", payload)
 
@@ -470,16 +615,17 @@ class AscultiCorSimulator:
                 "pcg_clipping_detected": False,
             })
             self._publish_meta(session_id, {
-                "type": "start_pcg", "valve_position": "AV",
+                "type": "start_pcg", "valve_position": self.scenario.valve_position,
                 "sample_rate_hz": PCG_SAMPLE_RATE, "format": "pcm_s16le",
                 "channels": 1, "chunk_samples": PCG_CHUNK_SAMPLES,
                 "target_duration_sec": duration, "microphone": "virtual-pcg",
+                "gain_db": 60,
             })
             self._publish_meta(session_id, {
                 "type": "start_ecg", "sample_rate_hz": ECG_SAMPLE_RATE,
                 "format": "int16_mv", "lead": "MLII", "n_leads": 1,
                 "chunk_samples": ECG_CHUNK_SAMPLES, "target_duration_sec": duration,
-                "ecg_model": "AuscultICor_v26_SL",
+                "adc_resolution": 12, "ecg_model": "AuscultICor_v26_SL",
             })
             self.publish_json(f"{self.topic_base}/status", self.status_payload(streaming=True), retain=True)
 
@@ -541,6 +687,12 @@ class AscultiCorSimulator:
         offline = json.dumps(self.status_payload(status="offline"), separators=(",", ":"))
         self.client.will_set(f"{self.topic_base}/status", offline, qos=1, retain=True)
         print(f"[SIMULATOR] Scenario: {self.scenario.title} ({self.scenario.key})")
+        print(
+            "[PROFILE] "
+            f"ECG={self.scenario.ecg_class} {self.scenario.bpm:g}BPM, "
+            f"PCG={self.scenario.pcg_class}, timing={self.scenario.murmur_timing}, "
+            f"grade={self.scenario.murmur_grade}, valve={self.scenario.valve_position}"
+        )
         print(f"[MQTT] Connecting to {self.config.mqtt_host}:{self.config.mqtt_port} TLS={self.config.mqtt_tls}")
         self.client.connect(self.config.mqtt_host, self.config.mqtt_port, keepalive=60)
         self.client.loop_start()
@@ -610,12 +762,79 @@ def load_config(path: str | None) -> SimulatorConfig:
     return SimulatorConfig.from_mapping(raw)
 
 
+def build_signal_profile(base: Scenario, args: argparse.Namespace) -> Scenario:
+    """Apply explicit model-domain controls to a named base scenario."""
+    updates: dict[str, Any] = {}
+    option_to_field = {
+        "heart_rate": "bpm",
+        "ecg_class": "ecg_class",
+        "pcg_class": "pcg_class",
+        "irregularity": "irregularity",
+        "murmur_timing": "murmur_timing",
+        "murmur_strength": "murmur_strength",
+        "murmur_shape": "murmur_shape",
+        "murmur_grade": "murmur_grade",
+        "murmur_pitch": "murmur_pitch",
+        "murmur_quality": "murmur_quality",
+        "valve_position": "valve_position",
+        "artifact_level": "artifact_level",
+    }
+    for option, field in option_to_field.items():
+        value = getattr(args, option, None)
+        if value is not None:
+            updates[field] = value
+
+    profile = replace(base, **updates)
+    if not 35 <= profile.bpm <= 180:
+        raise ValueError("heart rate must be between 35 and 180 BPM")
+    if not 0.0 <= profile.irregularity <= 0.30:
+        raise ValueError("irregularity must be between 0.0 and 0.30")
+    if not 0.0 <= profile.murmur_strength <= 1.0:
+        raise ValueError("murmur strength must be between 0.0 and 1.0")
+    if not 0.0 <= profile.artifact_level <= 1.0:
+        raise ValueError("artifact level must be between 0.0 and 1.0")
+
+    if profile.pcg_class == "murmur" and profile.murmur_timing == "none":
+        profile = replace(profile, murmur_timing="mid-systolic")
+    if profile.pcg_class == "normal" and args.murmur_timing not in (None, "none"):
+        raise ValueError("choose --pcg-class murmur when selecting murmur timing")
+    if profile.pcg_class == "artifact" and profile.artifact_level == 0:
+        profile = replace(profile, artifact_level=0.65)
+
+    return profile
+
+
+def print_model_domain() -> None:
+    print("ECG model: single-lead MLII, transport 500 Hz, inference 125 Hz, 500-sample windows")
+    print("  classes: normal, sveb, veb, fusion, unknown")
+    print("PCG Model 1: mono PCM, transport 22222 Hz, inference 22050 Hz, 10 s + YAMNet 3 s")
+    print("  classes: normal, murmur, artifact")
+    print("PCG Model 2: 4 valve channels represented by one selected capture position")
+    print("  timing: early-systolic, mid-systolic, late-systolic, holosystolic")
+    print("  shape: crescendo, decrescendo, diamond, plateau")
+    print("  grade: I/VI, II/VI, III/VI; pitch: low, medium, high")
+    print("  quality: blowing, harsh, musical; valve: AV, MV, PV, TV")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Stream a synthetic patient through AscultiCor MQTT.")
     parser.add_argument("--config", help="JSON file downloaded/generated when the virtual device is created.")
     parser.add_argument("--scenario", choices=sorted(set(SCENARIOS) | set(ALIASES)))
     parser.add_argument("--seed", type=int, default=2026, help="Deterministic signal seed.")
     parser.add_argument("--list-scenarios", action="store_true")
+    parser.add_argument("--describe-model-domain", action="store_true")
+    parser.add_argument("--heart-rate", type=float, help="35-180 BPM.")
+    parser.add_argument("--ecg-class", choices=ECG_CLASSES)
+    parser.add_argument("--pcg-class", choices=PCG_CLASSES)
+    parser.add_argument("--irregularity", type=float, help="Beat timing variability, 0.0-0.30.")
+    parser.add_argument("--murmur-timing", choices=MURMUR_TIMINGS)
+    parser.add_argument("--murmur-strength", type=float, help="Murmur amplitude, 0.0-1.0.")
+    parser.add_argument("--murmur-shape", choices=MURMUR_SHAPES)
+    parser.add_argument("--murmur-grade", choices=MURMUR_GRADES)
+    parser.add_argument("--murmur-pitch", choices=MURMUR_PITCHES)
+    parser.add_argument("--murmur-quality", choices=MURMUR_QUALITIES)
+    parser.add_argument("--valve-position", choices=VALVE_POSITIONS)
+    parser.add_argument("--artifact-level", type=float, help="Contact/motion artifact, 0.0-1.0.")
     return parser
 
 
@@ -625,9 +844,12 @@ def main() -> int:
         for scenario in SCENARIOS.values():
             print(f"{scenario.key:20} {scenario.title}: {scenario.description}")
         return 0
+    if args.describe_model_domain:
+        print_model_domain()
+        return 0
     try:
         config = load_config(args.config)
-        scenario = select_scenario(args.scenario)
+        scenario = build_signal_profile(select_scenario(args.scenario), args)
     except (OSError, ValueError, json.JSONDecodeError) as exc:
         print(f"Configuration error: {exc}", file=sys.stderr)
         return 2

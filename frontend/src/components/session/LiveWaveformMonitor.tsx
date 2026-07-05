@@ -213,9 +213,6 @@ export const LiveWaveformMonitor = forwardRef<
         latestLiveSampleIndexRef.current ?? -1,
         frame.sample_start_index + boundedCount - 1
       )
-      if (displayHeadSampleIndexRef.current === null) {
-        displayHeadSampleIndexRef.current = latestLiveSampleIndexRef.current
-      }
       lastFrameAtRef.current = Date.now()
       lastSequenceRef.current = frame.sequence
       hasLiveDataRef.current = true
@@ -575,24 +572,26 @@ export const LiveWaveformMonitor = forwardRef<
             1,
             Math.round((sampleRateRef.current * playbackLatencyMs) / 1000)
           )
-          const targetHead = Math.max(0, latestSampleIndex - playbackLatencySamples)
+          const bufferedStartHead = Math.max(0, latestSampleIndex - playbackLatencySamples)
 
           if (displayHeadSampleIndexRef.current === null) {
-            displayHeadSampleIndexRef.current = targetHead
+            displayHeadSampleIndexRef.current = bufferedStartHead
           } else if (!stale) {
             const advance = (deltaMs * sampleRateRef.current) / 1000
             const currentHead = displayHeadSampleIndexRef.current
-            if (currentHead > targetHead + playbackLatencySamples) {
-              displayHeadSampleIndexRef.current = targetHead
-            } else if (currentHead < targetHead) {
+            const excessiveLag = playbackLatencySamples * 4
+            if (currentHead > latestSampleIndex || latestSampleIndex - currentHead > excessiveLag) {
+              displayHeadSampleIndexRef.current = bufferedStartHead
+            } else if (currentHead < latestSampleIndex) {
               displayHeadSampleIndexRef.current = Math.min(
-                targetHead,
+                latestSampleIndex,
                 currentHead + advance
               )
             }
           }
 
-          const windowEnd = Math.floor(displayHeadSampleIndexRef.current ?? latestSampleIndex)
+          const displayHead = displayHeadSampleIndexRef.current ?? latestSampleIndex
+          const windowEnd = Math.floor(displayHead)
           renderSweepLine(
             ctx,
             width,
@@ -605,7 +604,7 @@ export const LiveWaveformMonitor = forwardRef<
 
           if (isSessionActive && !stale) {
             const cursorX = (
-              positiveModulo(windowEnd, windowSamplesRef.current) /
+              positiveModulo(displayHead, windowSamplesRef.current) /
               Math.max(1, windowSamplesRef.current - 1)
             ) * width
             renderSweepCursor(ctx, width, height, cursorX)
@@ -665,7 +664,7 @@ export const LiveWaveformMonitor = forwardRef<
                 {emptyLabel}
               </p>
               <p className="mt-1 text-[10px] uppercase tracking-[0.18em] text-slate-400/80">
-                Real ESP32 data only
+                Device stream only
               </p>
             </div>
           </div>

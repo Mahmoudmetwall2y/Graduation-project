@@ -60,6 +60,7 @@ specs/
 *.csv
 data/
 recordings/
+simulator/asculticor-simulator-*.json
 
 # Docker
 docker-compose.override.yml

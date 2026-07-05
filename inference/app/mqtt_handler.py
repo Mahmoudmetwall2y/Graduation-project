@@ -95,10 +95,6 @@ class SessionBuffer:
         """Throttle eager live-waveform writes while keeping graphs smooth."""
         if unpublished_samples <= 0:
             return False
-        if self.waveform_sequence == 0:
-            self.last_live_flush_requested_at = datetime.now(timezone.utc)
-            return True
-
         threshold_seconds = 0.25 if self.modality == 'ecg' else 0.35
         threshold_samples = max(1, int(self.sample_rate * threshold_seconds))
         if unpublished_samples < threshold_samples:

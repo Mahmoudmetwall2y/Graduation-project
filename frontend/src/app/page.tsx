@@ -1414,7 +1414,7 @@ export default function LandingPage() {
                   bg: 'rgba(0,245,212,0.1)',
                   border: 'rgba(0,245,212,0.15)',
                   title: 'Real-time ECG Monitoring',
-                  desc: 'Streaming electrocardiogram acquisition at 360 Hz with per-session waveform buffering, session replay, and AAMI-class arrhythmia detection.',
+                  desc: 'Streaming single-lead electrocardiogram acquisition at 500 Hz with per-session waveform buffering, session replay, and research AAMI-class arrhythmia analysis.',
                 },
                 {
                   icon: <Stethoscope size={24} />,
