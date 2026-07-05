@@ -50,6 +50,7 @@ export interface Model3Data {
   windows_analyzed?: number
   probabilities?: Record<string, number>
   raw_probabilities?: Record<string, number>
+  risk_score?: number
   demo_mode?: boolean
   model_version?: string
   latency_ms?: number

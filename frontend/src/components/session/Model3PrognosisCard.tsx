@@ -93,6 +93,10 @@ export function Model3PrognosisCard({ data, isPrintMode }: Model3PrognosisCardPr
     },
     { label: 'Windows Analyzed', value: data.windows_analyzed ?? 'N/A' },
     { label: 'Risk Level', value: aamiClass.risk.charAt(0).toUpperCase() + aamiClass.risk.slice(1) },
+    {
+      label: 'Cardiac Risk Score',
+      value: data.risk_score !== undefined ? `${(data.risk_score * 100).toFixed(1)}%` : 'N/A',
+    },
     { label: 'Model', value: 'ECG BiLSTM Predictor' },
     { label: 'Version', value: data.model_version || 'v1.0.0' },
     { label: 'Latency', value: data.latency_ms ? `${data.latency_ms}ms` : 'N/A' },
