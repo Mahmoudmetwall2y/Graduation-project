@@ -745,25 +745,113 @@ class AscultiCorSimulator:
             self.client.loop_stop()
 
 
-def select_scenario(requested: str | None) -> Scenario:
+def _prompt_choice(prompt: str, options: list, default: int = 1) -> int:
+    """Print a numbered menu and return the chosen 0-based index."""
+    for idx, label in enumerate(options, start=1):
+        print(f"  {idx}. {label}")
+    while True:
+        raw = input(f"{prompt} [{default}]: ").strip() or str(default)
+        if raw.isdigit() and 1 <= int(raw) <= len(options):
+            return int(raw) - 1
+        print(f"  Please enter a number between 1 and {len(options)}.")
+
+
+def select_scenario(
+    requested: str | None = None,
+    pcg_key: str | None = None,
+    ecg_key: str | None = None,
+) -> Scenario:
+    """
+    Choose a Scenario to simulate.
+
+    Priority order:
+      1. --scenario <key>                  single combined preset
+      2. --pcg-scenario / --ecg-scenario   mix two named presets
+      3. Interactive two-step prompt        PCG class then ECG class
+      4. Non-TTY fallback                  → 'normal'
+    """
+    # ── 1. Single named scenario ──────────────────────────────────────────────
     if requested:
         key = ALIASES.get(requested, requested)
         if key not in SCENARIOS:
             raise ValueError(f"Unknown scenario '{requested}'. Use --list-scenarios.")
         return SCENARIOS[key]
 
+    # ── 2. Explicit --pcg-scenario / --ecg-scenario mix ──────────────────────
+    if pcg_key or ecg_key:
+        pcg_base = SCENARIOS.get(
+            ALIASES.get(pcg_key or "normal", pcg_key or "normal"), SCENARIOS["normal"]
+        )
+        ecg_base = SCENARIOS.get(
+            ALIASES.get(ecg_key or "normal", ecg_key or "normal"), SCENARIOS["normal"]
+        )
+        return replace(
+            pcg_base,
+            ecg_class=ecg_base.ecg_class,
+            irregularity=ecg_base.irregularity,
+        )
+
+    # ── 3. Non-interactive fallback ───────────────────────────────────────────
     if not sys.stdin.isatty():
         return SCENARIOS["normal"]
 
-    print("\nChoose a virtual patient case:")
-    options = list(SCENARIOS.values())
-    for index, scenario in enumerate(options, start=1):
-        print(f"  {index}. {scenario.title} - {scenario.description}")
-    while True:
-        choice = input("Case number [1]: ").strip() or "1"
-        if choice.isdigit() and 1 <= int(choice) <= len(options):
-            return options[int(choice) - 1]
-        print("Please enter one of the listed numbers.")
+    # ── 4. Interactive two-step selector ─────────────────────────────────────
+    print("\n" + "=" * 60)
+    print(" AscultiCor Simulator — Virtual Patient Configuration")
+    print("=" * 60)
+
+    # Step 1: PCG
+    print("\nStep 1 of 2 — PCG (heart sounds)")
+    print("-" * 40)
+    pcg_type_options = [
+        f"Normal heart sounds   ({', '.join(PCG_NORMAL_SCENARIOS)})",
+        f"Abnormal heart sounds ({', '.join(PCG_ABNORMAL_SCENARIOS)})",
+    ]
+    pcg_type_idx = _prompt_choice("PCG type", pcg_type_options)
+
+    if pcg_type_idx == 0:
+        pcg_scenario_key = PCG_NORMAL_SCENARIOS[0]
+    else:
+        print("\n  Which abnormal PCG case?")
+        abnormal_labels = [
+            f"{k:25} — {SCENARIOS[k].title}" for k in PCG_ABNORMAL_SCENARIOS
+        ]
+        pcg_scenario_key = PCG_ABNORMAL_SCENARIOS[_prompt_choice("Case", abnormal_labels)]
+
+    # Step 2: ECG
+    print("\nStep 2 of 2 — ECG (rhythm)")
+    print("-" * 40)
+    ecg_type_options = [
+        f"Normal sinus rhythm  ({', '.join(ECG_NORMAL_SCENARIOS[:3])} …)",
+        f"Abnormal rhythm      ({', '.join(ECG_ABNORMAL_SCENARIOS)})",
+    ]
+    ecg_type_idx = _prompt_choice("ECG type", ecg_type_options)
+
+    if ecg_type_idx == 0:
+        ecg_scenario_key = "normal"
+    else:
+        print("\n  Which abnormal ECG case?")
+        ecg_labels = [
+            f"{k:25} — {SCENARIOS[k].title}  [{SCENARIOS[k].ecg_class.upper()}]"
+            for k in ECG_ABNORMAL_SCENARIOS
+        ]
+        ecg_scenario_key = ECG_ABNORMAL_SCENARIOS[_prompt_choice("Case", ecg_labels)]
+
+    # Build composite: PCG profile + ECG class from chosen ECG scenario
+    pcg_base = SCENARIOS[pcg_scenario_key]
+    ecg_base = SCENARIOS[ecg_scenario_key]
+    combined = replace(
+        pcg_base,
+        ecg_class=ecg_base.ecg_class,
+        irregularity=ecg_base.irregularity,
+    )
+
+    print("\n" + "-" * 60)
+    print(f"  PCG : {pcg_base.title}  [{pcg_base.pcg_class}]")
+    print(f"  ECG : {ecg_base.title}  [{ecg_base.ecg_class.upper()}]")
+    print("-" * 60)
+    return combined
+
 
 
 def load_config(path: str | None) -> SimulatorConfig:
@@ -837,9 +925,57 @@ def print_model_domain() -> None:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Stream a synthetic patient through AscultiCor MQTT.")
-    parser.add_argument("--config", help="JSON file downloaded/generated when the virtual device is created.")
-    parser.add_argument("--scenario", choices=sorted(set(SCENARIOS) | set(ALIASES)))
+    parser = argparse.ArgumentParser(
+        description="Stream a synthetic patient through AscultiCor MQTT."
+    )
+    parser.add_argument(
+        "--config",
+        help="JSON file downloaded/generated when the virtual device is created.",
+    )
+
+    # ── Scenario selection ───────────────────────────────────────────────────
+    sg = parser.add_argument_group(
+        "scenario",
+        "Choose what the simulator generates. Use --scenario for a single preset, "
+        "or combine --pcg-scenario and --ecg-scenario to mix PCG and ECG "
+        "independently. Omitting all three launches the interactive two-step prompt.",
+    )
+    sg.add_argument(
+        "--scenario",
+        choices=sorted(set(SCENARIOS) | set(ALIASES)),
+        help="Single combined preset (controls both ECG and PCG).",
+    )
+    sg.add_argument(
+        "--pcg-scenario",
+        choices=sorted(SCENARIOS),
+        metavar="PCG_KEY",
+        help=(
+            "PCG preset for heart-sound generation. "
+            f"Normal: {', '.join(PCG_NORMAL_SCENARIOS)}. "
+            f"Abnormal: {', '.join(PCG_ABNORMAL_SCENARIOS)}."
+        ),
+    )
+    sg.add_argument(
+        "--ecg-scenario",
+        choices=sorted(SCENARIOS),
+        metavar="ECG_KEY",
+        help=(
+            "ECG preset for rhythm generation. "
+            f"Normal: {', '.join(ECG_NORMAL_SCENARIOS)}. "
+            f"Abnormal: {', '.join(ECG_ABNORMAL_SCENARIOS)}."
+        ),
+    )
+
+    parser.add_argument(
+        "--sessions",
+        type=int,
+        default=1,
+        metavar="N",
+        help=(
+            "Number of sessions to run automatically then exit (default: 1). "
+            "Use 0 to stay online and wait for UI-triggered sessions."
+        ),
+    )
     parser.add_argument("--seed", type=int, default=2026, help="Deterministic signal seed.")
     parser.add_argument("--list-scenarios", action="store_true")
     parser.add_argument("--describe-model-domain", action="store_true")
@@ -861,22 +997,64 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> int:
     args = build_parser().parse_args()
     if args.list_scenarios:
-        for scenario in SCENARIOS.values():
-            print(f"{scenario.key:20} {scenario.title}: {scenario.description}")
+        print(f"{'KEY':<22} {'ECG':^7} {'PCG':^8}  TITLE")
+        print("-" * 65)
+        for s in SCENARIOS.values():
+            marker = " [abnormal]" if s.ecg_class != "normal" or s.pcg_class != "normal" else ""
+            print(f"{s.key:<22} {s.ecg_class:^7} {s.pcg_class:^8}  {s.title}{marker}")
+        print()
+        print(f"PCG normal   : {', '.join(PCG_NORMAL_SCENARIOS)}")
+        print(f"PCG abnormal : {', '.join(PCG_ABNORMAL_SCENARIOS)}")
+        print(f"ECG normal   : {', '.join(ECG_NORMAL_SCENARIOS)}")
+        print(f"ECG abnormal : {', '.join(ECG_ABNORMAL_SCENARIOS)}")
         return 0
     if args.describe_model_domain:
         print_model_domain()
         return 0
     try:
         config = load_config(args.config)
-        scenario = build_signal_profile(select_scenario(args.scenario), args)
+        scenario = build_signal_profile(
+            select_scenario(
+                requested=args.scenario,
+                pcg_key=getattr(args, "pcg_scenario", None),
+                ecg_key=getattr(args, "ecg_scenario", None),
+            ),
+            args,
+        )
     except (OSError, ValueError, json.JSONDecodeError) as exc:
         print(f"Configuration error: {exc}", file=sys.stderr)
         return 2
 
+    n_sessions = args.sessions
     simulator = AscultiCorSimulator(config, scenario, seed=args.seed)
     signal.signal(signal.SIGTERM, lambda *_: (_ for _ in ()).throw(KeyboardInterrupt()))
-    simulator.run()
+
+    if n_sessions == 0:
+        # Stay online indefinitely; sessions are triggered by the UI via MQTT.
+        print("[SIMULATOR] Online mode — waiting for UI-triggered sessions (Ctrl+C to quit).")
+        simulator.run()
+    else:
+        # Auto-run N sessions sequentially then exit.
+        import uuid
+        simulator.client.connect(config.mqtt_host, config.mqtt_port, keepalive=60)
+        simulator.client.loop_start()
+        time.sleep(3)  # let broker settle
+        print(f"[SIMULATOR] Auto-session mode: running {n_sessions} session(s).")
+        try:
+            for i in range(1, n_sessions + 1):
+                session_id = str(uuid.uuid4())
+                print(f"\n[SESSION {i}/{n_sessions}] id={session_id[:8]}\u2026")
+                simulator._stream_session(session_id, duration=15)
+                if i < n_sessions:
+                    print(f"[SESSION {i}/{n_sessions}] Done. Waiting 5 s before next\u2026")
+                    time.sleep(5)
+        except KeyboardInterrupt:
+            print("\n[SIMULATOR] Interrupted.")
+        finally:
+            simulator.client.disconnect()
+            simulator.client.loop_stop()
+        print(f"[SIMULATOR] All {n_sessions} session(s) complete.")
+
     return 0
 
 
