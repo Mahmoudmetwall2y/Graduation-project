@@ -270,16 +270,22 @@ def generate_ecg(
         )
         waveform = np.where(ectopic_mask, sveb, waveform)
     elif scenario.ecg_class in {"veb", "fusion"}:
-        ventricular = (
-            0.92 * gaussian(phase, 0.39, 0.044)
-            - 0.52 * gaussian(phase, 0.47, 0.052)
-            - 0.20 * gaussian(phase, 0.69, 0.075)
-        )
-        replacement = (
-            ventricular
-            if scenario.ecg_class == "veb"
-            else (0.48 * waveform + 0.52 * ventricular)
-        )
+        if scenario.ecg_class == "veb":
+            # Real clinical PVC/VEB in lead II: wide, deep negative QRS deflection,
+            # followed by an upright wide T-wave.
+            ventricular = (
+                -0.90 * gaussian(phase, 0.41, 0.045)
+                + 0.35 * gaussian(phase, 0.68, 0.08)
+            )
+            replacement = ventricular
+        else:  # fusion
+            # Fusion beat is a hybrid shape
+            ventricular = (
+                0.92 * gaussian(phase, 0.39, 0.044)
+                - 0.52 * gaussian(phase, 0.47, 0.052)
+                - 0.20 * gaussian(phase, 0.69, 0.075)
+            )
+            replacement = 0.48 * waveform + 0.52 * ventricular
         waveform = np.where(ectopic_mask, replacement, waveform)
     elif scenario.ecg_class == "unknown":
         artifact_envelope = (
