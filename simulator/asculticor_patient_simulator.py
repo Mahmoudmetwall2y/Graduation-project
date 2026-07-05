@@ -204,13 +204,13 @@ def cardiac_phase(times: np.ndarray, scenario: Scenario, seed: int) -> np.ndarra
         cycle_idx = np.floor(theta / 2.0)
         warped_mod = np.zeros_like(theta_mod)
 
-        # Beat 0: normal timing (ends early at 0.8)
-        m1 = (theta_mod >= 0.0) & (theta_mod < 0.8)
-        warped_mod[m1] = theta_mod[m1] * 1.25
+        # Beat 0: normal timing (ends early at 0.6)
+        m1 = (theta_mod >= 0.0) & (theta_mod < 0.6)
+        warped_mod[m1] = theta_mod[m1] * (1.0 / 0.6)
 
-        # Beat 1: premature beat timing + compensatory pause (starts early at 0.8, ends at 2.0)
-        m2 = (theta_mod >= 0.8) & (theta_mod <= 2.0)
-        warped_mod[m2] = 1.0 + (theta_mod[m2] - 0.8) * (1.0 / 1.2)
+        # Beat 1: premature beat timing + compensatory pause (starts early at 0.6, ends at 2.0)
+        m2 = (theta_mod >= 0.6) & (theta_mod <= 2.0)
+        warped_mod[m2] = 1.0 + (theta_mod[m2] - 0.6) * (1.0 / 1.4)
 
         theta = cycle_idx * 2.0 + warped_mod
 
@@ -261,7 +261,7 @@ def generate_ecg(
     beat_number = np.floor(times * (scenario.bpm / 60.0)).astype(np.int64)
     ectopic_mask = (beat_number % 2) == 1
     if scenario.ecg_class == "sveb":
-        premature_phase = (phase + 0.14) % 1.0
+        premature_phase = (phase + 0.18) % 1.0
         sveb = (
             -0.04 * gaussian(premature_phase, 0.35, 0.008)
             + 0.88 * gaussian(premature_phase, 0.40, 0.010)
@@ -272,18 +272,18 @@ def generate_ecg(
     elif scenario.ecg_class in {"veb", "fusion"}:
         if scenario.ecg_class == "veb":
             # Real clinical PVC/VEB in lead II: wide, deep negative QRS deflection,
-            # followed by an upright wide T-wave.
+            # occurring early (at phase 0.22) followed by an upright wide T-wave.
             ventricular = (
-                -0.90 * gaussian(phase, 0.41, 0.045)
-                + 0.35 * gaussian(phase, 0.68, 0.08)
+                -0.90 * gaussian(phase, 0.22, 0.045)
+                + 0.35 * gaussian(phase, 0.52, 0.08)
             )
             replacement = ventricular
         else:  # fusion
-            # Fusion beat is a hybrid shape
+            # Fusion beat is a hybrid shape occurring early
             ventricular = (
-                0.92 * gaussian(phase, 0.39, 0.044)
-                - 0.52 * gaussian(phase, 0.47, 0.052)
-                - 0.20 * gaussian(phase, 0.69, 0.075)
+                0.92 * gaussian(phase, 0.22, 0.044)
+                - 0.52 * gaussian(phase, 0.30, 0.052)
+                - 0.20 * gaussian(phase, 0.52, 0.075)
             )
             replacement = 0.48 * waveform + 0.52 * ventricular
         waveform = np.where(ectopic_mask, replacement, waveform)
