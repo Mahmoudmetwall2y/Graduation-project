@@ -1586,7 +1586,7 @@ export default function LandingPage() {
         {/* CTA */}
         <Section id="cta">
           <div className="lp-cta">
-            <p className="lp-section-eyebrow" style={{ textAlign: 'center' }}>Graduation Project 2026</p>
+            <p className="lp-section-eyebrow" style={{ textAlign: 'center' }}>Cardiac Monitoring Platform</p>
             <h2 className="lp-cta-title">
               Ready to explore<br />
               <span style={{
@@ -1626,7 +1626,7 @@ export default function LandingPage() {
             </span>
           </div>
           <p className="lp-footer-copy">
-            Graduation Project 2026 · Biomedical Engineering
+            AscultiCor · AI-Assisted Cardiac Monitoring
           </p>
         </footer>
       </div>

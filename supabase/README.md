@@ -81,7 +81,7 @@ This directory contains all Supabase-related configuration for AscultiCor.
    ```
 
 6. **Realtime/polling note**:
-   - The current graduation-safe path uses explicit polling in the dashboard.
+   - The current free-tier-compatible path uses explicit polling in the dashboard.
    - Do not re-enable table realtime replication unless you also validate the realtime migration path and browser behavior.
    - Migrations `012` through `017` intentionally disable or clean up problematic realtime publication/triggers for the free-tier-compatible setup.
 

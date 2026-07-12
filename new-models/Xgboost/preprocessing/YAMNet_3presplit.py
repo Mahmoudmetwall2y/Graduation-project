@@ -16,8 +16,11 @@ warnings.filterwarnings("ignore", category=UserWarning)
 # =====================================
 # DATASET ROOT
 # =====================================
-DATASET_PATH = r"C:\Users\Nada\Desktop\Ai Graduation Project\Datasets\classification-of-heart-sound-recordings"
-new_cache_dir = r"C:\Users\Nada\Desktop\Ai Graduation Project\Preprocessing\tfhub_cache"
+DATASET_PATH = os.environ.get(
+    "ASCULTICOR_DATASET_PATH",
+    os.path.join("datasets", "classification-of-heart-sound-recordings"),
+)
+new_cache_dir = os.environ.get("TFHUB_CACHE_DIR", os.path.join(".cache", "tfhub"))
 os.environ["TFHUB_CACHE_DIR"] = new_cache_dir
 print("Loading YAMNet from TensorFlow Hub...")
 yamnet_model = hub.load('https://tfhub.dev/google/yamnet/1')

@@ -1,70 +1,50 @@
 # AscultiCor Release Checklist
 
-Use this checklist before a graduation demo, local handoff, or future VPS deployment.
-Do not deploy from a machine that has not passed the local checks.
+Use this checklist before a demonstration, release handoff, or server deployment.
 
-## Secrets and Environment
+## Secrets and environment
 
-- [ ] No plaintext `env` file exists in the repository root.
-- [ ] `.env` is local-only and is not committed.
-- [ ] `.env.cloud.example` contains placeholders only.
-- [ ] `INTERNAL_API_TOKEN`, `INFERENCE_INTERNAL_TOKEN`, MQTT passwords, Supabase service role key, n8n password, and n8n encryption key are rotated before public deployment.
-- [ ] `N8N_EMAIL_PAYLOAD_EXPORT_ENABLED=false` unless a trusted email workflow explicitly needs generated report bodies.
+- [ ] No real `.env`, certificate, key, Terraform state, or backup is tracked.
+- [ ] Internal API, inference, MQTT, Supabase, and n8n credentials are strong and independent.
+- [ ] Public environment variables contain no secrets.
+- [ ] Production credentials have been rotated from development values.
 
-## Local Verification
+## Verification
 
-- [ ] `powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/security-smoke.ps1` passes locally.
-- [ ] `cd frontend && npm ci && npm run lint && npm run typecheck && npm run build` passes.
-- [ ] `cd inference && python -m pip install -r requirements.txt && python -m compileall app` passes.
-- [ ] Docker stack starts with `docker compose --env-file .env up --build -d`.
-- [ ] Public `/api/health` returns only minimal status.
-- [ ] Detailed `/api/health?details=1` works only with `x-internal-token`.
+- [ ] Security smoke checks pass.
+- [ ] Frontend lint, typecheck, and production build pass.
+- [ ] Inference and simulator tests pass.
+- [ ] The Docker stack starts cleanly and health endpoints behave as documented.
 
-## Database
+## Data and access control
 
-- [ ] Numbered migrations are applied in order through `026_device_mqtt_credentials.sql`.
-- [ ] `apply_this_in_supabase.sql` is used only as a fresh-database snapshot.
-- [ ] RLS remains enabled on tenant data tables.
-- [ ] Storage bucket `recordings` is private.
-- [ ] Signed upload/download functions verify organization and session/recording ownership.
+- [ ] Numbered migrations are applied in order.
+- [ ] RLS is enabled and cross-organization access tests fail as expected.
+- [ ] Private storage requires authorized signed URLs.
+- [ ] Seed records contain no personal information.
+- [ ] Backup restoration has been tested.
 
-## Future Hostinger VPS Readiness
+## Models and hardware
 
-- [ ] No deployment is performed until the local checklist passes.
-- [ ] MQTT TCP is loopback/private unless protected by TLS, VPN, or a private network.
-- [ ] NGINX does not publicly proxy `/api/inference/`.
-- [ ] n8n is protected by authentication and an encryption key.
-- [ ] Firewall exposes only the intended public ports.
+- [ ] Required models, encoders, scalers, and configurations are present.
+- [ ] Model input contracts and validation checks pass.
+- [ ] Model limitations and evaluation evidence are documented.
+- [ ] Firmware, provisioning, sampling, MQTT, and sessions work on a test device.
+- [ ] OTA checksum, staged rollout, and serial recovery paths are verified.
 
----
+## Deployment
 
-## ML Models (Critical for Live Demo)
+- [ ] HTTPS and remote MQTT TLS use trusted certificates.
+- [ ] Only required firewall ports are exposed.
+- [ ] Nginx does not expose internal inference routes.
+- [ ] n8n requires authentication and uses an encryption key.
+- [ ] Logs contain no credentials or sensitive payloads.
+- [ ] Monitoring, recovery, rollback, and incident-response owners are known.
 
-- [ ] All 3 model directories exist with required files (see README for full list).
-- [ ] **ECG_SAMPLE_RATE=360 and ECG_WINDOW_SIZE=300** — must match BiLSTM MIT-BIH training config.
-- [ ] Inference `/health` reports `models_loaded: 3` (not demo mode).
-- [ ] At least one test prediction runs end-to-end before demo.
-- [ ] Training confusion matrices and accuracy scores are documented for defense.
+## Final acceptance
 
-## Hardware (for Live Demo)
-
-- [ ] ESP32 firmware flashed with latest version.
-- [ ] Device provisioned with MQTT credentials via Serial Monitor.
-- [ ] Device shows "online" status in dashboard before demo starts.
-- [ ] Backup: pre-recorded demo video ready in case hardware fails.
-
-## Frontend
-
-- [ ] Login works with demo admin account.
-- [ ] Dashboard loads with real or seeded session data.
-- [ ] 3D heart visualization renders without JavaScript errors.
-- [ ] Report generation works (or demo mode shows template report).
-- [ ] No console errors in browser devtools during demo flow.
-
-## Graduation Defense Preparation
-
-- [ ] Defense Q&A answers prepared (why MQTT, why Supabase, RLS explanation, AAMI classification).
-- [ ] "Limitations and Future Work" slide prepared (MQTT TLS, in-memory rate limiter, horizontal scaling).
-- [ ] Architecture diagram shown in presentation (ESP32 → MQTT → FastAPI → Supabase → Next.js).
-- [ ] Multi-tenancy demo: show RLS blocking cross-org access.
-- [ ] Dataset citations ready: PhysioNet CirCor 2022, MIT-BIH Arrhythmia Database.
+- [ ] Login, patient, device, session, prediction, report, and audit workflows pass.
+- [ ] A multi-tenant test confirms organization isolation.
+- [ ] Known limitations and non-diagnostic status are visible.
+- [ ] Dataset and model provenance are recorded.
+- [ ] The release version and deployment commit are recorded.

@@ -12,9 +12,9 @@ from scipy.signal import butter, sosfilt
 warnings.filterwarnings("ignore", category=UserWarning)
 
 # =====================================
-# DATASET ROOT (UNTOUCHED)
+# DATASET ROOT
 # =====================================
-DATASET_PATH = r"C:\Users\Nada\Desktop\Ai Graduation Project\Datasets\archive"
+DATASET_PATH = os.environ.get("ASCULTICOR_DATASET_PATH", os.path.join("datasets", "archive"))
 
 # Load YAMNet globally to ensure matching 1024-dimensional feature embeddings
 print("Loading YAMNet from TensorFlow Hub...")

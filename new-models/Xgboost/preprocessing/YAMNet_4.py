@@ -11,9 +11,10 @@ from scipy.signal import butter, sosfilt
 
 warnings.filterwarnings("ignore", category=UserWarning)
 
-# --- 1. CONFIGURATION (UNTOUCHED ORIGINAL SETTINGS) ---
-DATASET_PATH = r"C:\Users\Nada\Desktop\Ai Graduation Project\Datasets\BMD-HS-Dataset-main\train"
-CSV_PATH = r"C:\Users\Nada\Desktop\Ai Graduation Project\Datasets\BMD-HS-Dataset-main\train.csv" 
+# --- 1. CONFIGURATION ---
+DATASET_ROOT = os.environ.get("ASCULTICOR_DATASET_ROOT", "datasets")
+DATASET_PATH = os.path.join(DATASET_ROOT, "BMD-HS-Dataset-main", "train")
+CSV_PATH = os.path.join(DATASET_ROOT, "BMD-HS-Dataset-main", "train.csv")
 SR = 22050
 DURATION = 10
 
@@ -157,4 +158,3 @@ else:
     np.save("y_buet.npy", y_buet)
 
     print(f"\nSuccess! X_buet shape: {X_buet.shape}")
-    

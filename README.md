@@ -1,158 +1,158 @@
-# AscultiCor - AI-Powered Cardiac Monitoring Platform
+# AscultiCor
 
-AscultiCor is a full-stack, real-time cardiac auscultation and monitoring platform that combines IoT hardware (ESP32), MQTT messaging, ML inference, and a modern web dashboard. It enables clinicians to monitor patients' heart sounds (PCG) and electrocardiograms (ECG) with AI-assisted classification.
-94.130.24.242
-ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAID2L9wjFUbzKKZELEeNQCdnSNPWbw+CKY/cVSRF3FzGK asculticor-deploy
-## Architecture Overview
+**An end-to-end, AI-assisted cardiac monitoring platform for ECG and PCG signals.**
 
-Data flow:
-1. ESP32 devices capture PCG/ECG signals and publish raw data via MQTT.
-2. Mosquitto broker authenticates devices and routes messages with per-device MQTT credentials for newly provisioned hardware.
-3. Inference Service (FastAPI) subscribes to MQTT topics, runs ML models, and stores predictions in Supabase.
-4. Supabase provides PostgreSQL with RLS and auth.
-5. Next.js dashboard displays sessions, devices, waveforms, predictions, and LLM-generated reports using explicit polling on the free-tier-friendly path.
+AscultiCor connects an ESP32-based acquisition device to a secure cardiac-monitoring dashboard. It captures electrocardiogram (ECG) and phonocardiogram (PCG) signals, streams them over MQTT, applies machine-learning models, and presents live waveforms, predictions, device telemetry, and generated reports.
 
-## Key Features
+> [!IMPORTANT]
+> AscultiCor is an academic prototype. It is not a certified medical device and must not be used to diagnose, treat, or make clinical decisions.
 
-- Real-time ECG/PCG waveforms
-- ML classification for PCG and ECG
-- Device telemetry (battery, temperature, WiFi signal)
-- Responsive UI
-- Supabase auth with organization-level RLS
-- LLM-based clinical reports (demo mode by default)
-- Device bootstrap with device-scoped MQTT credentials
-- Docker Compose deployment
+## Highlights
 
-## Quick Start
+- Live ECG and PCG waveform monitoring
+- AI-assisted heart-sound, murmur, and arrhythmia analysis
+- ESP32 provisioning and device-scoped MQTT credentials
+- Patient, session, device, report, and audit workflows
+- Organization-level authorization with Supabase Auth and Row Level Security
+- Firmware release and over-the-air update support
+- Optional n8n automation and LLM-generated report workflows
+- Local and cloud deployment with Docker Compose
+
+## Architecture
+
+```mermaid
+flowchart LR
+    D[ESP32 + ECG/PCG sensors] -->|MQTT| M[Mosquitto]
+    M --> I[FastAPI inference service]
+    I --> AI[ML models]
+    I --> S[(Supabase)]
+    S --> W[Next.js dashboard]
+    W -->|Provisioning and OTA| D
+    W --> N[n8n / report automation]
+```
+
+1. The device samples ECG and PCG signals and publishes measurements through MQTT.
+2. Mosquitto authenticates the device and routes telemetry to the inference service.
+3. FastAPI preprocesses signal windows, executes the model pipeline, and stores results.
+4. Supabase provides PostgreSQL, authentication, storage, and access-control policies.
+5. The Next.js application displays live sessions, analytics, reports, and device state.
+
+## Technology Stack
+
+| Layer | Technologies |
+| --- | --- |
+| Hardware | ESP32-WROOM-32, AD8232 ECG sensor, MAX9814 PCG microphone |
+| Web | Next.js 14, React 18, TypeScript, Tailwind CSS |
+| Inference | Python, FastAPI, TensorFlow/Keras, XGBoost |
+| Data and identity | Supabase PostgreSQL, Auth, Storage, Row Level Security |
+| Messaging | Eclipse Mosquitto, MQTT |
+| Operations | Docker Compose, Nginx, n8n, Terraform |
+
+## Repository Layout
+
+```text
+frontend/             Web dashboard and API routes
+inference/            FastAPI service, preprocessing, and model runtime
+firmware/             ESP32 firmware and release metadata
+models/               Runtime model artifacts and validation outputs
+mosquitto/            MQTT broker configuration and credential tooling
+supabase/             Schema migrations, seed data, and Edge Functions
+simulator/            Synthetic device and signal simulator
+n8n/                  Optional automation workflows
+nginx/                Reverse-proxy configuration
+docs/                 Architecture, hardware, deployment, and operations guides
+scripts/              Build, deployment, validation, and documentation utilities
+training/              Reproducible model-training scripts
+```
+
+## Quick Start with Docker
 
 ### Prerequisites
-- Docker and Docker Compose
-- Node.js 20+ (for local frontend development)
-- A Supabase project (free tier works)
 
-### 1. Configure environment
+- Docker Engine with Docker Compose v2
+- A Supabase project
+- Git
+
+For frontend-only development, install Node.js 20 or newer. Python 3.11 is recommended for the inference service and simulator.
+
+### 1. Configure the application
 
 ```bash
+git clone <repository-url> asculticor
+cd asculticor
 cp .env.example .env
 ```
 
-Edit `.env` with your Supabase credentials.
+Fill in the required Supabase and application values in `.env`. Never commit this file. For a cloud deployment, begin with `.env.cloud.example` and follow the deployment section in the [application guide](docs/README.md).
 
-Configuration notes:
-- `LLM_PROVIDER=demo` uses template reports. Set to a real provider only after integration.
-- `CORS_ORIGIN` is used by Supabase Edge Functions to restrict origins.
-- `MQTT_BIND_ADDRESS=127.0.0.1` keeps the broker local-only. Set `MQTT_BIND_ADDRESS=0.0.0.0` for real ESP32 devices on your LAN.
-- `DEVICE_BOOTSTRAP_PUBLIC_BASE_URL` should be set to a URL reachable by hardware devices if you want to use the recommended bootstrap provisioning flow.
-- `MQTT_DEVICE_PASSWORD_PEPPER` should be a long random secret used to derive per-device MQTT passwords during bootstrap.
-- `DEFAULT_SIGNUP_ORG_ID` enables self-signup into a specific organization. Leave it blank if onboarding should stay admin/invite only.
+### 2. Prepare the database
 
-### 2. Apply database migrations
+- New environment: apply `supabase/migrations/apply_this_in_supabase.sql` in the Supabase SQL editor.
+- Existing environment: apply the numbered files in `supabase/migrations/` in ascending order.
 
-For existing databases, apply numbered migrations in order from
-`supabase/migrations/001_initial_schema.sql` through
-`supabase/migrations/026_device_mqtt_credentials.sql`.
+The numbered migrations are the source of truth for upgrades. `supabase/seed.sql` provides demonstration metadata but does not create Supabase Auth users.
 
-For a fresh one-shot bootstrap database, you can run
-`supabase/migrations/apply_this_in_supabase.sql`.
-Treat the one-shot file as a fresh-database snapshot; the numbered migrations
-remain the source of truth for existing databases.
-
-### 3. Start all services
+### 3. Start the platform
 
 ```bash
-docker-compose up --build -d
+docker compose up --build -d
+docker compose ps
 ```
 
-Services:
-- Frontend: `http://localhost:3000`
-- Inference API: `http://localhost:8000`
-- MQTT Broker: `mqtt://localhost:1883`
+| Service | Default address |
+| --- | --- |
+| Dashboard | `http://localhost:3000` |
+| Inference API | `http://localhost:8000` |
+| MQTT broker | `mqtt://localhost:1883` |
 
-Cloud/staging deployment:
-- Use `.env.cloud.example` as the starting point
-- Follow `docs/CLOUD_VM_DEPLOYMENT.md`
+Use an existing Supabase Auth account or create one from the login page. To stop the stack, run `docker compose down`.
 
-### 4. Process LLM report queue (async)
-
-Reports are queued first. To process pending reports:
-
-```bash
-curl -X POST "http://localhost:3000/api/llm?action=process-pending" \
-  -H "x-internal-token: $INTERNAL_API_TOKEN"
-```
-
-Optional: enable `.github/workflows/process-llm-queue.yml` and set repository secrets:
-- `ASCULTICOR_APP_URL` (e.g., `https://your-app.example.com`)
-- `ASCULTICOR_INTERNAL_API_TOKEN`
-
-By default, the LLM queue endpoint does not return generated email/report body
-payloads. Set `N8N_EMAIL_PAYLOAD_EXPORT_ENABLED=true` and call the queue worker
-with `include_email_payloads=1` only for trusted n8n email workflows.
-
-### 5. Login
-
-Use an existing Supabase Auth user, or create one through the UI at `/auth/login`.
-
-Important notes:
-- `supabase/seed.sql` inserts demo `profiles` and device metadata, but it does **not** create rows in `auth.users`.
-- If you want the historical demo admin account, create `admin@asculticor.local` in Supabase Auth first.
-- Self-signup can auto-provision an `operator` profile only when `DEFAULT_SIGNUP_ORG_ID` is configured or the database contains exactly one organization.
-- Session, dashboard, and device freshness use polling intentionally because Supabase realtime publication is disabled in the free-plan-safe path.
-
-## Project Structure
-
-```
-asculticor/
-  frontend/            Next.js 14 web dashboard
-  inference/           FastAPI ML inference service
-  mosquitto/           MQTT broker
-  supabase/            migrations, seed data, edge functions
-  n8n/                 optional workflow automation exports
-  docs/                diagrams, runbooks, and deployment notes
-```
-
-## Design System
-
-The UI uses a medical-grade design system built with CSS custom properties.
-
-## Recommended Quality Checks
+## Local Development
 
 ```bash
 # Frontend
-cd frontend && npm ci && npm run lint && npm run typecheck && npm run build
-
-# Inference
-cd ../inference && python -m pip install -r requirements.txt && python -m compileall app
-
-# Project-specific security regression checks
-powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/security-smoke.ps1
-```
-
-Public `/api/health` returns only a minimal status payload. Detailed health
-diagnostics require `?details=1` and the `x-internal-token` header.
-
-## Release Checklist
-
-See `./RELEASE_CHECKLIST.md` before demos or deployment.
-
-## Development
-
-### Frontend (local)
-
-```bash
 cd frontend
-npm install
+npm ci
 npm run dev
-```
 
-### Inference Service (local)
-
-```bash
+# Inference service (in a separate terminal)
 cd inference
-pip install -r requirements.txt
+python -m venv .venv
+# Windows: .venv\Scripts\activate
+# Linux/macOS: source .venv/bin/activate
+python -m pip install -r requirements.txt
 uvicorn app.main:app --reload --port 8000
 ```
 
+The simulator has its own setup instructions in [simulator/README.md](simulator/README.md).
+
+## Quality Checks
+
+```bash
+cd frontend
+npm run lint
+npm run typecheck
+npm run build
+
+cd ../inference
+python -m pytest
+python -m compileall app
+```
+
+On Windows, run the project security checks with:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/security-smoke.ps1
+```
+
+## Documentation
+
+The consolidated [application guide](docs/README.md) covers architecture, configuration, hardware, firmware, protocols, models, data, deployment, automation, security, testing, and troubleshooting. Component-specific operational notes remain beside their source code.
+
+## Contributing and Security
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the development workflow. Report security concerns using the private process in [SECURITY.md](SECURITY.md); do not publish credentials, patient information, or vulnerability details in a public issue.
+
 ## License
 
-This project was developed as a graduation project. All rights reserved.
+This project is distributed under the terms in [LICENSE](LICENSE).
