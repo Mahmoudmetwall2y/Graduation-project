@@ -24,7 +24,7 @@
  *
  * Board: ESP32-WROOM-32  |  Arduino IDE 2.x  |  ESP32 Core >= 2.0
  *
- * License: Graduation Project — All rights reserved.
+ * License: See the repository LICENSE file.
  */
 
 #include <WiFi.h>

@@ -13,12 +13,13 @@ from scipy.signal import butter, sosfilt
 # =========================
 # PATHS
 # =========================
-# Corrected paths to point to your Google Drive
-AUDIO_PATH = r"C:\Users\Nada\Desktop\Ai Graduation Project\Datasets\PCG_CirCor\training_data"
-LABEL_FILE =  r"C:\Users\Nada\Desktop\Ai Graduation Project\Datasets\PCG_CirCor\training_data.csv"
+# Configure local data without embedding workstation-specific paths.
+DATASET_ROOT = os.environ.get("ASCULTICOR_DATASET_ROOT", "datasets")
+AUDIO_PATH = os.path.join(DATASET_ROOT, "PCG_CirCor", "training_data")
+LABEL_FILE = os.path.join(DATASET_ROOT, "PCG_CirCor", "training_data.csv")
 
 # Load YAMNet once globally
-new_cache_dir = r"C:\Users\Nada\Desktop\Ai Graduation Project\Preprocessing\tfhub_cache"
+new_cache_dir = os.environ.get("TFHUB_CACHE_DIR", os.path.join(".cache", "tfhub"))
 os.environ["TFHUB_CACHE_DIR"] = new_cache_dir
 print("Loading YAMNet from TensorFlow Hub...")
 yamnet_model = hub.load('https://tfhub.dev/google/yamnet/1')
